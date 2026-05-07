@@ -1,0 +1,31 @@
+{
+  "name": "my-whatsapp-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp delivery worker backed by NATS",
+  "main": "worker.js",
+  "type": "module",
+  "scripts": {
+    "start": "node worker.js",
+    "test": "node --check worker.js",
+    "worker": "node worker.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.32.1",
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc.9",
+    "csv-parse": "^6.2.1",
+    "dotenv": "^16.6.1",
+    "nats": "^2.29.3",
+    "pino": "^10.3.1",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@whiskeysockets/baileys",
+      "protobufjs",
+      "sharp"
+    ]
+  }
+}

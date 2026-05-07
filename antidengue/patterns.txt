@@ -1,0 +1,48 @@
+1. The Dual Write (The Anti-Pattern)
+The Flow: Python -> Writes to DB -> Python -> Publishes to Broker.
+
+The Concept: Your application code tries to manually update both systems one after the other.
+
+The Verdict: Do not use. If your machine crashes exactly between the two steps, the systems become permanently out of sync. It is the number one cause of "ghost bugs" in distributed systems.
+
+2. The Ticket System (Claim Check Pattern)
+The Flow: Python saves heavy data (Excel/Image) to Database -> Python sends a tiny "Job ID: 42" to Broker -> Node.js reads ID -> Node.js fetches heavy data from Database.
+
+The Concept: Message brokers choke on massive files. You use the database as a permanent, heavy "Vault," and the broker as a lightweight "Notification Bell."
+
+Best For: Systems sending large media files, PDFs, or massive JSON payloads.
+
+3. Native Database Queuing (SKIP LOCKED)
+The Flow: Python -> PostgreSQL Table -> Node.js (using SELECT ... FOR UPDATE SKIP LOCKED).
+
+The Concept: You skip the message broker completely. You use advanced PostgreSQL commands to lock rows instantly without locking the whole table, combined with LISTEN/NOTIFY to get instant push alerts without polling.
+
+Best For: Teams that already use PostgreSQL and want the safety of a queue without installing or maintaining extra broker software (like NATS or RabbitMQ).
+
+4. The Transactional Outbox Pattern
+The Flow: Python -> PostgreSQL (saves business data + queue data in one transaction) -> Middleman Relay -> Broker -> Node.js.
+
+The Concept: The database is the absolute "Source of Truth." The message isn't allowed to go to the broker until it is safely locked inside the database. It adds a few milliseconds of delay but guarantees 100% data safety.
+
+Best For: Financial systems, e-commerce, or anywhere losing a message is catastrophic.
+
+5. Change Data Capture (CDC)
+The Flow: Python -> PostgreSQL -> CDC Tool (like Debezium) -> Broker.
+
+The Concept: The enterprise upgrade to the Outbox Pattern. Instead of a slow script asking the database for updates, a CDC tool physically watches the database's hard drive logs and instantly fires changes into the broker with near-zero latency.
+
+Best For: High-scale enterprise architectures that need the safety of the Outbox pattern but the speed of a direct broker.
+
+6. The Wire Tap Pattern (Parallel Archiving)
+The Flow: Python -> Broker -> [Instantly splits to Node.js AND a Database Logger].
+
+The Concept: The broker acts as a high-speed traffic cop. It clones the message so your WhatsApp sender and your database logger can work at the exact same time without ever waiting for each other.
+
+Best For: Systems where speed is the number one priority and you want total decoupling (Node.js doesn't even need to know the database exists).
+
+7. Separation of Concerns (The Midnight Archiver)
+The Flow: Python -> Broker -> Node.js. (Then, at 11:59 PM: Script fetches completed data from Broker -> Bulk Inserts to Database).
+
+The Concept: Letting the broker do what it does best (handling active, volatile, live state) and the database do what it does best (acting as a clean, historical data warehouse).
+
+Best For: Preventing your database from bloating with temporary queue data, while still maintaining perfect historical analytics.

@@ -1,0 +1,35 @@
+{
+  "defaults": {
+    "Complaint Number": "{complaint_code}",
+    "Revision": "{version}",
+    "Source": "{source_label}",
+    "Direction": "Incoming",
+    "The Reported Entity Address": "{identity.address}"
+  },
+  "main_complaint": {
+    "Document Role": "Main Complaint",
+    "Status": "Pending",
+    "Complainant Name": "{identity.citizen_name}",
+    "Complainant Mobile Number": "{identity.citizen_contact}",
+    "Department": "{identity.level_one}",
+    "Complaint Category": "{identity.category}"
+  },
+  "attachment": {
+    "Document Role": "Complaint Details",
+    "Parent Case": "{parent_document_id}"
+  },
+  "clear_fields": {
+    "attachment": [
+      "Status"
+    ]
+  },
+  "filters": {
+    "roles": [
+      "main_complaint",
+      "attachment"
+    ],
+    "paperless_added_date": null,
+    "paperless_created_date": null,
+    "complaint_codes": []
+  }
+}

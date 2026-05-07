@@ -1,0 +1,15 @@
+[project]
+name = "scrap-pmdu"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "aiohttp>=3.13.5",
+    "duckdb>=1.5.2",
+    "lxml>=6.1.0",
+    "nats-py>=2.14.0",
+    "orjson>=3.11.8",
+    "playwright>=1.59.0",
+    "yarl>=1.23.0",
+]
