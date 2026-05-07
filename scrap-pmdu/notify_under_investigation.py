@@ -6,6 +6,7 @@ import hashlib
 import logging
 import mimetypes
 import re
+import subprocess
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -628,7 +629,9 @@ async def download_documents_for_complaint(
         )
     if include_attachments:
         for index, document in enumerate(related_documents, start=1):
-            title = clean_text(document.get("title")) or clean_text(document.get("original_file_name"))
+            title = clean_text(document.get("title")) or clean_text(
+                document.get("original_file_name")
+            )
             caption = f"📎 Attachment {index} of {complaint_number}"
             if title:
                 caption += f"\n{title}"
@@ -641,11 +644,27 @@ async def download_documents_for_complaint(
     return documents
 
 
+def files_profile_flags(profile: str) -> tuple[bool, bool]:
+    if profile == "none":
+        return False, False
+    if profile == "pdf":
+        return True, False
+    if profile in ("pdf-and-attachments", "combined-pdf"):
+        return True, True
+    raise ValueError(
+        "--files must be one of: none, pdf, pdf-and-attachments, combined-pdf"
+    )
+
+
 def expected_document_count(
     include_complaint_file: bool,
     include_attachments: bool,
     related_documents: list[dict[str, Any]],
+    files_profile: str,
 ) -> int:
+    if files_profile == "combined-pdf":
+        return 1 if (include_complaint_file or include_attachments) else 0
+
     count = 1 if include_complaint_file else 0
     if include_attachments:
         count += len(related_documents)
@@ -684,16 +703,6 @@ def complaint_package_fingerprint(
     return hashlib.sha256(
         orjson.dumps(payload, option=orjson.OPT_SORT_KEYS)
     ).hexdigest()
-
-
-def files_profile_flags(profile: str) -> tuple[bool, bool]:
-    if profile == "none":
-        return False, False
-    if profile == "pdf":
-        return True, False
-    if profile == "pdf-and-attachments":
-        return True, True
-    raise ValueError("--files must be one of: none, pdf, pdf-and-attachments")
 
 
 def render_template(template: str, values: dict[str, Any]) -> str:
@@ -919,7 +928,10 @@ def log_preview(jobs: list[dict[str, Any]], logger: logging.Logger) -> None:
             text = str(text_value).splitlines()
             if text and len(item["examples"]) < 3:
                 item["examples"].append(text[0])
-        elif int(job.get("expected_document_count", 0) or 0) > 0 and len(item["examples"]) < 3:
+        elif (
+            int(job.get("expected_document_count", 0) or 0) > 0
+            and len(item["examples"]) < 3
+        ):
             item["examples"].append("document caption")
 
     logger.info("Preview summary:")
@@ -1087,6 +1099,7 @@ async def run_notify_async(settings: NotifySettings, project_root: Path) -> None
                         include_complaint_file,
                         include_attachments,
                         related,
+                        settings.files,
                     )
                     for recipient in recipients_for_complaint(
                         officers,
@@ -1173,6 +1186,78 @@ async def run_notify_async(settings: NotifySettings, project_root: Path) -> None
                                         complaint_code(fields, document),
                                     )
                                 )
+
+                                if settings.files == "combined-pdf":
+                                    c_code = complaint_code(fields, document)
+                                    letters_dir = project_root / "generated_letters"
+
+                                    # Grab the generated Inquiry Letter
+                                    letter_matches = list(
+                                        letters_dir.glob(
+                                            f"Inquiry_Letter_{c_code}*.pdf"
+                                        )
+                                    )
+
+                                    input_pdfs = []
+                                    if letter_matches:
+                                        input_pdfs.append(letter_matches[0])
+                                    else:
+                                        logger.warning(
+                                            "No PDF inquiry letter found for %s in %s",
+                                            c_code,
+                                            letters_dir,
+                                        )
+
+                                    # Grab downloaded PMDU files
+                                    for doc in downloaded_documents:
+                                        if doc["path"].lower().endswith(".pdf"):
+                                            input_pdfs.append(Path(doc["path"]))
+                                        else:
+                                            logger.warning(
+                                                "Skipping non-PDF attachment during merge: %s",
+                                                doc["path"],
+                                            )
+
+                                    # Merge them using qpdf
+                                    if input_pdfs:
+                                        combined_filename = (
+                                            f"Complete_Inquiry_Package_{c_code}.pdf"
+                                        )
+                                        combined_path = (
+                                            downloads_root
+                                            / str(document["id"])
+                                            / combined_filename
+                                        )
+
+                                        cmd = ["qpdf", "--empty", "--pages"]
+                                        for p in input_pdfs:
+                                            cmd.extend([str(p), "1-z"])
+                                        cmd.extend(["--", str(combined_path)])
+
+                                        try:
+                                            subprocess.run(
+                                                cmd, check=True, capture_output=True
+                                            )
+                                            # Replace payload documents with the single merged file
+                                            downloaded_documents = [
+                                                with_caption(
+                                                    {
+                                                        "path": str(combined_path),
+                                                        "filename": combined_filename,
+                                                        "mimetype": "application/pdf",
+                                                    },
+                                                    text
+                                                    if text
+                                                    else f"📁 Complete Inquiry Package - {c_code}",
+                                                )
+                                            ]
+                                        except subprocess.CalledProcessError as e:
+                                            logger.error(
+                                                "qpdf merge failed for %s: %s",
+                                                c_code,
+                                                e.stderr.decode(),
+                                            )
+
                             payload["documents"] = downloaded_documents
                         jobs.append(payload)
                         notification_records.append(
@@ -1201,6 +1286,91 @@ async def run_notify_async(settings: NotifySettings, project_root: Path) -> None
                     )
                 )
                 text = group_summary_message(complaints, group_title, templates)
+
+                # --- NEW LOGIC: GENERATE SINGLE GIANT PDF FOR ALL COMPLAINTS IN THE GROUP ---
+                group_documents_payload = []
+                expected_group_docs = 0
+                if delivery_enabled and settings.files == "combined-pdf" and complaints:
+                    logger.info("Generating giant combined PDF for the group...")
+                    expected_group_docs = 1
+                    group_input_pdfs = []
+                    letters_dir = project_root / "generated_letters"
+
+                    for document, fields in complaints:
+                        c_code = complaint_code(fields, document)
+
+                        # 1. Append the corresponding Inquiry Letter
+                        letter_matches = list(
+                            letters_dir.glob(f"Inquiry_Letter_{c_code}*.pdf")
+                        )
+                        if letter_matches:
+                            group_input_pdfs.append(letter_matches[0])
+                        else:
+                            logger.warning(
+                                "No PDF inquiry letter found for %s in %s",
+                                c_code,
+                                letters_dir,
+                            )
+
+                        # 2. Append all associated PMDU files (main complaint + attachments)
+                        related_ids = related_document_ids(
+                            document, all_documents, field_names
+                        )
+                        related = [
+                            documents_by_id[item]
+                            for item in related_ids
+                            if item in documents_by_id
+                        ]
+
+                        downloaded = await download_documents_for_complaint(
+                            client,
+                            document,
+                            related,
+                            downloads_root,
+                            True,
+                            True,
+                            "",
+                            c_code,
+                        )
+                        for doc in downloaded:
+                            if doc["path"].lower().endswith(".pdf"):
+                                group_input_pdfs.append(Path(doc["path"]))
+                            else:
+                                logger.warning(
+                                    "Skipping non-PDF attachment during group merge: %s",
+                                    doc["path"],
+                                )
+
+                    # 3. Merge every single gathered PDF using qpdf
+                    if group_input_pdfs:
+                        # Append timestamp so it creates a unique file for this exact batch
+                        combined_filename = f"Group_Complete_Inquiry_Package_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                        combined_path = downloads_root / combined_filename
+
+                        cmd = ["qpdf", "--empty", "--pages"]
+                        for p in group_input_pdfs:
+                            cmd.extend([str(p), "1-z"])
+                        cmd.extend(["--", str(combined_path)])
+
+                        try:
+                            subprocess.run(cmd, check=True, capture_output=True)
+                            group_documents_payload = [
+                                with_caption(
+                                    {
+                                        "path": str(combined_path),
+                                        "filename": combined_filename,
+                                        "mimetype": "application/pdf",
+                                    },
+                                    f"📁 Complete Inquiry Package - All Group Complaints",
+                                )
+                            ]
+                        except subprocess.CalledProcessError as e:
+                            logger.error(
+                                "Group qpdf merge failed: %s", e.stderr.decode()
+                            )
+                            expected_group_docs = 0
+                # --- END NEW LOGIC ---
+
                 for group in whatsapp_groups:
                     recently_sent = [
                         not should_send(
@@ -1217,6 +1387,7 @@ async def run_notify_async(settings: NotifySettings, project_root: Path) -> None
                             "Skipping recently sent group summary: %s", group.target
                         )
                         continue
+
                     payload = {
                         "job_id": str(uuid.uuid4()),
                         "target": group.target,
@@ -1224,6 +1395,8 @@ async def run_notify_async(settings: NotifySettings, project_root: Path) -> None
                         "recipient_name": group.name,
                         "attachment_text_mode": "separate",
                         "text": text,
+                        "documents": group_documents_payload,  # Attaches the giant PDF
+                        "expected_document_count": expected_group_docs,
                         "delay_ms": int(delivery.get("delay_ms", 1500) or 0),
                     }
                     jobs.append(payload)

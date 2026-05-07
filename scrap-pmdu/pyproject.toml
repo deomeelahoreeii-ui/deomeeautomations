@@ -11,5 +11,6 @@ dependencies = [
     "nats-py>=2.14.0",
     "orjson>=3.11.8",
     "playwright>=1.59.0",
+    "python-dotenv>=1.2.2",
     "yarl>=1.23.0",
 ]

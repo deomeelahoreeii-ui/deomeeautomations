@@ -372,3 +372,9 @@ and complaint numbers grouped by source and tehsil.
 
 Each run is tracked in `notification_batches`. Status observations are tracked
 in `complaint_status_history`, which powers `--scope newly-under-investigation`.
+
+
+uv run generate_letters.py 
+libreoffice --headless --convert-to pdf generated_letters/*.odt --outdir generated_letters/
+uv run python main.py notify-send --to aeo --scope all --files combined-pdf
+uv run python main.py notify-send --to group --files combined-pdf

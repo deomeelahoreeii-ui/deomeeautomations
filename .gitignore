@@ -3,6 +3,8 @@ __pycache__/
 *.py[oc]
 build/
 dist/
+nats-server/
+paperless-ngx/
 wheels/
 *.egg-info
 

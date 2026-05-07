@@ -13,19 +13,24 @@ from urllib.parse import urljoin
 
 import duckdb
 from playwright.sync_api import (
-    Error as PlaywrightError,
-    Page,
-    TimeoutError as PlaywrightTimeoutError,
     BrowserContext,
+    Page,
     sync_playwright,
 )
-
+from playwright.sync_api import (
+    Error as PlaywrightError,
+)
+from playwright.sync_api import (
+    TimeoutError as PlaywrightTimeoutError,
+)
 
 LOGGER_NAME = "pmdu_automation"
 DEFAULT_LOGIN_URL = "https://admin.pmdu.gov.pk/guardian/users/login"
 DEFAULT_COMPLAINTS_URL = "https://admin.pmdu.gov.pk/pkcp/complaints/list"
 DEFAULT_CHROMIUM_EXECUTABLE = "/usr/bin/chromium"
-COMPLAINT_CODE_RE = re.compile(r"\b[A-Z]{2,}[-/][A-Z0-9-/]{4,}\b|\b\d{4,}[-/]\d{2,}[-/]\d+\b")
+COMPLAINT_CODE_RE = re.compile(
+    r"\b[A-Z]{2,}[-/][A-Z0-9-/]{4,}\b|\b\d{4,}[-/]\d{2,}[-/]\d+\b"
+)
 
 
 @dataclass(frozen=True)
@@ -128,17 +133,21 @@ def load_settings(project_root: Path, require_credentials: bool = True) -> Setti
         slow_mo_ms=env_int("PMDU_SLOW_MO_MS", 100),
         login_timeout_ms=env_int("PMDU_LOGIN_TIMEOUT_MS", 300_000),
         navigation_timeout_ms=env_int("PMDU_NAVIGATION_TIMEOUT_MS", 60_000),
-        artifact_dir=(project_root / os.getenv("PMDU_ARTIFACT_DIR", "artifacts")).resolve(),
+        artifact_dir=(
+            project_root / os.getenv("PMDU_ARTIFACT_DIR", "artifacts")
+        ).resolve(),
         browser_width=env_int("PMDU_BROWSER_WIDTH", 1600),
         browser_height=env_int("PMDU_BROWSER_HEIGHT", 950),
-        raw_html_dir=(project_root / os.getenv("PMDU_RAW_HTML_DIR", "raw_html")).resolve(),
-        duckdb_path=(project_root / os.getenv("PMDU_DUCKDB_PATH", "pmdu_scrape.duckdb")).resolve(),
+        raw_html_dir=(
+            project_root / os.getenv("PMDU_RAW_HTML_DIR", "raw_html")
+        ).resolve(),
+        duckdb_path=(
+            project_root / os.getenv("PMDU_DUCKDB_PATH", "pmdu_scrape.duckdb")
+        ).resolve(),
         scrape_retries=env_int("PMDU_SCRAPE_RETRIES", 3),
         scrape_rate_limit_ms=env_int("PMDU_SCRAPE_RATE_LIMIT_MS", 1_500),
         max_details=(
-            env_int("PMDU_MAX_DETAILS", 0)
-            if os.getenv("PMDU_MAX_DETAILS")
-            else None
+            env_int("PMDU_MAX_DETAILS", 0) if os.getenv("PMDU_MAX_DETAILS") else None
         ),
     )
 
@@ -213,7 +222,8 @@ def load_paperless_settings(project_root: Path):
         ).strip(),
         source_label=os.getenv("PAPERLESS_SOURCE_LABEL", "PMDU Portal").strip(),
         field_config_path=(
-            project_root / os.getenv("PAPERLESS_FIELD_CONFIG", "paperless_field_defaults.json")
+            project_root
+            / os.getenv("PAPERLESS_FIELD_CONFIG", "paperless_field_defaults.json")
         ).resolve(),
         dry_run=env_bool("PAPERLESS_DRY_RUN", False),
     )
@@ -263,14 +273,18 @@ def parse_notify_flags(args: list[str]) -> dict[str, Any]:
         arg = args[index]
         if arg == "--to":
             if index + 1 >= len(args):
-                raise ValueError("--to requires a value: group, aeo, ddeo, deo, officers, or all")
+                raise ValueError(
+                    "--to requires a value: group, aeo, ddeo, deo, officers, or all"
+                )
             to_value = args[index + 1]
             index += 1
         elif arg.startswith("--to="):
             to_value = arg.split("=", 1)[1]
         elif arg == "--files":
             if index + 1 >= len(args):
-                raise ValueError("--files requires a value: none, pdf, or pdf-and-attachments")
+                raise ValueError(
+                    "--files requires a value: none, pdf, pdf-and-attachments, or combined-pdf"
+                )
             files = args[index + 1]
             index += 1
         elif arg.startswith("--files="):
@@ -291,7 +305,9 @@ def parse_notify_flags(args: list[str]) -> dict[str, Any]:
             tehsil = arg.split("=", 1)[1]
         elif arg == "--mode":
             if index + 1 >= len(args):
-                raise ValueError("--mode requires a value: per_complaint or per_recipient")
+                raise ValueError(
+                    "--mode requires a value: per_complaint or per_recipient"
+                )
             message_mode = args[index + 1]
             index += 1
         elif arg.startswith("--mode="):
@@ -303,11 +319,22 @@ def parse_notify_flags(args: list[str]) -> dict[str, Any]:
                 + ". Use --to, --files, --scope, --tehsil, or --mode."
             )
         index += 1
+
     if scope not in {"all", "new", "new-or-updated", "newly-under-investigation"}:
-        raise ValueError("--scope must be one of: all, new, new-or-updated, newly-under-investigation")
-    if files not in {"none", "pdf", "pdf-and-attachments"}:
-        raise ValueError("--files must be one of: none, pdf, pdf-and-attachments")
-    if message_mode is not None and message_mode not in {"per_complaint", "per_recipient"}:
+        raise ValueError(
+            "--scope must be one of: all, new, new-or-updated, newly-under-investigation"
+        )
+
+    # UPDATE HERE: Added "combined-pdf"
+    if files not in {"none", "pdf", "pdf-and-attachments", "combined-pdf"}:
+        raise ValueError(
+            "--files must be one of: none, pdf, pdf-and-attachments, combined-pdf"
+        )
+
+    if message_mode is not None and message_mode not in {
+        "per_complaint",
+        "per_recipient",
+    }:
         raise ValueError("--mode must be either per_complaint or per_recipient")
 
     role_values = {
@@ -330,7 +357,9 @@ def parse_notify_flags(args: list[str]) -> dict[str, Any]:
     }
 
 
-def fill_first_available(page: Page, label: str, selectors: list[str], value: str) -> None:
+def fill_first_available(
+    page: Page, label: str, selectors: list[str], value: str
+) -> None:
     logger = logging.getLogger(LOGGER_NAME)
     for selector in selectors:
         locator = page.locator(selector).first
@@ -378,10 +407,7 @@ def wait_for_manual_login(page: Page, settings: Settings) -> None:
         login_url = settings.login_url.rstrip("/")
         admin_origin = "https://admin.pmdu.gov.pk"
         return (
-            (
-                current_url == admin_origin
-                or current_url.startswith(f"{admin_origin}/")
-            )
+            (current_url == admin_origin or current_url.startswith(f"{admin_origin}/"))
             and current_url != login_url
             and "/guardian/users/login" not in current_url
         )
@@ -426,7 +452,9 @@ def open_complaints_list(page: Page, settings: Settings) -> None:
         page.wait_for_load_state("networkidle", timeout=settings.navigation_timeout_ms)
         logger.info("Complaints list reached network idle.")
     except PlaywrightTimeoutError:
-        logger.warning("Timed out waiting for network idle; continuing with current DOM.")
+        logger.warning(
+            "Timed out waiting for network idle; continuing with current DOM."
+        )
 
     logger.info("Final complaints list URL: %s", page.url)
     capture_artifacts(page, settings, "complaints-list")
@@ -451,8 +479,7 @@ def init_db(settings: Settings, project_root: Path) -> duckdb.DuckDBPyConnection
         """
     )
     queue_columns = {
-        row[1]
-        for row in conn.execute("PRAGMA table_info('scrape_queue')").fetchall()
+        row[1] for row in conn.execute("PRAGMA table_info('scrape_queue')").fetchall()
     }
     for column_name, column_type in (
         ("listing_received_at", "TEXT"),
@@ -460,7 +487,9 @@ def init_db(settings: Settings, project_root: Path) -> duckdb.DuckDBPyConnection
         ("last_scraped_listing_received_at", "TEXT"),
     ):
         if column_name not in queue_columns:
-            conn.execute(f"ALTER TABLE scrape_queue ADD COLUMN {column_name} {column_type}")
+            conn.execute(
+                f"ALTER TABLE scrape_queue ADD COLUMN {column_name} {column_type}"
+            )
     migrate_scrape_queue_paths(conn, project_root)
     logger.info("DuckDB queue ready: %s", settings.duckdb_path)
     return conn
@@ -492,7 +521,9 @@ def normalize_stored_path(value: str | None, project_root: Path) -> str:
     return value
 
 
-def migrate_scrape_queue_paths(conn: duckdb.DuckDBPyConnection, project_root: Path) -> None:
+def migrate_scrape_queue_paths(
+    conn: duckdb.DuckDBPyConnection, project_root: Path
+) -> None:
     rows = conn.execute(
         """
         SELECT complaint_code, saved_path
@@ -572,13 +603,21 @@ def extract_listing_rows(page: Page) -> list[dict[str, str]]:
         complaint_code = None
         listing_received_at = ""
         for index, header in enumerate(headers):
-            if "complaint" in header and "code" in header and index < len(indexed_cells):
+            if (
+                "complaint" in header
+                and "code" in header
+                and index < len(indexed_cells)
+            ):
                 complaint_code = indexed_cells[index]
             if "received" in header and "date" in header and index < len(indexed_cells):
                 listing_received_at = indexed_cells[index]
         if not complaint_code:
             complaint_code = next(
-                (code for code in (extract_code_from_text(cell) for cell in cells) if code),
+                (
+                    code
+                    for code in (extract_code_from_text(cell) for cell in cells)
+                    if code
+                ),
                 None,
             )
         if not complaint_code:
@@ -657,7 +696,9 @@ def upsert_queue_rows(
         if existing:
             seen_existing += 1
             status, previous_received_at, last_scraped_received_at = existing
-            baseline_received_at = last_scraped_received_at or previous_received_at or ""
+            baseline_received_at = (
+                last_scraped_received_at or previous_received_at or ""
+            )
             received_changed = (
                 bool(listing_received_at)
                 and bool(baseline_received_at)
@@ -753,7 +794,9 @@ def set_show_entries_to_all(page: Page, settings: Settings) -> bool:
         logger.info("Changing Show entries dropdown to All via %s.", selector)
         select.select_option(value=all_option["value"])
         try:
-            page.wait_for_load_state("networkidle", timeout=settings.navigation_timeout_ms)
+            page.wait_for_load_state(
+                "networkidle", timeout=settings.navigation_timeout_ms
+            )
         except PlaywrightTimeoutError:
             logger.warning("Timed out waiting after selecting All; continuing.")
         page.wait_for_timeout(1_000)
@@ -797,7 +840,9 @@ def click_next_page(page: Page, settings: Settings) -> bool:
             locator.wait_for(state="visible", timeout=1_500)
             locator.click()
             try:
-                page.wait_for_load_state("networkidle", timeout=settings.navigation_timeout_ms)
+                page.wait_for_load_state(
+                    "networkidle", timeout=settings.navigation_timeout_ms
+                )
             except PlaywrightTimeoutError:
                 pass
             page.wait_for_timeout(750)
@@ -816,7 +861,9 @@ def build_scrape_queue(
 ) -> None:
     logger = logging.getLogger(LOGGER_NAME)
     logger.info("Waiting for listing table to render.")
-    page.locator("table").first.wait_for(state="visible", timeout=settings.navigation_timeout_ms)
+    page.locator("table").first.wait_for(
+        state="visible", timeout=settings.navigation_timeout_ms
+    )
 
     used_all = set_show_entries_to_all(page, settings)
     page_number = 1
@@ -827,9 +874,7 @@ def build_scrape_queue(
 
     while True:
         rows = extract_listing_rows(page)
-        new_rows = [
-            row for row in rows if row["complaint_code"] not in seen_codes
-        ]
+        new_rows = [row for row in rows if row["complaint_code"] not in seen_codes]
         for row in new_rows:
             seen_codes.add(row["complaint_code"])
 
@@ -852,7 +897,9 @@ def build_scrape_queue(
         if not is_next_button_enabled(page):
             break
         if not click_next_page(page, settings):
-            logger.warning("Next pagination button looked enabled but could not be clicked.")
+            logger.warning(
+                "Next pagination button looked enabled but could not be clicked."
+            )
             break
         page_number += 1
 
@@ -967,7 +1014,9 @@ def scrape_detail_page(
                 timeout=settings.navigation_timeout_ms,
             )
             if "/guardian/users/login" in page.url:
-                raise RuntimeError("Detail page redirected to login; session is not valid")
+                raise RuntimeError(
+                    "Detail page redirected to login; session is not valid"
+                )
             if response is None:
                 logger.warning("No response object for %s.", complaint_code)
             else:
@@ -983,7 +1032,9 @@ def scrape_detail_page(
             wait_for_detail_render(page, settings)
             settings.raw_html_dir.mkdir(parents=True, exist_ok=True)
             saved_path.write_text(page.content(), encoding="utf-8")
-            mark_scraped(conn, complaint_code, saved_path, Path(__file__).resolve().parent)
+            mark_scraped(
+                conn, complaint_code, saved_path, Path(__file__).resolve().parent
+            )
             logger.info("Saved rendered HTML for %s: %s", complaint_code, saved_path)
             return True
         except Exception as exc:
@@ -1013,11 +1064,15 @@ def scrape_pending_details(
     pending = pending_queue_rows(conn, settings)
     logger.info("Pending detail pages to scrape: %s", len(pending))
     if settings.max_details is not None:
-        logger.info("PMDU_MAX_DETAILS is set: scraping at most %s rows.", settings.max_details)
+        logger.info(
+            "PMDU_MAX_DETAILS is set: scraping at most %s rows.", settings.max_details
+        )
 
     scraped = 0
     failed = 0
-    for index, (complaint_code, detail_url, listing_received_at) in enumerate(pending, start=1):
+    for index, (complaint_code, detail_url, listing_received_at) in enumerate(
+        pending, start=1
+    ):
         logger.info("Detail progress %s/%s: %s", index, len(pending), complaint_code)
         if scrape_detail_page(
             context,
