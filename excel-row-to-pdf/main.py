@@ -14,7 +14,6 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-
 DROP_DIR = Path("drop-excel-files")
 OUTPUT_DIR = Path("pdf-output")
 COMPLAINT_NO_RE = re.compile(r"\b\d{3}-\d{7}\b")
@@ -50,7 +49,9 @@ def convert_workbook(workbook_path: Path, output_dir: Path) -> int:
     created = 0
 
     for worksheet in workbook.worksheets:
-        header_row_index, headers = find_header_row(worksheet.iter_rows(values_only=True))
+        header_row_index, headers = find_header_row(
+            worksheet.iter_rows(values_only=True)
+        )
         if header_row_index is None:
             continue
 
@@ -124,7 +125,9 @@ def normalize_header(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.lower())
 
 
-def build_row_data(headers: list[str], row: tuple[object, ...]) -> list[tuple[str, str]]:
+def build_row_data(
+    headers: list[str], row: tuple[object, ...]
+) -> list[tuple[str, str]]:
     data: list[tuple[str, str]] = []
     width = max(len(headers), len(row))
 
@@ -137,7 +140,9 @@ def build_row_data(headers: list[str], row: tuple[object, ...]) -> list[tuple[st
 
 
 def get_complaint_number(
-    row_data: list[tuple[str, str]], row: tuple[object, ...], complaint_index: int | None
+    row_data: list[tuple[str, str]],
+    row: tuple[object, ...],
+    complaint_index: int | None,
 ) -> str | None:
     if complaint_index is not None and complaint_index < len(row):
         match = COMPLAINT_NO_RE.search(clean_text(row[complaint_index]))
@@ -208,6 +213,16 @@ def write_pdf(
         fontSize=8,
         leading=10,
         textColor=colors.HexColor("#4b5563"),
+        spaceAfter=12,  # Added a bit of space below the meta text
+    )
+
+    # A slightly larger label style for items broken out of the table
+    long_item_label = ParagraphStyle(
+        "LongItemLabel",
+        parent=label,
+        fontSize=11,
+        spaceBefore=12,
+        spaceAfter=4,
     )
 
     document = SimpleDocTemplate(
@@ -221,38 +236,57 @@ def write_pdf(
         author="excel-row-to-pdf",
     )
 
-    rows = [
-        [
-            Paragraph(escape_text(field), label),
-            Paragraph(escape_text(value) if value else "-", normal),
-        ]
-        for field, value in row_data
-    ]
-
-    table = Table(rows, colWidths=[48 * mm, 130 * mm], repeatRows=0)
-    table.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f3f4f6")),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#d1d5db")),
-                ("LEFTPADDING", (0, 0), (-1, -1), 5),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-                ("TOPPADDING", (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ]
-        )
-    )
-
     story = [
         Paragraph(f"Complaint {escape_text(complaint_number)}", title),
         Paragraph(
-            escape_text(f"Source: {workbook_name} | Sheet: {sheet_name} | Row: {row_index}"),
+            escape_text(
+                f"Source: {workbook_name} | Sheet: {sheet_name} | Row: {row_index}"
+            ),
             meta,
         ),
-        Spacer(1, 6 * mm),
-        table,
     ]
+
+    table_rows = []
+    long_items = []
+
+    for field, value in row_data:
+        # Check if the text is too long or has too many newlines for a single table cell.
+        # 1500 chars is a safe threshold that guarantees it won't exceed a page height.
+        if value and (len(value) > 1500 or value.count("\n") > 25):
+            long_items.append((field, value))
+        else:
+            table_rows.append(
+                [
+                    Paragraph(escape_text(field), label),
+                    Paragraph(escape_text(value) if value else "-", normal),
+                ]
+            )
+
+    # 1. Render the standard data inside the styled Table
+    if table_rows:
+        table = Table(table_rows, colWidths=[48 * mm, 130 * mm], repeatRows=0)
+        table.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f3f4f6")),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#d1d5db")),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ]
+            )
+        )
+        story.append(table)
+
+    # 2. Render massive data blocks below the table as standard paginating flowables
+    if long_items:
+        story.append(Spacer(1, 6 * mm))
+        for field, value in long_items:
+            story.append(Paragraph(escape_text(field), long_item_label))
+            story.append(Paragraph(escape_text(value), normal))
+            story.append(Spacer(1, 4 * mm))
 
     document.build(story)
 
