@@ -16,7 +16,6 @@ import duckdb
 import orjson
 from yarl import URL
 
-
 LOGGER_NAME = "pmdu_automation"
 
 
@@ -53,6 +52,7 @@ DEFAULT_FIELD_CONFIG: dict[str, Any] = {
         "Complainant Mobile Number": "{identity.citizen_contact}",
         "Department": "{identity.level_one}",
         "Complaint Category": "{identity.category}",
+        "Tehsil": "None",
     },
     "attachment": {
         "Document Role": "Complaint Details",
@@ -128,7 +128,9 @@ def unsupported_paperless_attachment_reason(path: Path) -> str:
 
 def latest_snapshots(artifact_dir: Path, max_cases: int | None) -> list[Path]:
     snapshots: list[Path] = []
-    for complaint_dir in sorted(path for path in artifact_dir.iterdir() if path.is_dir()):
+    for complaint_dir in sorted(
+        path for path in artifact_dir.iterdir() if path.is_dir()
+    ):
         versions = []
         for version_dir in complaint_dir.glob("v*"):
             if not version_dir.is_dir():
@@ -164,7 +166,9 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
 def load_field_config(path: Path) -> dict[str, Any]:
     logger = logging.getLogger(LOGGER_NAME)
     if not path.exists():
-        logger.info("Paperless field config not found; using built-in defaults: %s", path)
+        logger.info(
+            "Paperless field config not found; using built-in defaults: %s", path
+        )
         return deepcopy(DEFAULT_FIELD_CONFIG)
 
     data = orjson.loads(path.read_bytes())
@@ -198,7 +202,15 @@ def init_paperless_db(conn: duckdb.DuckDBPyConnection) -> None:
         for row in conn.execute("PRAGMA table_info('paperless_documents')").fetchall()
     }
     if "metadata_fingerprint" not in columns:
-        conn.execute("ALTER TABLE paperless_documents ADD COLUMN metadata_fingerprint TEXT")
+        conn.execute(
+            "ALTER TABLE paperless_documents ADD COLUMN metadata_fingerprint TEXT"
+        )
+
+    if "baseline_custom_fields" not in columns:
+        conn.execute(
+            "ALTER TABLE paperless_documents ADD COLUMN baseline_custom_fields TEXT"
+        )
+
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS paperless_status_history (
@@ -223,7 +235,7 @@ def existing_uploaded_document(
 ) -> dict[str, Any] | None:
     row = conn.execute(
         """
-        SELECT paperless_document_id, metadata_fingerprint
+        SELECT paperless_document_id, metadata_fingerprint, baseline_custom_fields
         FROM paperless_documents
         WHERE complaint_code = ?
           AND version = ?
@@ -241,6 +253,7 @@ def existing_uploaded_document(
     return {
         "document_id": int(row[0]),
         "metadata_fingerprint": row[1] or "",
+        "baseline_custom_fields": row[2] or "[]",
     }
 
 
@@ -310,6 +323,7 @@ def record_paperless_document(
     parent_document_id: int | None,
     upload_status: str,
     metadata_fingerprint: str = "",
+    baseline_custom_fields: str = "[]",
     error: str = "",
 ) -> None:
     conn.execute(
@@ -325,9 +339,10 @@ def record_paperless_document(
             upload_status,
             uploaded_at,
             metadata_fingerprint,
+            baseline_custom_fields,
             error
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             complaint_code,
@@ -340,12 +355,15 @@ def record_paperless_document(
             upload_status,
             datetime.now(timezone.utc).replace(tzinfo=None),
             metadata_fingerprint,
+            baseline_custom_fields,
             error,
         ],
     )
 
 
-def migrate_paperless_paths(conn: duckdb.DuckDBPyConnection, project_root: Path) -> None:
+def migrate_paperless_paths(
+    conn: duckdb.DuckDBPyConnection, project_root: Path
+) -> None:
     rows = conn.execute(
         """
         SELECT complaint_code, version, artifact_role, local_path
@@ -369,7 +387,6 @@ def migrate_paperless_paths(conn: duckdb.DuckDBPyConnection, project_root: Path)
                     [normalized, complaint_code, version, artifact_role, local_path],
                 )
             except duckdb.ConstraintException:
-                # A relative row may already exist; future matching no longer depends on local_path.
                 continue
 
 
@@ -452,7 +469,9 @@ class PaperlessClient:
         correspondent_id: int | None,
     ) -> int:
         assert self.session is not None
-        content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+        content_type = (
+            mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+        )
         form = aiohttp.FormData()
         form.add_field(
             "document",
@@ -473,8 +492,7 @@ class PaperlessClient:
             if response.status >= 400:
                 body = await response.text()
                 raise RuntimeError(
-                    "Paperless upload failed: "
-                    f"status={response.status} file={file_path} "
+                    f"Paperless upload failed: status={response.status} file={file_path} "
                     f"content_type={content_type} body={body}"
                 )
             data = await response.json()
@@ -496,7 +514,9 @@ class PaperlessClient:
 
     async def wait_for_document_id(self, task_id: str) -> int:
         logger = logging.getLogger(LOGGER_NAME)
-        deadline = asyncio.get_running_loop().time() + self.settings.task_timeout_seconds
+        deadline = (
+            asyncio.get_running_loop().time() + self.settings.task_timeout_seconds
+        )
         while asyncio.get_running_loop().time() < deadline:
             tasks = await self.get_json("/api/tasks/?page_size=100")
             if isinstance(tasks, dict):
@@ -514,11 +534,17 @@ class PaperlessClient:
                     match = re.search(r"document id (\d+)", str(task.get("result", "")))
                     if match:
                         return int(match.group(1))
-                    raise RuntimeError(f"Paperless task succeeded without document id: {task!r}")
+                    raise RuntimeError(
+                        f"Paperless task succeeded without document id: {task!r}"
+                    )
                 if status in {"FAILURE", "REVOKED"}:
                     result_text = str(task.get("result", ""))
                     related_document = task.get("related_document")
-                    if status == "FAILURE" and related_document and "duplicate" in result_text.lower():
+                    if (
+                        status == "FAILURE"
+                        and related_document
+                        and "duplicate" in result_text.lower()
+                    ):
                         logger.info(
                             "Paperless task %s reported duplicate; using related document %s.",
                             task_id,
@@ -575,18 +601,12 @@ def custom_field_payload(
         return None
     field = fields_by_name.get(field_name.lower())
     if not field:
-        logger.warning("Paperless custom field missing: %s", field_name)
         return None
 
     data_type = field.get("data_type")
     if data_type == "select":
         option_id = select_option_id(field, str(value))
         if not option_id:
-            logger.warning(
-                "Paperless select option missing for field %s: %s",
-                field_name,
-                value,
-            )
             return None
         value = option_id
     elif data_type == "float":
@@ -646,11 +666,17 @@ def build_custom_fields(
     skip_field_names: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     identity = snapshot.get("identity", {})
+
+    # Overrides Source to CRM Portal if the snapshot specifies "source": "CRM"
+    source_label = (
+        "CRM Portal" if snapshot.get("source") == "CRM" else settings.source_label
+    )
+
     context = {
         **snapshot,
         "identity": identity,
         "parent_document_id": parent_document_id,
-        "source_label": settings.source_label,
+        "source_label": source_label,
     }
 
     payload: list[dict[str, Any]] = []
@@ -665,7 +691,9 @@ def build_custom_fields(
     return payload
 
 
-def custom_field_id(fields_by_name: dict[str, dict[str, Any]], field_name: str) -> int | None:
+def custom_field_id(
+    fields_by_name: dict[str, dict[str, Any]], field_name: str
+) -> int | None:
     field = fields_by_name.get(field_name.lower())
     if not field:
         return None
@@ -693,28 +721,49 @@ def custom_field_label(
     return ""
 
 
-def merge_custom_fields(
-    existing_custom_fields: list[dict[str, Any]],
-    new_custom_fields: list[dict[str, Any]],
+def smart_merge_custom_fields(
+    baseline_fields: list[dict[str, Any]],
+    new_scraped_fields: list[dict[str, Any]],
+    live_server_fields: list[dict[str, Any]],
     fields_by_name: dict[str, dict[str, Any]],
     clear_field_names: list[str],
 ) -> list[dict[str, Any]]:
-    new_field_ids = {int(item["field"]) for item in new_custom_fields}
+    final_custom_fields = []
+
     clear_field_ids = {
-        field_id
-        for field_id in (
-            custom_field_id(fields_by_name, field_name)
-            for field_name in clear_field_names
-        )
-        if field_id is not None
+        custom_field_id(fields_by_name, fn)
+        for fn in clear_field_names
+        if custom_field_id(fields_by_name, fn) is not None
     }
-    retained = [
-        item
-        for item in existing_custom_fields
-        if int(item["field"]) not in new_field_ids
-        and int(item["field"]) not in clear_field_ids
-    ]
-    return retained + new_custom_fields
+
+    baseline = {int(item["field"]): item.get("value") for item in baseline_fields}
+    new_scrape = {int(item["field"]): item.get("value") for item in new_scraped_fields}
+    live_server = {int(item["field"]): item.get("value") for item in live_server_fields}
+
+    all_field_ids = (
+        set(baseline.keys()).union(new_scrape.keys()).union(live_server.keys())
+    )
+
+    for f_id in all_field_ids:
+        if f_id in clear_field_ids:
+            continue
+
+        val_baseline = baseline.get(f_id)
+        val_new = new_scrape.get(f_id)
+        val_live = live_server.get(f_id)
+
+        if val_new != val_baseline:
+            if val_new is not None and val_new != "":
+                if isinstance(val_new, list):
+                    val_new = list(set([v for v in val_new if v is not None]))
+                final_custom_fields.append({"field": f_id, "value": val_new})
+        else:
+            if val_live is not None and val_live != "":
+                if isinstance(val_live, list):
+                    val_live = list(set([v for v in val_live if v is not None]))
+                final_custom_fields.append({"field": f_id, "value": val_live})
+
+    return final_custom_fields
 
 
 def clear_fields_for_role(field_config: dict[str, Any], role: str) -> list[str]:
@@ -749,7 +798,9 @@ def filters_have_existing_document_constraints(field_config: dict[str, Any]) -> 
     filters = field_config.get("filters", {})
     if not isinstance(filters, dict):
         return False
-    return bool(filters.get("paperless_added_date") or filters.get("paperless_created_date"))
+    return bool(
+        filters.get("paperless_added_date") or filters.get("paperless_created_date")
+    )
 
 
 def artifact_allowed_by_config(
@@ -775,25 +826,43 @@ def artifact_allowed_by_config(
     if added_dates or created_dates:
         if not existing_document:
             return False, "date filters require an existing Paperless document"
-        if added_dates and document_date(existing_document.get("added")) not in added_dates:
+        if (
+            added_dates
+            and document_date(existing_document.get("added")) not in added_dates
+        ):
             return False, "Paperless added date did not match filter"
-        if created_dates and document_date(existing_document.get("created")) not in created_dates:
+        if (
+            created_dates
+            and document_date(existing_document.get("created")) not in created_dates
+        ):
             return False, "Paperless created date did not match filter"
 
     return True, ""
 
 
-async def resolve_metadata(client: PaperlessClient, settings: PaperlessSettings) -> dict[str, Any]:
-    document_types = by_name(await client.paginated_results("/api/document_types/?page_size=100"))
-    custom_fields = by_name(await client.paginated_results("/api/custom_fields/?page_size=100"))
-    correspondents = by_name(await client.paginated_results("/api/correspondents/?page_size=100"))
+async def resolve_metadata(
+    client: PaperlessClient, settings: PaperlessSettings
+) -> dict[str, Any]:
+    document_types = by_name(
+        await client.paginated_results("/api/document_types/?page_size=100")
+    )
+    custom_fields = by_name(
+        await client.paginated_results("/api/custom_fields/?page_size=100")
+    )
+    correspondents = by_name(
+        await client.paginated_results("/api/correspondents/?page_size=100")
+    )
 
     complaint_type = document_types.get(settings.document_type_complaint.lower())
     attachment_type = document_types.get(settings.document_type_attachment.lower())
     if not complaint_type:
-        raise RuntimeError(f"Paperless document type missing: {settings.document_type_complaint}")
+        raise RuntimeError(
+            f"Paperless document type missing: {settings.document_type_complaint}"
+        )
     if not attachment_type:
-        raise RuntimeError(f"Paperless document type missing: {settings.document_type_attachment}")
+        raise RuntimeError(
+            f"Paperless document type missing: {settings.document_type_attachment}"
+        )
 
     correspondent = correspondents.get(settings.correspondent_name.lower())
     if not correspondent:
@@ -827,6 +896,7 @@ async def upload_artifact(
     complaint_code = snapshot["complaint_code"]
     version = int(snapshot["version"])
     digest = sha256_file(path)
+
     existing_id = existing_uploaded_document(
         conn,
         complaint_code,
@@ -835,56 +905,86 @@ async def upload_artifact(
         digest,
     )
     existing_document_id = existing_id["document_id"] if existing_id else None
-    existing_fingerprint = existing_id["metadata_fingerprint"] if existing_id else ""
-    if settings.dry_run:
-        if existing_document_id:
-            logger.info(
-                "DRY RUN Paperless metadata patch existing %s: doc_id=%s path=%s",
-                artifact_role,
-                existing_document_id,
-                path,
-            )
-            return existing_document_id
-        logger.info("DRY RUN Paperless upload %s: %s", artifact_role, path)
-        return 0
+
+    baseline_custom_fields_str = (
+        existing_id["baseline_custom_fields"] if existing_id else "[]"
+    )
+    try:
+        baseline_fields = orjson.loads(baseline_custom_fields_str)
+    except Exception:
+        baseline_fields = []
 
     document_type_id = (
         metadata["complaint_type_id"]
         if artifact_role == "main_complaint"
         else metadata["attachment_type_id"]
     )
+
+    new_scraped_fields = build_custom_fields(
+        snapshot=snapshot,
+        fields_by_name=metadata["custom_fields"],
+        role=artifact_role,
+        settings=settings,
+        field_config=field_config,
+        parent_document_id=parent_document_id,
+    )
+
+    local_payload = {
+        "title": title,
+        "document_type": document_type_id,
+        "custom_fields": new_scraped_fields,
+    }
+    if metadata["correspondent_id"]:
+        local_payload["correspondent"] = metadata["correspondent_id"]
+
+    local_fingerprint = stable_hash(local_payload)
+    db_fingerprint = existing_id["metadata_fingerprint"] if existing_id else ""
+
+    if existing_document_id and local_fingerprint == db_fingerprint:
+        logger.info(
+            "⚡ FAST SKIP: No website updates for %s (doc_id=%s). Skipped API.",
+            title,
+            existing_document_id,
+        )
+        return existing_document_id
+
+    if settings.dry_run:
+        logger.info("DRY RUN Paperless upload/patch %s: %s", artifact_role, path)
+        return existing_document_id or 0
+
     try:
         document_id = existing_document_id
-        document_existed_before_upload = bool(document_id)
         status_reason = "preserved_existing"
+
+        existing_document = None
         if document_id:
             logger.info(
-                "Paperless already uploaded %s: doc_id=%s path=%s; refreshing metadata",
+                "Fetching live Paperless data for %s (doc_id=%s) to perform 3-Way Merge...",
                 artifact_role,
                 document_id,
-                path,
             )
+            existing_document = await client.get_document(document_id)
         else:
             document_id = await client.find_document_by_title(title)
-            document_existed_before_upload = bool(document_id)
-        if document_id and not existing_id:
-            logger.info("Found existing Paperless document by title: doc_id=%s title=%s", document_id, title)
-        existing_document = await client.get_document(document_id) if document_id else None
+            if document_id:
+                existing_document = await client.get_document(document_id)
+
         allowed, reason = artifact_allowed_by_config(
-            field_config,
-            artifact_role,
-            snapshot,
-            existing_document,
+            field_config, artifact_role, snapshot, existing_document
         )
         if not allowed:
-            logger.info("Skipping Paperless %s for %s: %s", artifact_role, title, reason)
+            logger.info(
+                "Skipping Paperless %s for %s: %s", artifact_role, title, reason
+            )
             return document_id or 0
+
         if not document_id and filters_have_existing_document_constraints(field_config):
             logger.info(
                 "Skipping new Paperless upload for %s because date filters only apply to existing documents.",
                 title,
             )
             return 0
+
         if not document_id:
             status_reason = (
                 "new_version"
@@ -899,41 +999,32 @@ async def upload_artifact(
                 correspondent_id=metadata["correspondent_id"],
             )
             existing_document = await client.get_document(document_id)
-            document_existed_before_upload = False
-        preserve_status = (
-            artifact_role == "main_complaint"
-            and document_existed_before_upload
+
+        live_server_fields = (
+            existing_document.get("custom_fields", []) if existing_document else []
         )
         status_before = ""
         if artifact_role == "main_complaint" and existing_document:
             status_before = custom_field_label(
-                existing_document.get("custom_fields", []),
-                metadata["custom_fields"],
-                "Status",
+                live_server_fields, metadata["custom_fields"], "Status"
             )
-        custom_fields = build_custom_fields(
-            snapshot=snapshot,
-            fields_by_name=metadata["custom_fields"],
-            role=artifact_role,
-            settings=settings,
-            field_config=field_config,
-            parent_document_id=parent_document_id,
-            skip_field_names={"Status"} if preserve_status else None,
-        )
+
         clear_field_names = clear_fields_for_role(field_config, artifact_role)
-        merged_custom_fields = merge_custom_fields(
-            existing_custom_fields=existing_document.get("custom_fields", []),
-            new_custom_fields=custom_fields,
+
+        merged_custom_fields = smart_merge_custom_fields(
+            baseline_fields=baseline_fields,
+            new_scraped_fields=new_scraped_fields,
+            live_server_fields=live_server_fields,
             fields_by_name=metadata["custom_fields"],
             clear_field_names=clear_field_names,
         )
+
         status_after = ""
         if artifact_role == "main_complaint":
             status_after = custom_field_label(
-                merged_custom_fields,
-                metadata["custom_fields"],
-                "Status",
+                merged_custom_fields, metadata["custom_fields"], "Status"
             )
+
         patch_payload: dict[str, Any] = {
             "title": title,
             "document_type": document_type_id,
@@ -941,48 +1032,66 @@ async def upload_artifact(
         }
         if metadata["correspondent_id"]:
             patch_payload["correspondent"] = metadata["correspondent_id"]
-        metadata_fingerprint = stable_hash(
-            {
-                "title": title,
-                "document_type": document_type_id,
-                "correspondent": metadata["correspondent_id"],
-                "custom_fields": merged_custom_fields,
-                "parent_document_id": parent_document_id,
-            }
-        )
-        stored_local_path = relative_path(path, project_root)
-        if existing_fingerprint == metadata_fingerprint:
-            logger.info(
-                "Paperless metadata unchanged for %s doc_id=%s title=%s; skipping patch",
-                artifact_role,
-                document_id,
-                title,
-            )
-            record_paperless_document(
-                conn,
-                complaint_code,
-                version,
-                artifact_role,
-                Path(stored_local_path),
-                digest,
-                document_id,
-                parent_document_id,
-                "uploaded",
-                metadata_fingerprint=metadata_fingerprint,
-            )
-            if artifact_role == "main_complaint":
-                record_status_history(
-                    conn,
-                    complaint_code,
-                    version,
-                    document_id,
-                    status_before,
-                    status_after,
-                    status_reason,
-                )
-            return document_id
 
-        await client.patch_json(f"/api/documents/{document_id}/", patch_payload)
+        target_fingerprint = stable_hash(patch_payload)
+        live_fingerprint = (
+            stable_hash(
+                {
+                    "title": existing_document.get("title")
+                    if existing_document
+                    else title,
+                    "document_type": document_type_id,
+                    "custom_fields": live_server_fields,
+                    "correspondent": metadata["correspondent_id"],
+                }
+            )
+            if existing_document
+            else ""
+        )
+
+        stored_local_path = relative_path(path, project_root)
+        new_baseline_str = orjson.dumps(new_scraped_fields).decode("utf-8")
+
+        if target_fingerprint == live_fingerprint:
+            logger.info(
+                "Server already matches target metadata for %s doc_id=%s. Updating DB only.",
+                artifact_role,
+                document_id,
+            )
+        else:
+            try:
+                await client.patch_json(f"/api/documents/{document_id}/", patch_payload)
+                logger.info(
+                    "Uploaded/Patched Paperless %s doc_id=%s title=%s",
+                    artifact_role,
+                    document_id,
+                    title,
+                )
+            except RuntimeError as e:
+                if "Some documents in value don't exist or were specified twice" in str(
+                    e
+                ):
+                    logger.warning(
+                        "Dead ghost link detected in doc_id=%s. Auto-healing by stripping invalid links...",
+                        document_id,
+                    )
+                    patch_payload["custom_fields"] = [
+                        cf
+                        for cf in merged_custom_fields
+                        if not isinstance(cf.get("value"), list)
+                    ]
+                    await client.patch_json(
+                        f"/api/documents/{document_id}/", patch_payload
+                    )
+                    logger.info(
+                        "Uploaded/Patched Paperless %s doc_id=%s title=%s (After Auto-Heal)",
+                        artifact_role,
+                        document_id,
+                        title,
+                    )
+                else:
+                    raise
+
         record_paperless_document(
             conn,
             complaint_code,
@@ -993,9 +1102,11 @@ async def upload_artifact(
             document_id,
             parent_document_id,
             "uploaded",
-            metadata_fingerprint=metadata_fingerprint,
+            metadata_fingerprint=local_fingerprint,
+            baseline_custom_fields=new_baseline_str,
         )
-        if artifact_role == "main_complaint":
+
+        if artifact_role == "main_complaint" and status_before != status_after:
             record_status_history(
                 conn,
                 complaint_code,
@@ -1005,8 +1116,9 @@ async def upload_artifact(
                 status_after,
                 status_reason,
             )
-        logger.info("Uploaded Paperless %s doc_id=%s title=%s", artifact_role, document_id, title)
+
         return document_id
+
     except Exception as exc:
         record_paperless_document(
             conn,
@@ -1023,9 +1135,13 @@ async def upload_artifact(
         raise
 
 
-def attachment_title(snapshot: dict[str, Any], attachment: dict[str, Any], path: Path) -> str:
+def attachment_title(
+    snapshot: dict[str, Any], attachment: dict[str, Any], path: Path
+) -> str:
     filename = attachment.get("filename") or path.name
-    return f"PMDU - {snapshot['complaint_code']} - Attachment - {filename}"
+    # Dynamically switches prefix based on source
+    prefix = "CRM" if snapshot.get("source") == "CRM" else "PMDU"
+    return f"{prefix} - {snapshot['complaint_code']} - Attachment - {filename}"
 
 
 async def sync_one_snapshot(
@@ -1042,9 +1158,14 @@ async def sync_one_snapshot(
     version = int(snapshot["version"])
     pdf_path = resolve_project_path(snapshot.get("generated_pdf"), project_root)
     if not pdf_path.exists():
-        raise FileNotFoundError(f"Generated PDF missing for {complaint_code}: {pdf_path}")
+        raise FileNotFoundError(
+            f"Generated PDF missing for {complaint_code}: {pdf_path}"
+        )
 
-    main_title = f"PMDU - {complaint_code} - Main Complaint - v{version}"
+    # Dynamically switches prefix based on source
+    prefix = "CRM" if snapshot.get("source") == "CRM" else "PMDU"
+    main_title = f"{prefix} - {complaint_code} - Main Complaint - v{version}"
+
     parent_document_id = await upload_artifact(
         client,
         settings,
@@ -1065,25 +1186,13 @@ async def sync_one_snapshot(
             continue
         attachment_key = f"{local_path}|{attachment.get('sha256', '')}"
         if attachment_key in seen_attachments:
-            logging.getLogger(LOGGER_NAME).info(
-                "Skipping duplicate attachment entry for %s: %s",
-                complaint_code,
-                local_path,
-            )
             continue
         seen_attachments.add(attachment_key)
         attachment_path = resolve_project_path(local_path, project_root)
         if not attachment_path.exists():
-            logging.getLogger(LOGGER_NAME).warning("Attachment file missing: %s", attachment_path)
             continue
         unsupported_reason = unsupported_paperless_attachment_reason(attachment_path)
         if unsupported_reason:
-            logging.getLogger(LOGGER_NAME).warning(
-                "Skipping unsupported Paperless attachment for %s: %s (%s)",
-                complaint_code,
-                attachment_path,
-                unsupported_reason,
-            )
             record_paperless_document(
                 conn,
                 complaint_code,
@@ -1113,15 +1222,15 @@ async def sync_one_snapshot(
             )
         except Exception:
             logging.getLogger(LOGGER_NAME).exception(
-                "Paperless attachment sync failed for %s; continuing with remaining files: %s",
-                complaint_code,
-                attachment_path,
+                "Paperless attachment sync failed for %s", complaint_code
             )
 
 
 def roles_for_preflight(field_config: dict[str, Any]) -> list[str]:
     filters = field_config.get("filters", {})
-    configured = list_filter(filters.get("roles")) if isinstance(filters, dict) else set()
+    configured = (
+        list_filter(filters.get("roles")) if isinstance(filters, dict) else set()
+    )
     roles = ["main_complaint", "attachment"]
     if configured:
         roles = [role for role in roles if role in configured]
@@ -1142,11 +1251,16 @@ def validate_field_values(
     for snapshot_path in snapshots:
         snapshot = load_snapshot(snapshot_path)
         for role in roles_for_preflight(field_config):
+            source_label = (
+                "CRM Portal"
+                if snapshot.get("source") == "CRM"
+                else settings.source_label
+            )
             context = {
                 **snapshot,
                 "identity": snapshot.get("identity", {}),
                 "parent_document_id": 1,
-                "source_label": settings.source_label,
+                "source_label": source_label,
             }
             for field_name, raw_value in role_field_config(field_config, role).items():
                 field = fields_by_name.get(field_name.lower())
@@ -1158,21 +1272,26 @@ def validate_field_values(
                     continue
                 data_type = field.get("data_type")
                 if data_type == "select" and not select_option_id(field, str(value)):
-                    issues.add(f"Paperless select option missing for field {field_name}: {value}")
+                    issues.add(
+                        f"Paperless select option missing for field {field_name}: {value}"
+                    )
                 elif data_type == "float":
                     try:
                         float(value)
-                    except (TypeError, ValueError):
-                        issues.add(f"Paperless float field value invalid for {field_name}: {value}")
+                    except TypeError, ValueError:
+                        issues.add(
+                            f"Paperless float field value invalid for {field_name}: {value}"
+                        )
     return sorted(issues)
 
 
-async def run_paperless_check_async(settings: PaperlessSettings, project_root: Path) -> None:
+async def run_paperless_check_async(
+    settings: PaperlessSettings, project_root: Path
+) -> None:
     logger = logging.getLogger(LOGGER_NAME)
     snapshots = latest_snapshots(settings.artifact_dir, settings.max_cases)
     field_config = load_field_config(settings.field_config_path)
     logger.info("Paperless check URL: %s", settings.base_url)
-    logger.info("Paperless check snapshots found: %s", len(snapshots))
     async with PaperlessClient(settings) as client:
         metadata = await resolve_metadata(client, settings)
         issues = validate_field_values(settings, metadata, field_config, snapshots)
@@ -1192,9 +1311,6 @@ async def run_paperless_async(settings: PaperlessSettings, project_root: Path) -
     snapshots = latest_snapshots(settings.artifact_dir, settings.max_cases)
     field_config = load_field_config(settings.field_config_path)
     logger.info("Paperless URL: %s", settings.base_url)
-    logger.info("Paperless artifact snapshots found: %s", len(snapshots))
-    logger.info("Paperless dry run: %s", settings.dry_run)
-    logger.info("Paperless field config: %s", settings.field_config_path)
 
     conn = duckdb.connect(str(settings.duckdb_path))
     try:
@@ -1205,7 +1321,6 @@ async def run_paperless_async(settings: PaperlessSettings, project_root: Path) -
             uploaded = 0
             failed = 0
             for index, snapshot_path in enumerate(snapshots, start=1):
-                logger.info("Paperless progress %s/%s: %s", index, len(snapshots), snapshot_path)
                 try:
                     await sync_one_snapshot(
                         client,
@@ -1220,7 +1335,11 @@ async def run_paperless_async(settings: PaperlessSettings, project_root: Path) -
                 except Exception:
                     failed += 1
                     logger.exception("Paperless sync failed for %s", snapshot_path)
-            logger.info("Paperless sync complete: cases_processed=%s failed=%s", uploaded, failed)
+            logger.info(
+                "Paperless sync complete: cases_processed=%s failed=%s",
+                uploaded,
+                failed,
+            )
     finally:
         conn.close()
 

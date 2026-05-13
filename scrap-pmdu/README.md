@@ -374,7 +374,16 @@ Each run is tracked in `notification_batches`. Status observations are tracked
 in `complaint_status_history`, which powers `--scope newly-under-investigation`.
 
 
-uv run generate_letters.py 
+uv run generate_letters.py
 libreoffice --headless --convert-to pdf generated_letters/*.odt --outdir generated_letters/
 uv run python main.py notify-send --to aeo --scope all --files combined-pdf
 uv run python main.py notify-send --to group --files combined-pdf
+
+uv run python main.py notify-send --to aeo --tehsil "Model Town" --scope all --files combined-pdf
+uv run python upload_crm.py
+
+
+
+uv run python ingest_crm.py
+uv run python pull_paperless_state.py
+uv run python main.py paperless
