@@ -20,6 +20,7 @@ dependencies = [
     "requests",
     "sqlmodel",
     "xlrd",
+    "reportlab>=5.0.0",
 ]
 
 [dependency-groups]
