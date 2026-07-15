@@ -32,8 +32,6 @@ import {
 import { resolveJobPayload, ValidationError } from "./lib/jobs.js";
 import { ensureJetStreamWorkerResources } from "./lib/nats-setup.js";
 import { createLogger } from "./lib/logger.js";
-import { InboundMessageStore } from "./lib/inbound-message-store.js";
-import { createInboundCapture } from "./lib/inbound-capture.js";
 
 const log = createLogger("worker");
 const sc = StringCodec();
@@ -44,12 +42,6 @@ const identityStore = createWhatsAppIdentityStore({
 });
 const groupDiscovery = config.enableGroupDiscovery
   ? createGroupDiscovery({ config, log })
-  : null;
-const inboundMessageStore = config.enableInboundCapture
-  ? new InboundMessageStore({ filePath: config.inboundStorePath, workerId: config.workerId, log })
-  : null;
-const inboundCapture = inboundMessageStore
-  ? createInboundCapture({ config, store: inboundMessageStore, log })
   : null;
 const MAX_WHATSAPP_CAPTION_CHARS = 900;
 const MAX_WHATSAPP_TEXT_CHARS = 3500;
@@ -709,7 +701,6 @@ function workerHealthPayload() {
     lastDisconnect: lastDisconnectInfo,
     identityStore: identityStore.stats(),
     targetPolicy: config.directJidPolicy,
-    inboundCapture: inboundCapture?.stats() || { enabled: false },
   };
 }
 
@@ -1816,7 +1807,6 @@ async function startWorker() {
       logger: pino({ level: config.logLevel === "debug" ? "debug" : "silent" }),
       version: latestVersion?.version,
       browser: configuredBrowserIdentity(),
-      getMessage: async (key) => inboundCapture?.getMessage(key)?.message,
     });
 
     activeSocket = sock;
@@ -1825,21 +1815,15 @@ async function startWorker() {
     scheduleConnectionOpenTimeout(sock);
 
     groupDiscovery?.reset();
-    inboundCapture?.start();
 
     sock.ev.on("creds.update", () => {
       void queueCredentialSave(saveCreds);
     });
 
-    sock.ev.on("messages.upsert", (event) => {
-      inboundCapture?.handleMessagesUpsert(event);
+    sock.ev.on("messages.upsert", ({ messages }) => {
       if (groupDiscovery) {
-        groupDiscovery.handleMessagesUpsert(sock, event);
+        groupDiscovery.handleMessagesUpsert(sock, { messages });
       }
-    });
-
-    sock.ev.on("messaging-history.set", (event) => {
-      inboundCapture?.handleMessagingHistorySet(event);
     });
 
     sock.ev.on("messages.update", handleMessageUpdates);
@@ -1966,8 +1950,6 @@ async function shutdown(signal, exitCode = 0) {
   await stopHealthResponder();
   await stopSocket();
   await flushCredentialSaves();
-  inboundCapture?.stop();
-  inboundMessageStore?.close();
   releaseWorkerLock();
 
   process.exit(exitCode);

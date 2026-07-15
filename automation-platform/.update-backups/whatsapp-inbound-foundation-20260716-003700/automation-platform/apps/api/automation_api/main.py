@@ -13,7 +13,6 @@ from crm_filters.api import router as crm_filters_router
 from master_data.api import router as master_data_router
 from whatsapp_gateway.api import router as whatsapp_router
 from whatsapp_gateway.preview_api import router as whatsapp_preview_router
-from whatsapp_gateway.inbound_api import router as whatsapp_inbound_router
 
 
 @asynccontextmanager
@@ -44,7 +43,6 @@ app.include_router(crm_filters_router)
 app.include_router(master_data_router)
 app.include_router(whatsapp_router)
 app.include_router(whatsapp_preview_router)
-app.include_router(whatsapp_inbound_router)
 
 
 @app.get("/health")

@@ -8,8 +8,7 @@
     "start": "node worker.js",
     "test": "node --check worker.js",
     "tokens": "node scripts/check-tctokens.mjs",
-    "worker": "node worker.js",
-    "test:inbound": "node --test test/inbound-foundation.test.mjs"
+    "worker": "node worker.js"
   },
   "keywords": [],
   "author": "",

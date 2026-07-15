@@ -87,13 +87,6 @@ export const config = {
   directJidPolicy: parseDirectJidPolicy(),
   defaultSendDelayMs: parseInteger("WA_SEND_DELAY_MS", 1500),
   enableGroupDiscovery: parseBoolean("WA_ENABLE_GROUP_DISCOVERY", true),
-  enableInboundCapture: parseBoolean("WA_ENABLE_INBOUND_CAPTURE", true),
-  inboundStorePath: resolveFromRoot(process.env.WA_INBOUND_STORE_PATH || `data/whatsapp-inbound-${workerId}.sqlite`),
-  inboundPlatformUrl: process.env.WA_PLATFORM_URL || "http://127.0.0.1:8020",
-  inboundPlatformToken: process.env.WA_PLATFORM_INGEST_TOKEN || "",
-  inboundPlatformTimeoutMs: parseInteger("WA_PLATFORM_TIMEOUT_MS", 10000),
-  inboundOutboxFlushMs: parseInteger("WA_INBOUND_OUTBOX_FLUSH_MS", 5000),
-  inboundOutboxBatchSize: parseInteger("WA_INBOUND_OUTBOX_BATCH_SIZE", 100),
   groupsFile:
     resolveFromRoot(process.env.WA_GROUPS_FILE || "data/discovered-groups.csv"),
   qrImagePath:
@@ -145,7 +138,6 @@ export function ensureRuntimeDirectories() {
     path.dirname(config.groupsFile),
     path.dirname(config.deliveryAuditPath),
     path.dirname(config.identityStorePath),
-    path.dirname(config.inboundStorePath),
     path.dirname(config.logFile),
     path.dirname(config.qrImagePath),
     path.dirname(config.lockFile),

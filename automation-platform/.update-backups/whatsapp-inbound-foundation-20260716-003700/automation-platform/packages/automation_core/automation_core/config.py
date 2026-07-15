@@ -46,7 +46,6 @@ class Settings(BaseSettings):
     whatsapp_identity_directory_subject: str = "whatsapp.worker.directory.identities"
     whatsapp_group_members_subject: str = "whatsapp.worker.group-members"
     whatsapp_qr_image_path: Path = Path("./data/whatsapp/login-qr.png")
-    whatsapp_inbound_ingest_token: str = ""
 
     api_cors_origins: str = (
         "http://localhost:4321,http://127.0.0.1:4321,"
