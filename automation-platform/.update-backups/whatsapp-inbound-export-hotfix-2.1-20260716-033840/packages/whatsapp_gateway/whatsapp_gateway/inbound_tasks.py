@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -32,50 +31,7 @@ from whatsapp_gateway.models import (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class _AccountSnapshot:
-    worker_key: str
-    health_subject: str
-
-
-@dataclass(frozen=True, slots=True)
-class _AttachmentSnapshot:
-    id: uuid.UUID
-    original_filename: str | None
-    mime_type: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class _MessageSnapshot:
-    remote_jid: str
-    message_id: str
-
-
-def _snapshot_account(account: WhatsAppAccount) -> _AccountSnapshot:
-    return _AccountSnapshot(
-        worker_key=account.worker_key,
-        health_subject=account.health_subject,
-    )
-
-
-def _snapshot_attachment(
-    attachment: WhatsAppInboundAttachment,
-) -> _AttachmentSnapshot:
-    return _AttachmentSnapshot(
-        id=attachment.id,
-        original_filename=attachment.original_filename,
-        mime_type=attachment.mime_type,
-    )
-
-
-def _snapshot_message(message: WhatsAppInboundMessage) -> _MessageSnapshot:
-    return _MessageSnapshot(
-        remote_jid=message.remote_jid,
-        message_id=message.message_id,
-    )
-
-
-async def _open_media_client(account: _AccountSnapshot):
+async def _open_media_client(account: WhatsAppAccount):
     settings = get_settings()
     client = await nats.connect(
         settings.whatsapp_nats_url,
@@ -100,9 +56,9 @@ async def _open_media_client(account: _AccountSnapshot):
 async def _request_media_download(
     *,
     client: Any,
-    account: _AccountSnapshot,
-    attachment: _AttachmentSnapshot,
-    message: _MessageSnapshot,
+    account: WhatsAppAccount,
+    attachment: WhatsAppInboundAttachment,
+    message: WhatsAppInboundMessage,
 ) -> dict[str, Any]:
     settings = get_settings()
     payload = {
@@ -186,10 +142,7 @@ def build_inbound_export_job(job_id: str) -> dict[str, object]:
                 .order_by(WhatsAppInboundExportItem.created_at)
             ).all()
         )
-        # SQLAlchemy expires ORM attributes on commit.  Never carry ORM model
-        # instances outside their Session; immutable value snapshots avoid
-        # DetachedInstanceError when the Celery task opens later Sessions.
-        account_snapshot = _snapshot_account(account)
+        account_snapshot = account
 
     downloaded = reused = unavailable = total_bytes = 0
     loop: asyncio.AbstractEventLoop | None = None
@@ -252,8 +205,8 @@ def build_inbound_export_job(job_id: str) -> dict[str, object]:
                     f"[{index}/{len(item_ids)}] Downloading {item.media_category}: "
                     f"{attachment.original_filename or message.message_id}.",
                 )
-                attachment_snapshot = _snapshot_attachment(attachment)
-                message_snapshot = _snapshot_message(message)
+                attachment_snapshot = attachment
+                message_snapshot = message
                 expected_category = item.media_category
 
             try:
