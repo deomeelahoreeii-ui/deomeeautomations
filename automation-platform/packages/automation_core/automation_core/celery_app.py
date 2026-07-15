@@ -32,6 +32,13 @@ celery_app = Celery(
 celery_app.conf.update(
     accept_content=["json"],
     broker_transport_options=transport_options,
+
+    # RabbitMQ rejects transient, non-exclusive Celery pidbox queues.
+    # This project currently runs one local worker, so exclusive control
+    # and reply queues are appropriate.
+    control_queue_durable=False,
+    control_queue_exclusive=True,
+
     enable_utc=True,
     result_expires=60 * 60 * 24,
     task_ignore_result=settings.celery_result_backend is None,
