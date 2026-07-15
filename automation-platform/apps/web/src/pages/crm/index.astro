@@ -1,0 +1,348 @@
+---
+import DataTable from "../../components/DataTable.astro";
+import CrmLayout from "../../layouts/CrmLayout.astro";
+---
+
+<CrmLayout
+  title="CRM Sheet Duplicate Filter"
+  description="Upload a CRM sheet, compare each complaint with Paperless, and download safely separated result workbooks."
+  page="sheet-filter"
+>
+  <button class="btn btn-sm btn-ghost" id="refresh-crm" type="button" slot="actions">↻ Refresh</button>
+
+  <div class="notice crm-safety">
+    Paperless lookup errors and conflicting records are placed in <strong>Manual Review</strong>; they are never silently classified as fresh.
+  </div>
+
+  <section class="crm-grid">
+    <article class="master-card crm-upload-card">
+      <div class="panel-heading compact">
+        <div><p class="eyebrow">Immutable intake</p><h2>Upload CRM sheet</h2></div>
+        <span class="environment-pill">Maximum 50 MB</span>
+      </div>
+      <form id="crm-upload-form">
+        <label class="crm-upload-drop" id="crm-upload-drop">
+          <input id="crm-file" type="file" accept=".xlsx,.xls,.xlsm,.csv" required />
+          <span class="crm-upload-icon">⇧</span>
+          <strong id="crm-upload-title">Choose or drop a CRM sheet</strong>
+          <small id="crm-upload-detail">Excel and CSV files are supported</small>
+        </label>
+        <button class="btn btn-primary w-full" id="crm-upload-button" type="submit">Validate &amp; filter</button>
+      </form>
+    </article>
+
+    <article class="master-card crm-preflight-card">
+      <div class="panel-heading compact">
+        <div><p class="eyebrow">Preflight</p><h2>Detected CRM data</h2></div>
+        <span class="status-chip inactive" id="paperless-status">Checking Paperless…</span>
+      </div>
+      <div id="crm-preflight-empty" class="empty-state">Upload a sheet to inspect its header, complaint numbers, duplicates, and validation findings.</div>
+      <div id="crm-preflight-result" hidden>
+        <div class="crm-preflight-metrics">
+          <div><span>Rows</span><strong id="crm-preflight-rows">—</strong></div>
+          <div><span>Unique complaints</span><strong id="crm-preflight-unique">—</strong></div>
+          <div><span>Blank rows</span><strong id="crm-preflight-blank">—</strong></div>
+          <div><span>Header row</span><strong id="crm-preflight-header">—</strong></div>
+        </div>
+        <div id="crm-preflight-messages" class="crm-preflight-messages"></div>
+      </div>
+    </article>
+  </section>
+
+  <section class="crm-job-section" id="crm-job-section" hidden>
+    <div class="section-title-row">
+      <div><p class="eyebrow">Processing activity</p><h2 id="crm-job-title">CRM filter run</h2></div>
+      <span class="status-chip inactive" id="crm-job-status">Loading</span>
+    </div>
+    <div class="crm-result-grid" id="crm-result-grid">
+      <article class="master-card crm-result-card"><span>Fresh</span><strong data-count="fresh">—</strong></article>
+      <article class="master-card crm-result-card"><span>Uploaded / Pending</span><strong data-count="uploaded_pending">—</strong></article>
+      <article class="master-card crm-result-card"><span>Not Relevant</span><strong data-count="uploaded_not_relevant">—</strong></article>
+      <article class="master-card crm-result-card"><span>Submitted</span><strong data-count="submitted">—</strong></article>
+      <article class="master-card crm-result-card review"><span>Manual Review</span><strong data-count="manual_review">—</strong></article>
+    </div>
+    <div class="crm-job-grid">
+      <article class="master-card crm-log-card">
+        <div class="panel-heading compact"><div><p class="eyebrow">Live worker log</p><h2>Activity</h2></div></div>
+        <pre id="crm-job-log">Waiting for worker output…</pre>
+      </article>
+      <article class="master-card crm-artifact-card">
+        <div class="panel-heading compact"><div><p class="eyebrow">Generated files</p><h2>Downloads</h2></div></div>
+        <div id="crm-artifacts" class="crm-artifacts"><p class="empty-state">Files will appear after processing.</p></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="crm-history">
+    <div class="section-title-row"><div><p class="eyebrow">Source history</p><h2>CRM sheet intake</h2></div></div>
+    <div class="toolbar directory-toolbar">
+      <input class="input input-bordered input-sm search-input" id="crm-search" placeholder="Search filename or checksum…" />
+      <select class="select select-bordered select-sm" id="crm-validation-status">
+        <option value="">All validation states</option>
+        <option value="valid">Valid</option>
+        <option value="invalid">Invalid</option>
+      </select>
+      <span class="toolbar-status" id="crm-total">Loading…</span>
+    </div>
+    <article class="master-card"><DataTable id="crm-sheets-table" pageSize={10} emptyText="No CRM sheets have been uploaded." /></article>
+  </section>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { actionButtons, badge, stack } from "../../scripts/table-cells";
+    import { closeAlert, confirmAction, showError, showLoading, showSuccess } from "../../scripts/alerts";
+
+    const API = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const table = el("crm-sheets-table") as any;
+    const fileInput = el<HTMLInputElement>("crm-file");
+    const selectedJobId = new URLSearchParams(window.location.search).get("job_id");
+    let hasActiveJobs = false;
+    let tablePollTimer: number | undefined;
+    let jobPollTimer: number | undefined;
+
+    function bytes(value: number) {
+      if (value < 1024) return `${value} B`;
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+      return `${(value / 1024 / 1024).toFixed(1)} MB`;
+    }
+
+    async function apiJson(path: string) {
+      const response = await fetch(`${API}${path}`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const detail = typeof data.detail === "object" ? data.detail?.message : data.detail;
+        throw new Error(detail || response.statusText || "Request failed");
+      }
+      return data;
+    }
+
+    function updateSelectedFile() {
+      const file = fileInput.files?.[0];
+      el("crm-upload-title").textContent = file?.name || "Choose or drop a CRM sheet";
+      el("crm-upload-detail").textContent = file
+        ? `${bytes(file.size)} · ready for validation`
+        : "Excel and CSV files are supported";
+    }
+
+    function showPreflight(source: any) {
+      const meta = source.detected_metadata || {};
+      el("crm-preflight-empty").hidden = true;
+      el("crm-preflight-result").hidden = false;
+      el("crm-preflight-rows").textContent = String(meta.row_count ?? "—");
+      el("crm-preflight-unique").textContent = String(meta.unique_complaint_count ?? "—");
+      el("crm-preflight-blank").textContent = String(meta.blank_complaint_count ?? "—");
+      el("crm-preflight-header").textContent = String(meta.header_row ?? "—");
+      const messages = el("crm-preflight-messages");
+      messages.replaceChildren();
+      const entries: Array<[string, string]> = [
+        ...source.validation_errors.map((message: string) => ["error", message] as [string, string]),
+        ...source.validation_warnings.map((message: string) => ["warning", message] as [string, string]),
+      ];
+      if (!entries.length) entries.push(["valid", "Complaint No was detected and the sheet is ready for Paperless filtering."]);
+      for (const [tone, message] of entries) {
+        const row = document.createElement("p");
+        row.className = `crm-preflight-message ${tone}`;
+        row.textContent = message;
+        messages.append(row);
+      }
+    }
+
+    async function loadOverview() {
+      const result = await actions.crm.overview();
+      if (result.error) return;
+      const overview = result.data as any;
+      const status = el("paperless-status");
+      status.textContent = overview.paperless.configured ? "Paperless configured" : "Paperless setup required";
+      status.className = `status-chip ${overview.paperless.configured ? "" : "error"}`;
+      status.title = overview.paperless.url || "PAPERLESS_URL is not configured";
+    }
+
+    async function loadPage(pageIndex: number, pageSize: number) {
+      const result = await actions.crm.sheets({
+        search: el<HTMLInputElement>("crm-search").value,
+        status: el<HTMLSelectElement>("crm-validation-status").value,
+        page: pageIndex + 1,
+        pageSize,
+      });
+      if (result.error) throw result.error;
+      const data = result.data as any;
+      hasActiveJobs = data.items.some((item: any) => ["queued", "running"].includes(item.latest_job?.status));
+      el("crm-total").textContent = `${data.total} uploads`;
+      return { rows: data.items, total: data.total };
+    }
+
+    async function processSource(source: any) {
+      if (source.latest_job && !await confirmAction(
+        "Reprocess this immutable CRM sheet?",
+        "A new Paperless lookup run will be created. The original uploaded file remains unchanged.",
+        "Reprocess",
+      )) return;
+      showLoading("Queueing CRM filter", "The validated sheet will be processed by the crm worker.");
+      const result = await actions.crm.processSheet({ id: source.id });
+      if (result.error) { closeAlert(); await showError(result.error); return; }
+      closeAlert();
+      const job = result.data as any;
+      window.location.href = `/crm/?job_id=${job.id}`;
+    }
+
+    async function hardDeleteSource(source: any) {
+      if (!await confirmAction(
+        "Permanently delete this CRM upload?",
+        "The source file, all processing attempts, logs, and generated workbooks will be removed. This cannot be undone.",
+        "Delete permanently",
+      )) return;
+      const result = await actions.crm.hardDeleteSheet({ id: source.id });
+      if (result.error) { await showError(result.error); return; }
+      await showSuccess("CRM upload deleted", "The immutable source and its managed outputs were removed.");
+      await table.refresh(true);
+    }
+
+    function statusTone(status: string) {
+      if (status === "succeeded") return "";
+      if (status === "failed") return "error";
+      if (["queued", "running"].includes(status)) return "warning";
+      return "inactive";
+    }
+
+    async function loadJob(jobId: string) {
+      el("crm-job-section").hidden = false;
+      try {
+        const [job, logs, artifacts] = await Promise.all([
+          apiJson(`/api/v1/jobs/${jobId}`),
+          apiJson(`/api/v1/jobs/${jobId}/logs`),
+          apiJson(`/api/v1/jobs/${jobId}/artifacts`),
+        ]);
+        el("crm-job-title").textContent = job.title;
+        const status = el("crm-job-status");
+        status.textContent = job.status;
+        status.className = `status-chip ${statusTone(job.status)}`;
+        const counts = job.result?.counts || {};
+        document.querySelectorAll<HTMLElement>("[data-count]").forEach((node) => {
+          node.textContent = String(counts[node.dataset.count || ""] ?? "—");
+        });
+        el("crm-job-log").textContent = logs.length
+          ? logs.map((entry: any) => `[${new Date(entry.created_at).toLocaleTimeString()}] ${entry.message}`).join("\n")
+          : "Waiting for worker output…";
+        const artifactBox = el("crm-artifacts");
+        artifactBox.replaceChildren();
+        if (!artifacts.length) {
+          const empty = document.createElement("p");
+          empty.className = "empty-state";
+          empty.textContent = job.status === "failed" ? (job.error || "The job failed before generating files.") : "Files will appear after processing.";
+          artifactBox.append(empty);
+        } else {
+          for (const artifact of artifacts) {
+            const link = document.createElement("a");
+            link.className = `crm-artifact-link ${artifact.kind}`;
+            link.href = `${API}/api/v1/artifacts/${artifact.id}/download`;
+            link.target = "_blank";
+            const title = document.createElement("strong");
+            title.textContent = artifact.name;
+            const detail = document.createElement("small");
+            detail.textContent = `${artifact.kind} · ${bytes(artifact.size_bytes)}`;
+            link.append(title, detail);
+            artifactBox.append(link);
+          }
+        }
+        if (["queued", "running"].includes(job.status)) {
+          jobPollTimer = window.setTimeout(() => void loadJob(jobId), 2500);
+        }
+      } catch (error) {
+        await showError(error);
+      }
+    }
+
+    await customElements.whenDefined("astro-data-table");
+    try {
+      await table.configure({
+        manualPagination: true,
+        loadPage,
+        columns: [
+          { accessorKey: "original_name", header: "Source file", enableSorting: false, cell: ({ row }: any) => stack(row.original.original_name, `${bytes(row.original.size_bytes)} · ${row.original.sha256.slice(0, 12)}…`) },
+          { id: "detected", header: "Detected", enableSorting: false, cell: ({ row }: any) => stack(`${row.original.detected_metadata?.row_count ?? 0} rows`, `${row.original.detected_metadata?.unique_complaint_count ?? 0} unique complaints`) },
+          { accessorKey: "validation_status", header: "Validation", enableSorting: false, cell: ({ row }: any) => badge(row.original.validation_status, row.original.validation_status === "valid" ? "" : "error") },
+          { id: "processing", header: "Latest run", enableSorting: false, cell: ({ row }: any) => row.original.latest_job ? stack(row.original.latest_job.status, new Date(row.original.latest_job.created_at).toLocaleString()) : badge("Not processed", "inactive") },
+          { accessorKey: "created_at", header: "Uploaded", enableSorting: false, cell: ({ row }: any) => new Date(row.original.created_at).toLocaleString() },
+          { id: "actions", header: "", enableSorting: false, cell: ({ row }: any) => actionButtons([
+            { label: "Source", onClick: () => window.open(`${API}/api/v1/crm/sheets/${row.original.id}/download`, "_blank") },
+            ...(row.original.latest_job ? [{ label: "Activity", onClick: () => { window.location.href = `/crm/?job_id=${row.original.latest_job.id}`; } }] : []),
+            ...(row.original.validation_status === "valid" && !["queued", "running"].includes(row.original.latest_job?.status)
+              ? [{ label: row.original.latest_job ? "Reprocess" : "Filter", onClick: () => void processSource(row.original) }]
+              : []),
+            ...(!["queued", "running"].includes(row.original.latest_job?.status)
+              ? [{ label: "Delete permanently", tone: "danger", onClick: () => void hardDeleteSource(row.original) }]
+              : []),
+          ]) },
+        ],
+      });
+    } catch (error) { await showError(error); }
+
+    fileInput.addEventListener("change", updateSelectedFile);
+    const drop = el("crm-upload-drop");
+    for (const eventName of ["dragenter", "dragover"]) drop.addEventListener(eventName, (event) => { event.preventDefault(); drop.classList.add("dragging"); });
+    for (const eventName of ["dragleave", "drop"]) drop.addEventListener(eventName, (event) => { event.preventDefault(); drop.classList.remove("dragging"); });
+    drop.addEventListener("drop", (event) => {
+      const files = (event as DragEvent).dataTransfer?.files;
+      if (!files?.length) return;
+      const transfer = new DataTransfer();
+      transfer.items.add(files[0]);
+      fileInput.files = transfer.files;
+      updateSelectedFile();
+    });
+
+    el<HTMLFormElement>("crm-upload-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      const button = el<HTMLButtonElement>("crm-upload-button");
+      button.disabled = true;
+      showLoading("Validating CRM sheet", "Uploading an immutable copy and detecting the complaint column.");
+      try {
+        const body = new FormData();
+        body.append("file", file);
+        const response = await fetch(`${API}/api/v1/crm/sheets/uploads`, { method: "POST", body });
+        const data = await response.json();
+        if (!response.ok) {
+          const detail = typeof data.detail === "object" ? data.detail.message : data.detail;
+          throw new Error(detail || "The CRM sheet could not be uploaded.");
+        }
+        showPreflight(data);
+        await table.refresh(true);
+        if (data.validation_status !== "valid") {
+          closeAlert();
+          await showError(new Error(data.validation_errors.join(" ") || "The CRM sheet is invalid."));
+          return;
+        }
+        const queued = await actions.crm.processSheet({ id: data.id });
+        if (queued.error) throw queued.error;
+        closeAlert();
+        const job = queued.data as any;
+        window.location.href = `/crm/?job_id=${job.id}`;
+      } catch (error) {
+        closeAlert();
+        await showError(error);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    el("crm-search").addEventListener("input", () => void table.refresh(true));
+    el("crm-validation-status").addEventListener("change", () => void table.refresh(true));
+    el("refresh-crm").addEventListener("click", () => { void table.refresh(false); void loadOverview(); if (selectedJobId) void loadJob(selectedJobId); });
+
+    async function pollTableWhileActive() {
+      if (!hasActiveJobs) return;
+      await table.refresh(false);
+      if (hasActiveJobs) tablePollTimer = window.setTimeout(() => void pollTableWhileActive(), 4000);
+    }
+
+    await loadOverview();
+    if (selectedJobId) await loadJob(selectedJobId);
+    if (hasActiveJobs) tablePollTimer = window.setTimeout(() => void pollTableWhileActive(), 4000);
+    window.addEventListener("beforeunload", () => {
+      window.clearTimeout(tablePollTimer);
+      window.clearTimeout(jobPollTimer);
+    });
+  </script>
+</CrmLayout>

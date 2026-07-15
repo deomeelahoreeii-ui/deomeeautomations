@@ -216,6 +216,11 @@ def test_openapi_contains_filter_job_endpoints() -> None:
         schema = client.get("/openapi.json").json()
 
     paths = schema["paths"]
+    assert "/api/v1/crm/overview" in paths
+    assert "/api/v1/crm/sheets" in paths
+    assert "/api/v1/crm/sheets/uploads" in paths
+    assert "/api/v1/crm/sheets/{source_file_id}/process" in paths
+    assert "/api/v1/crm/sheets/{source_file_id}/hard" in paths
     assert "/api/v1/crm/filters/sheets/jobs" in paths
     assert "/api/v1/crm/filters/pdfs/jobs" in paths
     assert "/api/v1/antidengue/runs" in paths

@@ -30,9 +30,9 @@ Start RabbitMQ, then use three terminals:
 # API
 /home/ahmad/.local/bin/uv run uvicorn automation_api.main:app --reload --port 8020
 
-# AntiDengue worker
+# Automation worker (AntiDengue, WhatsApp, and CRM queues)
 /home/ahmad/.local/bin/uv run celery -A automation_worker.main.celery_app worker \
-  --queues=antidengue --concurrency=1 --hostname=antidengue@%h --loglevel=INFO
+  --queues=antidengue,crm --concurrency=1 --hostname=automation@%h --loglevel=INFO
 
 # Astro
 cd apps/web && npm run dev -- --host 0.0.0.0 --port 4321
@@ -83,7 +83,36 @@ GET  /api/v1/jobs/{job_id}/artifacts
 GET  /api/v1/artifacts/{artifact_id}/download
 ```
 
-CRM filter endpoints remain available but are not yet migrated into the new UI.
+## Native CRM sheet duplicate filter
+
+Open <http://localhost:4321/crm/> to upload a CRM Excel/CSV sheet and compare each
+`Complaint No` against Paperless. The intake service stores an immutable source,
+calculates a SHA-256 checksum, detects the header within the first 20 rows, and
+records validation findings before a job is queued on the dedicated `crm` queue.
+
+The worker authenticates with Paperless once per run, fetches document/custom-field
+metadata once, and caches repeated complaint-number lookups. Output is isolated per
+job under `data/artifacts/crm-sheet-filter/<job-id>/` and includes non-empty category
+workbooks, a full classification audit, `run_summary.json`, and a ZIP bundle.
+Paperless request failures, blank complaint numbers, and conflicting Submitted/Not
+Relevant matches are placed in Manual Review rather than being treated as fresh.
+
+Configure either `PAPERLESS_TOKEN`, or `PAPERLESS_USERNAME` and
+`PAPERLESS_PASSWORD`, in `.env`. `PAPERLESS_URL` may point to the Paperless root or
+its `/dashboard` URL.
+
+```text
+GET  /api/v1/crm/overview
+GET  /api/v1/crm/sheets
+POST /api/v1/crm/sheets/uploads
+GET  /api/v1/crm/sheets/{source_file_id}
+POST /api/v1/crm/sheets/{source_file_id}/process
+GET  /api/v1/crm/sheets/{source_file_id}/download
+DELETE /api/v1/crm/sheets/{source_file_id}/hard
+```
+
+The CRM PDF filter remains temporarily behind its legacy adapter and is not part of
+this native sheet-filter slice.
 
 ## WhatsApp Gateway
 

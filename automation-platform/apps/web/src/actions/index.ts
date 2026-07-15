@@ -12,7 +12,9 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await response.json().catch(() => ({}));
     const detail = Array.isArray(body.detail)
       ? body.detail.map((item: any) => item.msg || item.message || JSON.stringify(item)).join("; ")
-      : typeof body.detail === "string" ? body.detail : response.statusText;
+      : typeof body.detail === "string"
+        ? body.detail
+        : body.detail?.message || response.statusText;
     throw new ActionError({
       code: response.status === 404 ? "NOT_FOUND" : "BAD_REQUEST",
       message: detail,
@@ -80,6 +82,34 @@ export const server = {
       input: z.object({ id: z.string().uuid() }),
       handler: ({ id }) => api(`/api/v1/antidengue/manual-reports/${id}/hard`, { method: "DELETE" }),
     }),
+  },
+  crm: {
+    sheets: defineAction({
+      input: z.object({
+        search: z.string().default(""),
+        status: z.string().default(""),
+        page: z.number().int().positive().default(1),
+        pageSize: z.number().int().min(1).max(100).default(10),
+      }),
+      handler: (input) => {
+        const params = new URLSearchParams({
+          search: input.search,
+          validation_status: input.status,
+          page: String(input.page),
+          page_size: String(input.pageSize),
+        });
+        return api(`/api/v1/crm/sheets?${params}`);
+      },
+    }),
+    processSheet: defineAction({
+      input: z.object({ id: z.string().uuid() }),
+      handler: ({ id }) => api(`/api/v1/crm/sheets/${id}/process`, { method: "POST" }),
+    }),
+    hardDeleteSheet: defineAction({
+      input: z.object({ id: z.string().uuid() }),
+      handler: ({ id }) => api(`/api/v1/crm/sheets/${id}/hard`, { method: "DELETE" }),
+    }),
+    overview: defineAction({ handler: () => api("/api/v1/crm/overview") }),
   },
   whatsapp: {
     overview: defineAction({ handler: () => api("/api/v1/whatsapp/overview") }),

@@ -2,6 +2,7 @@
 import "../styles/global.css";
 import "../styles/master-data.css";
 import "../styles/whatsapp.css";
+import "../styles/crm.css";
 
 interface Props {
   title: string;
@@ -37,7 +38,9 @@ const { title, eyebrow, description, active = "master-data" } = Astro.props;
           <a class:list={["nav-item", { active: active === "whatsapp" }]} href="/whatsapp/">
             <span class="nav-icon">●</span> WhatsApp
           </a>
-          <span class="nav-item muted"><span class="nav-icon">◇</span> CRM <small>Later</small></span>
+          <a class:list={["nav-item", { active: active === "crm" }]} href="/crm/">
+            <span class="nav-icon">◆</span> CRM
+          </a>
           <span class="nav-item muted"><span class="nav-icon">◇</span> PMDU <small>Later</small></span>
           <p class="nav-label nav-label-spaced">Management</p>
           <a class:list={["nav-item", { active: active === "master-data" }]} href="/master-data/">

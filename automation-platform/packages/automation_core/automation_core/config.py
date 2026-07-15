@@ -14,6 +14,14 @@ class Settings(BaseSettings):
     celery_filesystem_folder: Path = Path("./data/celery-broker")
     deomee_root: Path = Path("/home/ahmad/code/deomeeautomations")
     crm_project_root: Path | None = None
+    paperless_url: str = "https://paperless.lab.internal/dashboard"
+    paperless_username: str = ""
+    paperless_password: str = ""
+    paperless_token: str = ""
+    paperless_verify_ssl: bool = True
+    paperless_timeout_seconds: float = 15.0
+    paperless_document_type_complaint: str = "Complaint"
+    paperless_max_pages: int = 10
     antidengue_project_root: Path | None = None
     antidengue_python_bin: Path | None = None
     antidengue_pocketbase_db_path: Path | None = None
@@ -68,6 +76,10 @@ class Settings(BaseSettings):
     @property
     def source_file_root(self) -> Path:
         return (self.artifact_root / "source-files").resolve()
+
+    @property
+    def crm_filter_artifact_root(self) -> Path:
+        return (self.artifact_root / "crm-sheet-filter").resolve()
 
     @property
     def cors_origins(self) -> list[str]:

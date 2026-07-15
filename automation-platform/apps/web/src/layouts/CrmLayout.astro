@@ -1,0 +1,20 @@
+---
+import AppLayout from "./AppLayout.astro";
+
+interface Props {
+  title: string;
+  description: string;
+  page: "sheet-filter";
+}
+
+const { title, description, page } = Astro.props;
+const links = [["sheet-filter", "Sheet Duplicate Filter", "/crm/"]];
+---
+
+<AppLayout title={title} eyebrow="Operations / CRM" description={description} active="crm">
+  <slot name="actions" slot="actions" />
+  <nav class="section-tabs" aria-label="CRM pages">
+    {links.map(([id, label, href]) => <a class:list={{ active: page === id }} href={href}>{label}</a>)}
+  </nav>
+  <slot />
+</AppLayout>
