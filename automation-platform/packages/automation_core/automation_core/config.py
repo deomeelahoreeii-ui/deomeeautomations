@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     paperless_password: str = ""
     paperless_token: str = ""
     paperless_verify_ssl: bool = True
+    paperless_ca_bundle: Path | None = None
+    paperless_allow_insecure_fallback: bool = True
     paperless_timeout_seconds: float = 15.0
     paperless_document_type_complaint: str = "Complaint"
     paperless_max_pages: int = 10
@@ -80,6 +82,10 @@ class Settings(BaseSettings):
     @property
     def crm_filter_artifact_root(self) -> Path:
         return (self.artifact_root / "crm-sheet-filter").resolve()
+
+    @property
+    def crm_pdf_filter_artifact_root(self) -> Path:
+        return (self.artifact_root / "crm-pdf-filter").resolve()
 
     @property
     def cors_origins(self) -> list[str]:

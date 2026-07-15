@@ -10,8 +10,9 @@ class SheetFilterJobRequest(SQLModel):
 
 
 class PdfFilterJobRequest(SQLModel):
-    input_dir: str = Field(default="crm-main-complaints")
-    output_dir: str = Field(default="phase1-crm/unprocessed-crm/filtered")
-    db: str = Field(default="crm-cache.sqlite")
-    skip_paperless_refresh: bool = Field(default=False)
-    paperless_limit: int | None = Field(default=None, ge=1)
+    source_file_id: uuid.UUID
+    paperless_limit: int | None = Field(default=None, ge=1, le=10000)
+
+
+class PdfBatchProcessRequest(SQLModel):
+    paperless_limit: int | None = Field(default=None, ge=1, le=10000)

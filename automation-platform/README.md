@@ -32,7 +32,8 @@ Start RabbitMQ, then use three terminals:
 
 # Automation worker (AntiDengue, WhatsApp, and CRM queues)
 /home/ahmad/.local/bin/uv run celery -A automation_worker.main.celery_app worker \
-  --queues=antidengue,crm --concurrency=1 --hostname=automation@%h --loglevel=INFO
+  --queues=antidengue,crm --concurrency=1 --hostname=automation@%h \
+  --without-gossip --without-mingle --loglevel=INFO
 
 # Astro
 cd apps/web && npm run dev -- --host 0.0.0.0 --port 4321
@@ -99,7 +100,11 @@ Relevant matches are placed in Manual Review rather than being treated as fresh.
 
 Configure either `PAPERLESS_TOKEN`, or `PAPERLESS_USERNAME` and
 `PAPERLESS_PASSWORD`, in `.env`. `PAPERLESS_URL` may point to the Paperless root or
-its `/dashboard` URL.
+its `/dashboard` URL. For an internal certificate, the preferred configuration is
+`PAPERLESS_CA_BUNDLE=/path/to/internal-ca.pem`. When
+`PAPERLESS_ALLOW_INSECURE_FALLBACK=true`, a certificate-validation failure may be
+retried without verification only for loopback, private-address, or trusted internal
+hostnames such as `.internal`; the worker records that fallback in the job log.
 
 ```text
 GET  /api/v1/crm/overview
@@ -111,8 +116,33 @@ GET  /api/v1/crm/sheets/{source_file_id}/download
 DELETE /api/v1/crm/sheets/{source_file_id}/hard
 ```
 
-The CRM PDF filter remains temporarily behind its legacy adapter and is not part of
-this native sheet-filter slice.
+## Native CRM PDF duplicate filter
+
+Open <http://localhost:4321/crm/pdfs/> to upload one or more complaint PDFs. The
+browser sends them as an immutable, deterministic ZIP batch. Intake validates PDF
+headers, assigns safe unique filenames, calculates per-file and batch checksums,
+and reports exact duplicates and OCR-tool readiness before the job is queued.
+
+The worker extracts embedded text with Poppler and falls back to first-page OCR with
+Poppler plus Tesseract when needed. It builds a Paperless complaint index once per
+run, then compares complaint number, applicant identity, and complaint remarks.
+Results are separated into Fresh, Uploaded/Pending, Uploaded/Not Relevant,
+Submitted, Duplicate in Batch, Manual Review, and OCR Failed. Every run produces a
+CSV audit, an Excel audit, non-empty category ZIPs, `run_summary.json`, and a complete
+result bundle under `data/artifacts/crm-pdf-filter/<job-id>/`.
+
+Install the system `pdftotext` and `pdftoppm` tools from Poppler and the `tesseract`
+OCR executable on the worker machine. The feature still starts without complete OCR
+tools, but image-only PDFs may be classified as OCR Failed.
+
+```text
+GET  /api/v1/crm/pdf-batches
+POST /api/v1/crm/pdf-batches/uploads
+GET  /api/v1/crm/pdf-batches/{source_file_id}
+POST /api/v1/crm/pdf-batches/{source_file_id}/process
+GET  /api/v1/crm/pdf-batches/{source_file_id}/download
+DELETE /api/v1/crm/pdf-batches/{source_file_id}/hard
+```
 
 ## WhatsApp Gateway
 

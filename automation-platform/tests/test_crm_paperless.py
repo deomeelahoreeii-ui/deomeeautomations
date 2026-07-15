@@ -61,3 +61,52 @@ def test_paperless_conflicting_terminal_statuses_require_manual_review() -> None
 def test_title_matching_does_not_match_longer_number() -> None:
     assert title_has_exact_complaint("Complaint 104-1234 received", "104-1234")
     assert not title_has_exact_complaint("Complaint 104-12345 received", "104-1234")
+
+
+def test_internal_paperless_tls_failure_uses_configured_fallback() -> None:
+    import requests
+    from unittest.mock import MagicMock
+
+    from crm_filters.paperless import PaperlessClient
+
+    response = MagicMock()
+    client = PaperlessClient(
+        base_url="https://paperless.lab.internal",
+        token="token",
+        verify_ssl=True,
+        allow_insecure_fallback=True,
+    )
+    client.session.request = MagicMock(
+        side_effect=[requests.exceptions.SSLError("unknown issuer"), response]
+    )
+
+    actual = client._request("GET", "https://paperless.lab.internal/api/documents/")
+
+    assert actual is response
+    assert client.insecure_fallback_used is True
+    first_call = client.session.request.call_args_list[0]
+    second_call = client.session.request.call_args_list[1]
+    assert first_call.kwargs["verify"] is True
+    assert second_call.kwargs["verify"] is False
+
+
+def test_external_paperless_tls_failure_is_not_bypassed() -> None:
+    import pytest
+    import requests
+    from unittest.mock import MagicMock
+
+    from crm_filters.paperless import PaperlessClient
+
+    client = PaperlessClient(
+        base_url="https://paperless.example.com",
+        token="token",
+        verify_ssl=True,
+        allow_insecure_fallback=True,
+    )
+    client.session.request = MagicMock(side_effect=requests.exceptions.SSLError("unknown issuer"))
+
+    with pytest.raises(requests.exceptions.SSLError):
+        client._request("GET", "https://paperless.example.com/api/documents/")
+
+    assert client.session.request.call_count == 1
+    assert client.insecure_fallback_used is False

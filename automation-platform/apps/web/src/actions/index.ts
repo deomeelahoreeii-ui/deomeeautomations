@@ -109,6 +109,34 @@ export const server = {
       input: z.object({ id: z.string().uuid() }),
       handler: ({ id }) => api(`/api/v1/crm/sheets/${id}/hard`, { method: "DELETE" }),
     }),
+    pdfBatches: defineAction({
+      input: z.object({
+        search: z.string().default(""),
+        status: z.string().default(""),
+        page: z.number().int().positive().default(1),
+        pageSize: z.number().int().min(1).max(100).default(10),
+      }),
+      handler: (input) => {
+        const params = new URLSearchParams({
+          search: input.search,
+          validation_status: input.status,
+          page: String(input.page),
+          page_size: String(input.pageSize),
+        });
+        return api(`/api/v1/crm/pdf-batches?${params}`);
+      },
+    }),
+    processPdfBatch: defineAction({
+      input: z.object({ id: z.string().uuid(), paperlessLimit: z.number().int().positive().max(10000).optional() }),
+      handler: ({ id, paperlessLimit }) => api(`/api/v1/crm/pdf-batches/${id}/process`, {
+        method: "POST",
+        body: JSON.stringify(paperlessLimit ? { paperless_limit: paperlessLimit } : {}),
+      }),
+    }),
+    hardDeletePdfBatch: defineAction({
+      input: z.object({ id: z.string().uuid() }),
+      handler: ({ id }) => api(`/api/v1/crm/pdf-batches/${id}/hard`, { method: "DELETE" }),
+    }),
     overview: defineAction({ handler: () => api("/api/v1/crm/overview") }),
   },
   whatsapp: {
