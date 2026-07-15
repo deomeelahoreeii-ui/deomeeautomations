@@ -1,0 +1,290 @@
+---
+import DataTable from "../../../components/DataTable.astro";
+import CrmLayout from "../../../layouts/CrmLayout.astro";
+---
+
+<CrmLayout
+  title="Convert CRM Sheet Rows to PDFs"
+  description="Create one complaint PDF per valid CRM sheet row and download the complete result as a ZIP bundle."
+  page="sheet-to-pdf"
+>
+  <button class="btn btn-sm btn-ghost" id="refresh-converter" type="button" slot="actions">↻ Refresh</button>
+
+  <div class="notice crm-safety">
+    Conversion runs entirely from the uploaded sheet and does not require Paperless. Blank complaint numbers are skipped and listed in the manifest.
+  </div>
+
+  <section class="crm-grid">
+    <article class="master-card crm-upload-card">
+      <div class="panel-heading compact">
+        <div><p class="eyebrow">Immutable intake</p><h2>Upload CRM sheet</h2></div>
+        <span class="environment-pill">Maximum 50 MB</span>
+      </div>
+      <form id="converter-upload-form">
+        <label class="crm-upload-drop" id="converter-upload-drop">
+          <input id="converter-file" type="file" accept=".xlsx,.xls,.xlsm,.csv" required />
+          <span class="crm-upload-icon">⇧</span>
+          <strong id="converter-upload-title">Choose or drop a CRM sheet</strong>
+          <small id="converter-upload-detail">Excel and CSV files are supported</small>
+        </label>
+        <button class="btn btn-primary w-full" id="converter-upload-button" type="submit">Validate &amp; convert</button>
+      </form>
+    </article>
+
+    <article class="master-card crm-preflight-card">
+      <div class="panel-heading compact">
+        <div><p class="eyebrow">Output</p><h2>Conversion package</h2></div>
+        <span class="status-chip inactive">Native</span>
+      </div>
+      <div class="crm-preflight-metrics crm-convert-metrics">
+        <div><span>Rows</span><strong id="converter-rows">—</strong></div>
+        <div><span>Unique complaints</span><strong id="converter-unique">—</strong></div>
+        <div><span>Blank numbers</span><strong id="converter-blank">—</strong></div>
+        <div><span>Duplicate rows</span><strong id="converter-duplicates">—</strong></div>
+      </div>
+      <p class="empty-state" id="converter-help">
+        The result ZIP contains a <code>complaint-pdfs</code> folder, a CSV manifest, and a JSON summary.
+      </p>
+    </article>
+  </section>
+
+  <section class="crm-job-section" id="converter-job-section" hidden>
+    <div class="section-title-row">
+      <div><p class="eyebrow">Processing activity</p><h2 id="converter-job-title">Sheet-to-PDF run</h2></div>
+      <span class="status-chip inactive" id="converter-job-status">Loading</span>
+    </div>
+    <div class="crm-result-grid crm-converter-result-grid">
+      <article class="master-card crm-result-card"><span>PDFs created</span><strong data-convert-count="created">—</strong></article>
+      <article class="master-card crm-result-card"><span>Blank rows skipped</span><strong data-convert-count="skipped_blank">—</strong></article>
+      <article class="master-card crm-result-card error"><span>Failed rows</span><strong data-convert-count="failed">—</strong></article>
+      <article class="master-card crm-result-card"><span>Total rows</span><strong data-convert-count="total_rows">—</strong></article>
+    </div>
+    <div class="crm-job-grid">
+      <article class="master-card crm-log-card">
+        <div class="panel-heading compact"><div><p class="eyebrow">Live worker log</p><h2>Activity</h2></div></div>
+        <pre id="converter-job-log">Waiting for worker output…</pre>
+      </article>
+      <article class="master-card crm-artifact-card">
+        <div class="panel-heading compact"><div><p class="eyebrow">Generated files</p><h2>Downloads</h2></div></div>
+        <div id="converter-artifacts" class="crm-artifacts"><p class="empty-state">Files will appear after processing.</p></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="crm-history">
+    <div class="section-title-row"><div><p class="eyebrow">Source history</p><h2>Available CRM sheets</h2></div></div>
+    <div class="toolbar directory-toolbar">
+      <input class="input input-bordered input-sm search-input" id="converter-search" placeholder="Search filename or checksum…" />
+      <select class="select select-bordered select-sm" id="converter-validation-status">
+        <option value="">All validation states</option>
+        <option value="valid">Valid</option>
+        <option value="invalid">Invalid</option>
+      </select>
+      <span class="toolbar-status" id="converter-total">Loading…</span>
+    </div>
+    <article class="master-card"><DataTable id="converter-sheets-table" pageSize={10} emptyText="No CRM sheets have been uploaded." /></article>
+  </section>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { actionButtons, badge, stack } from "../../../scripts/table-cells";
+    import { closeAlert, confirmAction, showError, showLoading, showSuccess } from "../../../scripts/alerts";
+
+    const API = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const table = el("converter-sheets-table") as any;
+    const fileInput = el<HTMLInputElement>("converter-file");
+    const selectedJobId = new URLSearchParams(window.location.search).get("job_id");
+    let jobPollTimer: number | undefined;
+
+    function bytes(value: number) {
+      if (value < 1024) return `${value} B`;
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+      return `${(value / 1024 / 1024).toFixed(1)} MB`;
+    }
+
+    async function apiJson(path: string) {
+      const response = await fetch(`${API}${path}`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const detail = typeof data.detail === "object" ? data.detail?.message : data.detail;
+        throw new Error(detail || response.statusText || "Request failed");
+      }
+      return data;
+    }
+
+    function statusTone(status: string) {
+      if (status === "failed") return "error";
+      if (["queued", "running"].includes(status)) return "warning";
+      if (status === "succeeded") return "";
+      return "inactive";
+    }
+
+    function updateSelectedFile() {
+      const file = fileInput.files?.[0];
+      el("converter-upload-title").textContent = file?.name || "Choose or drop a CRM sheet";
+      el("converter-upload-detail").textContent = file
+        ? `${bytes(file.size)} · ready for validation`
+        : "Excel and CSV files are supported";
+    }
+
+    function showPreflight(source: any) {
+      const meta = source.detected_metadata || {};
+      el("converter-rows").textContent = String(meta.row_count ?? "—");
+      el("converter-unique").textContent = String(meta.unique_complaint_count ?? "—");
+      el("converter-blank").textContent = String(meta.blank_complaint_count ?? "—");
+      el("converter-duplicates").textContent = String(meta.duplicate_row_count ?? "—");
+      const messages = [...(source.validation_errors || []), ...(source.validation_warnings || [])];
+      el("converter-help").textContent = messages.join(" ") || "Validation passed. The conversion can start.";
+    }
+
+    async function loadPage({ page, pageSize }: any) {
+      const result = await actions.crm.sheets({
+        search: el<HTMLInputElement>("converter-search").value,
+        status: el<HTMLSelectElement>("converter-validation-status").value,
+        page,
+        pageSize,
+      });
+      if (result.error) throw result.error;
+      const data = result.data as any;
+      el("converter-total").textContent = `${data.total} upload${data.total === 1 ? "" : "s"}`;
+      return data;
+    }
+
+    async function convertSource(source: any) {
+      if (!await confirmAction("Convert sheet rows", `Create one PDF per complaint row from ${source.original_name}?`, "Convert")) return;
+      const result = await actions.crm.convertSheetToPdfs({ id: source.id });
+      if (result.error) return void await showError(result.error);
+      const job = result.data as any;
+      window.location.href = `/crm/convert/?job_id=${job.id}`;
+    }
+
+    async function hardDeleteSource(source: any) {
+      if (!await confirmAction("Delete source permanently", `Delete ${source.original_name} and all processing history?`, "Delete")) return;
+      const result = await actions.crm.hardDeleteSheet({ id: source.id });
+      if (result.error) return void await showError(result.error);
+      await showSuccess("Deleted", "The source and its generated artifacts were removed.");
+      await table.refresh(true);
+    }
+
+    async function loadJob(jobId: string) {
+      el("converter-job-section").hidden = false;
+      try {
+        const [job, logs, artifacts] = await Promise.all([
+          apiJson(`/api/v1/jobs/${jobId}`),
+          apiJson(`/api/v1/jobs/${jobId}/logs`),
+          apiJson(`/api/v1/jobs/${jobId}/artifacts`),
+        ]);
+        el("converter-job-title").textContent = job.title;
+        const status = el("converter-job-status");
+        status.textContent = job.status;
+        status.className = `status-chip ${statusTone(job.status)}`;
+        const counts = job.result?.counts || {};
+        document.querySelectorAll<HTMLElement>("[data-convert-count]").forEach((node) => {
+          node.textContent = String(counts[node.dataset.convertCount || ""] ?? "—");
+        });
+        const logBox = el<HTMLPreElement>("converter-job-log");
+        logBox.textContent = logs.length
+          ? logs.map((entry: any) => `[${new Date(entry.created_at).toLocaleTimeString()}] ${entry.message}`).join("\n")
+          : "Waiting for worker output…";
+        logBox.scrollTop = logBox.scrollHeight;
+
+        const artifactBox = el("converter-artifacts");
+        artifactBox.replaceChildren();
+        if (!artifacts.length) {
+          const empty = document.createElement("p");
+          empty.className = "empty-state";
+          empty.textContent = job.status === "failed" ? (job.error || "The job failed before generating files.") : "Files will appear after processing.";
+          artifactBox.append(empty);
+        } else {
+          for (const artifact of artifacts) {
+            const link = document.createElement("a");
+            link.className = `crm-artifact-link ${artifact.kind}`;
+            link.href = `${API}/api/v1/artifacts/${artifact.id}/download`;
+            link.target = "_blank";
+            const title = document.createElement("strong");
+            title.textContent = artifact.name;
+            const detail = document.createElement("small");
+            detail.textContent = `${artifact.kind} · ${bytes(artifact.size_bytes)}`;
+            link.append(title, detail);
+            artifactBox.append(link);
+          }
+        }
+        if (["queued", "running"].includes(job.status)) {
+          jobPollTimer = window.setTimeout(() => void loadJob(jobId), 1000);
+        }
+      } catch (error) {
+        await showError(error);
+      }
+    }
+
+    await customElements.whenDefined("astro-data-table");
+    await table.configure({
+      manualPagination: true,
+      loadPage,
+      columns: [
+        { accessorKey: "original_name", header: "Source file", enableSorting: false, cell: ({ row }: any) => stack(row.original.original_name, `${bytes(row.original.size_bytes)} · ${row.original.sha256.slice(0, 12)}…`) },
+        { id: "detected", header: "Detected", enableSorting: false, cell: ({ row }: any) => stack(`${row.original.detected_metadata?.row_count ?? 0} rows`, `${row.original.detected_metadata?.unique_complaint_count ?? 0} unique complaints`) },
+        { accessorKey: "validation_status", header: "Validation", enableSorting: false, cell: ({ row }: any) => badge(row.original.validation_status, row.original.validation_status === "valid" ? "" : "error") },
+        { id: "processing", header: "Latest run", enableSorting: false, cell: ({ row }: any) => row.original.latest_job ? stack(row.original.latest_job.status, row.original.latest_job.title || row.original.latest_job.type) : badge("Not processed", "inactive") },
+        { id: "actions", header: "", enableSorting: false, cell: ({ row }: any) => actionButtons([
+          { label: "Source", onClick: () => window.open(`${API}/api/v1/crm/sheets/${row.original.id}/download`, "_blank") },
+          ...(row.original.latest_job ? [{ label: "Activity", onClick: () => { window.location.href = `/crm/convert/?job_id=${row.original.latest_job.id}`; } }] : []),
+          ...(row.original.validation_status === "valid" && !["queued", "running"].includes(row.original.latest_job?.status) ? [{ label: "Convert", onClick: () => void convertSource(row.original) }] : []),
+          ...(!["queued", "running"].includes(row.original.latest_job?.status) ? [{ label: "Delete permanently", tone: "danger", onClick: () => void hardDeleteSource(row.original) }] : []),
+        ]) },
+      ],
+    });
+
+    fileInput.addEventListener("change", updateSelectedFile);
+    const drop = el("converter-upload-drop");
+    for (const eventName of ["dragenter", "dragover"]) drop.addEventListener(eventName, (event) => { event.preventDefault(); drop.classList.add("dragging"); });
+    for (const eventName of ["dragleave", "drop"]) drop.addEventListener(eventName, (event) => { event.preventDefault(); drop.classList.remove("dragging"); });
+    drop.addEventListener("drop", (event) => {
+      const files = (event as DragEvent).dataTransfer?.files;
+      if (!files?.length) return;
+      const transfer = new DataTransfer();
+      transfer.items.add(files[0]);
+      fileInput.files = transfer.files;
+      updateSelectedFile();
+    });
+
+    el<HTMLFormElement>("converter-upload-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      const button = el<HTMLButtonElement>("converter-upload-button");
+      button.disabled = true;
+      showLoading("Validating CRM sheet", "Uploading an immutable copy before conversion.");
+      try {
+        const body = new FormData();
+        body.append("file", file);
+        const response = await fetch(`${API}/api/v1/crm/sheets/uploads`, { method: "POST", body });
+        const data = await response.json();
+        if (!response.ok) {
+          const detail = typeof data.detail === "object" ? data.detail.message : data.detail;
+          throw new Error(detail || "The CRM sheet could not be uploaded.");
+        }
+        showPreflight(data);
+        await table.refresh(true);
+        if (data.validation_status !== "valid") throw new Error(data.validation_errors.join(" ") || "The CRM sheet is invalid.");
+        const queued = await actions.crm.convertSheetToPdfs({ id: data.id });
+        if (queued.error) throw queued.error;
+        closeAlert();
+        const job = queued.data as any;
+        window.location.href = `/crm/convert/?job_id=${job.id}`;
+      } catch (error) {
+        closeAlert();
+        await showError(error);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    el("converter-search").addEventListener("input", () => void table.refresh(true));
+    el("converter-validation-status").addEventListener("change", () => void table.refresh(true));
+    el("refresh-converter").addEventListener("click", () => { void table.refresh(false); if (selectedJobId) void loadJob(selectedJobId); });
+    if (selectedJobId) await loadJob(selectedJobId);
+    window.addEventListener("beforeunload", () => window.clearTimeout(jobPollTimer));
+  </script>
+</CrmLayout>
