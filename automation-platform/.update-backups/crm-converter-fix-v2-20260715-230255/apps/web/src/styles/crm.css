@@ -49,9 +49,3 @@
 [data-theme="automation-dark"] .crm-preflight-message.error { background: #3f171d; color: #fecaca; }
 [data-theme="automation-dark"] .crm-log-card pre { background: #05080d; color: #d7e0e8; }
 @media (max-width: 760px) { .crm-converter-result-grid { grid-template-columns: repeat(2, 1fr); } }
-.crm-converter-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--color-base-300); }
-.crm-converter-actions > div { min-width: 0; display: grid; gap: 3px; }
-.crm-converter-actions strong, .crm-converter-actions small { overflow-wrap: anywhere; }
-.crm-converter-actions small { opacity: .6; }
-.empty-panel.error { color: var(--color-error); }
-@media (max-width: 650px) { .crm-converter-actions { align-items: stretch; flex-direction: column; } }

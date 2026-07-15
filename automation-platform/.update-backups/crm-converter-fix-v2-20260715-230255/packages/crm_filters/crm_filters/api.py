@@ -31,6 +31,7 @@ from automation_core.models import (
 )
 from automation_core.time import utcnow
 from crm_filters.intake import ALLOWED_EXTENSIONS, safe_filename, validate_crm_sheet
+from crm_filters.job_recovery import fail_stale_crm_jobs
 from crm_filters.pdf_intake import create_pdf_batch_archive, safe_pdf_filename
 from crm_filters.schemas import PdfBatchProcessRequest, PdfFilterJobRequest, SheetFilterJobRequest
 from crm_filters.tasks import run_pdf_filter_job, run_sheet_filter_job, run_sheet_to_pdf_job
@@ -41,50 +42,19 @@ SHEET_KIND = "crm_sheet_upload"
 PDF_BATCH_KIND = "crm_pdf_batch_upload"
 
 
-def _latest_source_run(
-    session: Session,
-    source_file_id: uuid.UUID,
-    *,
-    job_type: str | None = None,
-) -> tuple[SourceFileRun, Job] | None:
-    statement = (
+def _latest_source_run(session: Session, source_file_id: uuid.UUID) -> tuple[SourceFileRun, Job] | None:
+    return session.execute(
         select(SourceFileRun, Job)
         .join(Job, Job.id == SourceFileRun.job_id)
         .where(SourceFileRun.source_file_id == source_file_id)
-    )
-    if job_type:
-        statement = statement.where(Job.type == job_type)
-    return session.execute(
-        statement.order_by(col(SourceFileRun.created_at).desc()).limit(1)
+        .order_by(col(SourceFileRun.created_at).desc())
+        .limit(1)
     ).first()
-
-
-def _job_summary(job: Job | None) -> dict | None:
-    if job is None:
-        return None
-    return {
-        "id": str(job.id),
-        "type": job.type,
-        "title": job.title,
-        "status": job.status,
-        "error": job.error,
-        "result": job.result,
-        "created_at": job.created_at,
-        "finished_at": job.finished_at,
-    }
 
 
 def _source_file_dict(session: Session, item: SourceFile, *, include_runs: bool = False) -> dict:
     latest = _latest_source_run(session, item.id)
-    latest_filter = _latest_source_run(
-        session, item.id, job_type=JobType.crm_sheet_filter.value
-    )
-    latest_conversion = _latest_source_run(
-        session, item.id, job_type=JobType.crm_sheet_to_pdf.value
-    )
     latest_job = latest[1] if latest else None
-    latest_filter_job = latest_filter[1] if latest_filter else None
-    latest_conversion_job = latest_conversion[1] if latest_conversion else None
     data = {
         "id": str(item.id),
         "module_key": item.module_key,
@@ -101,10 +71,21 @@ def _source_file_dict(session: Session, item: SourceFile, *, include_runs: bool 
         "validation_warnings": item.validation_warnings,
         "duplicate_of_id": str(item.duplicate_of_id) if item.duplicate_of_id else None,
         "created_at": item.created_at,
-        # Backward-compatible overall latest job plus workflow-specific views.
-        "latest_job": _job_summary(latest_job),
-        "latest_filter_job": _job_summary(latest_filter_job),
-        "latest_pdf_conversion_job": _job_summary(latest_conversion_job),
+        "latest_job": (
+            {
+                "id": str(latest_job.id),
+                "type": latest_job.type,
+                "title": latest_job.title,
+                "status": latest_job.status,
+                "error": latest_job.error,
+                "result": latest_job.result,
+                "created_at": latest_job.created_at,
+                "updated_at": latest_job.updated_at,
+                "finished_at": latest_job.finished_at,
+            }
+            if latest_job
+            else None
+        ),
     }
     if include_runs:
         attempts = session.execute(
@@ -117,12 +98,11 @@ def _source_file_dict(session: Session, item: SourceFile, *, include_runs: bool 
             {
                 "id": str(link.id),
                 "job_id": str(job.id),
-                "type": job.type,
-                "title": job.title,
                 "status": job.status,
                 "error": job.error,
                 "result": job.result,
                 "created_at": link.created_at,
+                "updated_at": job.updated_at,
                 "finished_at": job.finished_at,
             }
             for link, job in attempts
@@ -177,6 +157,14 @@ def _ensure_processable(item: SourceFile, *, require_paperless: bool = True) -> 
         )
 
 
+def _reconcile_stale_jobs(session: Session) -> None:
+    settings = get_settings()
+    fail_stale_crm_jobs(
+        session,
+        older_than_minutes=settings.crm_job_stale_minutes,
+    )
+
+
 def _active_job(session: Session, item: SourceFile) -> tuple[SourceFileRun, Job] | None:
     return session.execute(
         select(SourceFileRun, Job)
@@ -198,6 +186,7 @@ def _queue_source_job(
     require_paperless: bool = True,
 ) -> Job:
     _ensure_processable(item, require_paperless=require_paperless)
+    _reconcile_stale_jobs(session)
     active = _active_job(session, item)
     if active:
         raise HTTPException(
@@ -239,6 +228,7 @@ def _list_sources(
     page: int,
     page_size: int,
 ) -> dict:
+    _reconcile_stale_jobs(session)
     filters = [SourceFile.module_key == "crm", SourceFile.source_kind == source_kind]
     if search.strip():
         term = f"%{search.strip()}%"
@@ -331,6 +321,7 @@ def _hard_delete_source(session: Session, item: SourceFile) -> dict:
 
 @router.get("/overview")
 def read_crm_overview(session: Session = Depends(get_session)) -> dict:
+    _reconcile_stale_jobs(session)
     settings = get_settings()
     sheet_uploads = session.scalar(
         select(func.count()).select_from(SourceFile).where(

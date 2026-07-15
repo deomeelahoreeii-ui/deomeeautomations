@@ -57,7 +57,6 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
     private rows: unknown[] = [];
     private total = 0;
     private loading = false;
-    private errorMessage = "";
     private pagination: PaginationState = { pageIndex: 0, pageSize: 10 };
     private sorting: SortingState = [];
 
@@ -70,9 +69,6 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
     }
 
     async configure(config: TableConfig) {
-      if (config.manualPagination && typeof config.loadPage !== "function") {
-        throw new TypeError("DataTable manualPagination requires a loadPage(pageIndex, pageSize) callback.");
-      }
       this.config = config;
       this.rows = config.data || [];
       this.total = config.rowCount ?? this.rows.length;
@@ -102,25 +98,15 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
     async refresh(resetPage = false) {
       if (!this.config || !this.table) return;
       if (resetPage) this.pagination.pageIndex = 0;
-      this.errorMessage = "";
-      let caught: unknown;
       if (this.config.manualPagination && this.config.loadPage) {
         this.loading = true;
         this.render();
         try {
           const result = await this.config.loadPage(this.pagination.pageIndex, this.pagination.pageSize);
-          if (!result || !Array.isArray(result.rows) || !Number.isFinite(result.total)) {
-            throw new TypeError("DataTable loadPage must return { rows: Array, total: number }.");
-          }
           this.rows = result.rows;
-          this.total = Math.max(0, Number(result.total));
+          this.total = result.total;
           const lastPage = Math.max(0, this.pageCount() - 1);
           if (this.pagination.pageIndex > lastPage) this.pagination.pageIndex = lastPage;
-        } catch (error) {
-          caught = error;
-          this.rows = [];
-          this.total = 0;
-          this.errorMessage = error instanceof Error ? error.message : "The table could not be loaded.";
         } finally {
           this.loading = false;
         }
@@ -128,16 +114,6 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
         this.rows = this.config.data || this.rows;
         this.total = this.rows.length;
       }
-      this.syncTable();
-      this.render();
-      if (caught) throw caught;
-    }
-
-    showError(message: string) {
-      this.loading = false;
-      this.rows = [];
-      this.total = 0;
-      this.errorMessage = message;
       this.syncTable();
       this.render();
     }
@@ -205,12 +181,12 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
         head.append(row);
       }
 
-      if (this.loading || this.errorMessage) {
+      if (this.loading) {
         const row = document.createElement("tr");
         const cell = document.createElement("td");
         cell.colSpan = this.table.getVisibleLeafColumns().length || 1;
-        cell.className = `empty-panel${this.errorMessage ? " error" : ""}`;
-        cell.textContent = this.errorMessage || "Loading…";
+        cell.className = "empty-panel";
+        cell.textContent = "Loading…";
         row.append(cell);
         body.append(row);
       } else {
