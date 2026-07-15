@@ -1,0 +1,113 @@
+---
+import DataTable from "../../components/DataTable.astro";
+import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
+---
+
+<WhatsAppLayout title="Dispatch Destinations" description="Authorize detected WhatsApp groups as wing-isolated delivery destinations." page="groups">
+  <div class="page-actions" slot="actions"><a class="btn btn-sm" href="/whatsapp/directory/groups">View directory</a><button class="btn btn-sm btn-primary" id="add-group">＋ Add destination</button></div>
+  <div class="notice">Detection does not authorize dispatch. Every destination belongs to exactly one wing, with no cross-wing fallback.</div>
+  <article class="master-card" style="margin-top:12px"><DataTable id="groups-table" pageSize={10} emptyText="No WhatsApp groups have been configured." /></article>
+
+  <dialog class="modal" id="group-dialog">
+    <div class="modal-box master-modal">
+      <div class="modal-title"><h2 id="group-title">Add dispatch destination</h2><button type="button" id="close-group">×</button></div>
+      <form class="master-form" id="group-form">
+        <input type="hidden" id="group-id" />
+        <input type="hidden" id="directory-group-id" />
+        <div class="full group-picker">
+          <label for="detected-group-search"><span>Detected WhatsApp group *</span></label>
+          <input class="input input-bordered input-sm" id="detected-group-search" autocomplete="off" placeholder="Search detected group name or JID…" role="combobox" aria-expanded="false" aria-controls="detected-group-results" />
+          <div class="group-picker-results" id="detected-group-results" role="listbox" hidden></div>
+          <div class="selected-group" id="selected-group" hidden></div>
+          <small>Select a gateway-detected group. Its name and JID are filled automatically.</small>
+        </div>
+        <label><span>Wing *</span><select class="select select-bordered select-sm" id="group-wing" required></select></label>
+        <label><span>Purpose</span><select class="select select-bordered select-sm" id="group-purpose"><option value="reports">Reports</option><option value="head">Wing head</option><option value="escalation">Escalation</option><option value="operations">Operations</option></select></label>
+        <label><span>Status</span><select class="select select-bordered select-sm" id="group-enabled"><option value="true">Enabled</option><option value="false">Archived</option></select></label>
+        <label class="full"><span>Notes</span><textarea class="textarea textarea-bordered textarea-sm" id="group-notes"></textarea></label>
+        <details class="full manual-group-entry"><summary>Advanced: manually enter a group not currently detected</summary><div><label><span>Group name</span><input class="input input-bordered input-sm" id="group-name" /></label><label><span>Group JID</span><input class="input input-bordered input-sm" id="group-jid" placeholder="1203…@g.us" /></label></div></details>
+        <div class="form-actions"><button class="btn btn-sm" type="button" id="cancel-group">Cancel</button><button class="btn btn-sm btn-primary" type="submit">Save destination</button></div>
+      </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { actionButtons, badge, stack } from "../../scripts/table-cells";
+    import { confirmAction, showError, showSuccess } from "../../scripts/alerts";
+    await customElements.whenDefined("astro-data-table");
+    const table = document.getElementById("groups-table") as any;
+    const dialog = document.getElementById("group-dialog") as HTMLDialogElement;
+    let groups: any[] = [];
+    let selectedDetected: any = null;
+    let searchTimer: number | undefined;
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const options = await actions.masterData.options();
+    if (options.error) await showError(options.error);
+    else el<HTMLSelectElement>("group-wing").innerHTML = (options.data as any).wings.map((wing: any) => `<option value="${wing.id}">${wing.name}</option>`).join("");
+
+    function showSelected(group: any) {
+      selectedDetected = group;
+      el<HTMLInputElement>("directory-group-id").value = group?.id || group?.directory_group_id || "";
+      el<HTMLInputElement>("detected-group-search").value = group?.name || "";
+      const selected = el("selected-group");
+      selected.replaceChildren();
+      if (!selectedDetected) { selected.hidden = true; return; }
+      const title = document.createElement("strong"); title.textContent = selectedDetected.name || "Unnamed group";
+      const detail = document.createElement("small"); detail.textContent = `${selectedDetected.jid} · ${selectedDetected.participant_count ?? "—"} participants`;
+      const clear = document.createElement("button"); clear.type = "button"; clear.textContent = "Change"; clear.addEventListener("click", () => { showSelected(null); el<HTMLInputElement>("detected-group-search").focus(); void searchDetected(); });
+      selected.append(title, detail, clear); selected.hidden = false;
+      el("detected-group-results").hidden = true;
+      el<HTMLInputElement>("detected-group-search").setAttribute("aria-expanded", "false");
+    }
+    async function searchDetected() {
+      const input = el<HTMLInputElement>("detected-group-search");
+      const result = await actions.whatsapp.directoryGroups({search: input.value, availability: "available", page: 1, pageSize: 20});
+      if (result.error) { await showError(result.error); return; }
+      const records = (result.data as any).items.filter((item: any) => !item.configured_id || item.configured_id === el<HTMLInputElement>("group-id").value);
+      const list = el("detected-group-results"); list.replaceChildren();
+      if (!records.length) { const empty = document.createElement("div"); empty.className = "group-picker-empty"; empty.textContent = "No unassigned detected groups found. Sync the directory first."; list.append(empty); }
+      for (const record of records) {
+        const option = document.createElement("button"); option.type = "button"; option.setAttribute("role", "option");
+        const title = document.createElement("strong"); title.textContent = record.name || "Unnamed group";
+        const detail = document.createElement("small"); detail.textContent = `${record.participant_count} participants · ${record.jid}`;
+        option.append(title, detail); option.addEventListener("click", () => showSelected(record)); list.append(option);
+      }
+      list.hidden = false; input.setAttribute("aria-expanded", "true");
+    }
+    function openForm(group?: any) {
+      el<HTMLFormElement>("group-form").reset();
+      el("group-title").textContent = group ? "Edit dispatch destination" : "Add dispatch destination";
+      el<HTMLInputElement>("group-id").value = group?.id || "";
+      showSelected(group?.directory_group_id ? {...group, id: group.directory_group_id} : null);
+      el<HTMLInputElement>("group-name").value = group?.name || "";
+      el<HTMLSelectElement>("group-wing").value = group?.wing_id || el<HTMLSelectElement>("group-wing").options[0]?.value || "";
+      el<HTMLInputElement>("group-jid").value = group?.jid || "";
+      el<HTMLSelectElement>("group-purpose").value = group?.purpose || "reports";
+      el<HTMLSelectElement>("group-enabled").value = String(group?.enabled ?? true);
+      el<HTMLTextAreaElement>("group-notes").value = group?.notes || "";
+      dialog.showModal();
+      if (!group?.directory_group_id) { window.setTimeout(() => { el<HTMLInputElement>("detected-group-search").focus(); void searchDetected(); }, 0); }
+    }
+    async function load() { const result = await actions.whatsapp.groups(); if (result.error) throw result.error; groups = result.data as any[]; return groups; }
+    async function refresh() { try { await table.setData(await load()); } catch (error) { await showError(error); } }
+    await table.configure({ data: await load(), columns: [
+      { accessorKey: "name", header: "Destination", cell: ({row}: any) => stack(row.original.name, `${row.original.participant_count ?? "—"} participants · ${row.original.jid}`) },
+      { accessorKey: "wing_name", header: "Wing" },
+      { accessorKey: "purpose", header: "Purpose" },
+      { accessorKey: "enabled", header: "Status", cell: ({row}: any) => badge(row.original.enabled ? "Enabled" : "Archived", row.original.enabled ? "" : "inactive") },
+      { id: "actions", header: "", cell: ({row}: any) => actionButtons([
+        { label: "Edit", onClick: () => openForm(row.original) },
+        ...(row.original.enabled ? [{ label: "Archive", tone: "danger", onClick: async () => { if (!await confirmAction("Archive this group?", "It will no longer be eligible for dispatch.", "Archive group")) return; const result = await actions.whatsapp.archiveGroup({id: row.original.id}); if (result.error) await showError(result.error); else { await showSuccess("Group archived", "The route is no longer active."); await refresh(); } } }] : []),
+        { label: "Delete permanently", tone: "danger", onClick: async () => { if (!await confirmAction("Permanently delete this destination?", "The synchronized directory group remains available to configure again.", "Delete permanently")) return; const result = await actions.whatsapp.hardDeleteGroup({id: row.original.id}); if (result.error) await showError(result.error); else { await showSuccess("Destination deleted", "Its authorization record was removed."); await refresh(); } } },
+      ]) },
+    ]});
+    el("add-group").addEventListener("click", () => openForm());
+    el("detected-group-search").addEventListener("input", () => { selectedDetected = null; el<HTMLInputElement>("directory-group-id").value = ""; el("selected-group").hidden = true; window.clearTimeout(searchTimer); searchTimer = window.setTimeout(() => void searchDetected(), 200); });
+    el("detected-group-search").addEventListener("focus", () => { if (!selectedDetected) void searchDetected(); });
+    document.addEventListener("click", (event) => { if (!(event.target as Element).closest(".group-picker")) { el("detected-group-results").hidden = true; el<HTMLInputElement>("detected-group-search").setAttribute("aria-expanded", "false"); } });
+    el("close-group").addEventListener("click", () => dialog.close()); el("cancel-group").addEventListener("click", () => dialog.close());
+    el("group-form").addEventListener("submit", async (event) => { event.preventDefault(); try { const id = el<HTMLInputElement>("group-id").value; const directoryId = el<HTMLInputElement>("directory-group-id").value; const name = selectedDetected?.name || el<HTMLInputElement>("group-name").value.trim(); const jid = selectedDetected?.jid || el<HTMLInputElement>("group-jid").value.trim(); if (!directoryId && (!name || !jid)) throw new Error("Select a detected group or provide both manual group fields."); const result = await actions.whatsapp.saveGroup({ id: id || undefined, directory_group_id: directoryId || undefined, wing_id: el<HTMLSelectElement>("group-wing").value, name, jid, purpose: el<HTMLSelectElement>("group-purpose").value, notes: el<HTMLTextAreaElement>("group-notes").value, enabled: el<HTMLSelectElement>("group-enabled").value === "true" }); if (result.error) throw result.error; dialog.close(); await showSuccess("Destination saved", "The detected group is now authorized only for its assigned wing."); await refresh(); } catch (error) { await showError(error); } });
+  </script>
+</WhatsAppLayout>

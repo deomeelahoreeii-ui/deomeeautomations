@@ -1,0 +1,40 @@
+---
+import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
+---
+
+<MasterDataLayout title="Import Master Data" description="Validate CSV files before applying school or officer changes." page="import">
+  <div class="notice">Use CSV files exported by this platform. Preview first; committing upserts schools by EMIS and officers by normalized mobile number.</div>
+  <div class="export-grid" style="margin-top:15px">
+    <article class="export-card">
+      <h3>Import schools</h3><p>Requires EMIS, name, and valid hierarchy reference columns.</p>
+      <form class="import-form" data-kind="schools" style="margin-top:14px"><input required type="file" accept=".csv,text/csv" class="file-input file-input-bordered file-input-sm w-full" /><div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-sm" type="submit" data-commit="false">Preview</button><button class="btn btn-sm btn-primary" type="submit" data-commit="true">Commit import</button></div><pre class="import-result" style="font-size:9px;margin-top:10px;white-space:pre-wrap"></pre></form>
+    </article>
+    <article class="export-card">
+      <h3>Import officers</h3><p>Requires role, name, mobile, and valid hierarchy reference columns.</p>
+      <form class="import-form" data-kind="officers" style="margin-top:14px"><input required type="file" accept=".csv,text/csv" class="file-input file-input-bordered file-input-sm w-full" /><div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-sm" type="submit" data-commit="false">Preview</button><button class="btn btn-sm btn-primary" type="submit" data-commit="true">Commit import</button></div><pre class="import-result" style="font-size:9px;margin-top:10px;white-space:pre-wrap"></pre></form>
+    </article>
+  </div>
+  <script>
+    const API = import.meta.env.PUBLIC_API_BASE_URL || "http://localhost:8020";
+    document.querySelectorAll<HTMLFormElement>(".import-form").forEach((form) => form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const submitter = (event as SubmitEvent).submitter as HTMLButtonElement;
+      const commit = submitter.dataset.commit === "true";
+      if (commit && !confirm("Apply this import to the authoritative AntiDengue master data?")) return;
+      const input = form.querySelector<HTMLInputElement>('input[type="file"]')!;
+      if (!input.files?.length) return;
+      const result = form.querySelector(".import-result")!;
+      result.textContent = commit ? "Importing…" : "Validating…";
+      const body = new FormData();
+      body.append("file", input.files[0]);
+      body.append("commit", String(commit));
+      const response = await fetch(`${API}/api/v1/master-data/imports/${form.dataset.kind}`, { method: "POST", body });
+      const data = await response.json();
+      if (!response.ok) { result.textContent = data.detail || "Import failed"; return; }
+      const lines = [`${commit ? 'Committed' : 'Preview'}: ${data.created} create, ${data.updated} update, ${data.errors.length} errors.`];
+      for (const row of data.preview) lines.push(`Row ${row.row}: ${row.action} ${row.emis || row.role} ${row.name}`);
+      for (const error of data.errors.slice(0, 10)) lines.push(`ERROR row ${error.row}: ${error.error}`);
+      result.textContent = lines.join("\n");
+    }));
+  </script>
+</MasterDataLayout>

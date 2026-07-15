@@ -1,0 +1,28 @@
+---
+import DataTable from "../../components/DataTable.astro";
+import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
+---
+
+<MasterDataLayout title="Change History" description="Audit trail for web-based master-data changes and imports." page="history">
+  <article class="master-card">
+    <DataTable id="history-table" pageSize={10} emptyText="No web changes have been recorded yet." />
+  </article>
+  <script>
+    import { actions } from "astro:actions";
+    import { badge, stack } from "../../scripts/table-cells";
+
+    await customElements.whenDefined("astro-data-table");
+    const result = await actions.masterData.history({ limit: 500 });
+    if (result.error) throw result.error;
+    await (document.getElementById("history-table") as any).configure({
+      data: result.data as any[],
+      columns: [
+        { accessorKey: "created_at", header: "Time", cell: ({ row }: any) => stack(new Date(row.original.created_at).toLocaleString()) },
+        { accessorKey: "action", header: "Action", cell: ({ row }: any) => badge(row.original.action) },
+        { accessorKey: "entity_type", header: "Entity" },
+        { accessorKey: "summary", header: "Summary", cell: ({ row }: any) => stack(row.original.summary, row.original.entity_id) },
+        { accessorKey: "actor", header: "Actor" },
+      ],
+    });
+  </script>
+</MasterDataLayout>

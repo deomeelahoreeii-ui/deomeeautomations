@@ -1,0 +1,19 @@
+---
+import type { SurveyField } from "../../config/survey";
+
+type Props = {
+  field: SurveyField;
+};
+
+const { field } = Astro.props;
+---
+
+<label class="survey-field" data-aeo-field hidden>
+  <span class="survey-label">{field.label} {field.required && <span>*</span>}</span>
+  <select class="survey-input" data-aeo-select name={field.name} required={field.required} disabled>
+    <option value="">Select wing first</option>
+  </select>
+  <span id="aeoSelectHint" class="text-xs font-semibold text-slate-500">
+    AEO list changes after selecting Wing.
+  </span>
+</label>

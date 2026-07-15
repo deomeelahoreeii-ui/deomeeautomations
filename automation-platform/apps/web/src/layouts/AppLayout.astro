@@ -1,0 +1,68 @@
+---
+import "../styles/global.css";
+import "../styles/master-data.css";
+import "../styles/whatsapp.css";
+
+interface Props {
+  title: string;
+  eyebrow: string;
+  description: string;
+  active?: string;
+}
+
+const { title, eyebrow, description, active = "master-data" } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en" data-theme="automation">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>{title} · Automation Platform</title>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="/">
+          <span class="brand-mark">D</span>
+          <span><strong>Deomee</strong><small>Automation Platform</small></span>
+        </a>
+        <nav class="primary-nav" aria-label="Platform modules">
+          <p class="nav-label">Operations</p>
+          <a class:list={["nav-item", { active: active === "antidengue" }]} href="/">
+            <span class="nav-icon">◉</span> AntiDengue
+          </a>
+          <a class:list={["nav-item", { active: active === "whatsapp" }]} href="/whatsapp/">
+            <span class="nav-icon">●</span> WhatsApp
+          </a>
+          <span class="nav-item muted"><span class="nav-icon">◇</span> CRM <small>Later</small></span>
+          <span class="nav-item muted"><span class="nav-icon">◇</span> PMDU <small>Later</small></span>
+          <p class="nav-label nav-label-spaced">Management</p>
+          <a class:list={["nav-item", { active: active === "master-data" }]} href="/master-data/">
+            <span class="nav-icon">▦</span> Master Data
+          </a>
+          <span class="nav-item muted"><span class="nav-icon">≡</span> All jobs</span>
+          <span class="nav-item muted"><span class="nav-icon">⌁</span> System health</span>
+        </nav>
+        <div class="sidebar-status">
+          <span class="status-dot"></span>
+          <span><strong>API connected</strong><small id="api-status">Platform services available</small></span>
+        </div>
+      </aside>
+
+      <main class="content master-content">
+        <header class="topbar master-topbar">
+          <div>
+            <p class="eyebrow">{eyebrow}</p>
+            <h1>{title}</h1>
+            <p>{description}</p>
+          </div>
+          <slot name="actions" />
+        </header>
+        <slot />
+      </main>
+    </div>
+  </body>
+</html>

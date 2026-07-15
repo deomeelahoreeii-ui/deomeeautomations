@@ -1,0 +1,33 @@
+---
+import AppLayout from "./AppLayout.astro";
+
+interface Props {
+  title: string;
+  description: string;
+  page: string;
+}
+
+const { title, description, page } = Astro.props;
+const links = [
+  ["dashboard", "Dashboard", "/master-data/"],
+  ["schools", "Schools", "/master-data/schools"],
+  ["heads", "School Heads", "/master-data/heads"],
+  ["officers", "Officers", "/master-data/officers"],
+  ["jurisdictions", "Jurisdictions", "/master-data/jurisdictions"],
+  ["areas", "Areas", "/master-data/areas"],
+  ["quality", "Data Quality", "/master-data/quality"],
+  ["import", "Import", "/master-data/import"],
+  ["export", "Export", "/master-data/export"],
+  ["history", "History", "/master-data/history"],
+];
+---
+
+<AppLayout title={title} eyebrow="Master Data" description={description} active="master-data">
+  <slot name="actions" slot="actions" />
+  <nav class="section-tabs" aria-label="Master Data pages">
+    {links.map(([id, label, href]) => (
+      <a class:list={{ active: page === id }} href={href}>{label}</a>
+    ))}
+  </nav>
+  <slot />
+</AppLayout>

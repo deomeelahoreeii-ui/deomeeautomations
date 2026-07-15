@@ -1,0 +1,8 @@
+CRM PDFs rejected during ingest
+
+These files were not staged for Paperless upload because the ingest step
+could not safely identify a real CRM complaint number.
+
+- o-01.pdf: Could not extract a CRM complaint number like 104-6395857. If this is a scanned/image-only CRM PDF, add a reviewed entry to crm-complaint-overrides.json or run OCR before upload. OCR fallback: OCR could not read a CRM complaint number. Review the saved ID crop or add an entry to crm-complaint-overrides.json. Review crop: /home/ahmad/code/deomeeautomations/scrap-pmdu/crm-not-relevant/crm-ocr-review/o-01-complaint-id.png
+- o-07.pdf: Could not extract a CRM complaint number like 104-6395857. If this is a scanned/image-only CRM PDF, add a reviewed entry to crm-complaint-overrides.json or run OCR before upload. OCR fallback: OCR could not read a CRM complaint number. Review the saved ID crop or add an entry to crm-complaint-overrides.json.
+- o-15.pdf: Could not extract a CRM complaint number like 104-6395857. If this is a scanned/image-only CRM PDF, add a reviewed entry to crm-complaint-overrides.json or run OCR before upload. OCR fallback: OCR could not read a CRM complaint number. Review the saved ID crop or add an entry to crm-complaint-overrides.json. Review crop: /home/ahmad/code/deomeeautomations/scrap-pmdu/crm-not-relevant/crm-ocr-review/o-15-complaint-id.png

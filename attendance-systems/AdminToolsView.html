@@ -1,0 +1,84 @@
+<section id="adminView" class="grid hidden">
+  <div class="panel">
+    <div class="actions" style="justify-content: space-between; margin-top: 0;">
+      <div>
+        <h2 style="font-size: 18px; margin: 0;">Admin Tools</h2>
+        <div class="muted">User access diagnostics, permission sync, setup repair, and cache tools</div>
+      </div>
+      <span class="pill">Admin only</span>
+    </div>
+    <div id="adminNotice" class="notice"></div>
+  </div>
+
+  <div class="grid two">
+    <div class="panel">
+      <h2 style="font-size: 17px; margin: 0 0 10px;">User Access</h2>
+      <div class="field">
+        <label for="adminUserEmail">User Email</label>
+        <input id="adminUserEmail" type="email" inputmode="email" autocomplete="off" placeholder="trainer@gmail.com">
+      </div>
+      <div class="actions">
+        <button class="primary" id="adminDiagnoseUserBtn" type="button">Diagnose User</button>
+        <button class="success" id="adminSyncUserBtn" type="button">Sync This User</button>
+      </div>
+      <div class="notice show warn" style="display:block;">
+        Admin tools can fix Users-sheet access and spreadsheet Drive access. First-time Apps Script authorization must still be approved by the user on their own Google account.
+      </div>
+      <div class="admin-result hidden" id="adminUserResult"></div>
+    </div>
+
+    <div class="panel">
+      <h2 style="font-size: 17px; margin: 0 0 10px;">System Maintenance</h2>
+      <div class="admin-tool-row">
+        <div>
+          <strong>Sync all active users</strong>
+          <div class="muted">Grants spreadsheet Drive access from the Users sheet. Users still approve app authorization on first open.</div>
+        </div>
+        <button class="success" id="adminSyncAllBtn" type="button">Sync All</button>
+      </div>
+      <div class="admin-tool-row">
+        <div>
+          <strong>Setup / repair system</strong>
+          <div class="muted">Repairs sheets, headers, dashboard summaries, and Drive permissions.</div>
+        </div>
+        <button id="adminSetupBtn" type="button">Run Setup</button>
+      </div>
+      <div class="admin-tool-row">
+        <div>
+          <strong>Clear portal cache</strong>
+          <div class="muted">Forces fresh bootstrap, participants, and dashboard data.</div>
+        </div>
+        <button id="adminClearCacheBtn" type="button">Clear Cache</button>
+      </div>
+      <div class="admin-result hidden" id="adminSystemResult"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="actions" style="justify-content: space-between; margin-top: 0;">
+      <div>
+        <h2 style="font-size: 17px; margin: 0;">Absence Reasons</h2>
+        <div class="muted">Reasons appear when a candidate is marked absent in bulk attendance.</div>
+      </div>
+      <span class="pill" id="adminReasonCount">0 active reason(s)</span>
+    </div>
+    <div class="grid two" style="align-items: end;">
+      <div class="field">
+        <label for="adminAbsenceReason">New Reason</label>
+        <input id="adminAbsenceReason" autocomplete="off" placeholder="Example: Medical leave">
+      </div>
+      <div class="actions">
+        <button class="success" id="adminAddReasonBtn" type="button">Add Reason</button>
+      </div>
+    </div>
+    <div class="reason-list" id="adminAbsenceReasonList"></div>
+  </div>
+
+  <div class="panel">
+    <div class="actions" style="justify-content: space-between; margin-top: 0;">
+      <h2 style="font-size: 17px; margin: 0;">Latest Admin Result</h2>
+      <span class="muted" id="adminResultStatus">No action run yet</span>
+    </div>
+    <pre class="admin-json" id="adminRawResult">{}</pre>
+  </div>
+</section>

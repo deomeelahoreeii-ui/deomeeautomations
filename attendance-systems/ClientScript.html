@@ -1,0 +1,1854 @@
+<script>
+    const SESSION_KEY = 'pectaaAttendancePortal.currentSession.v1';
+    const state = { candidate: null, adjustmentCandidate: null, boot: null, toastTimer: null, recordsByKey: {}, bulkRows: [], reportType: 'absence' };
+    const $ = id => document.getElementById(id);
+
+    function init() {
+      $('title').textContent = PAGE.title;
+      $('subtitle').textContent = PAGE.view === 'dashboard'
+        ? PAGE.cityLabel + ' dashboard'
+        : (PAGE.view === 'adjust' ? 'Participant allocation adjustment' : (PAGE.view === 'reports' ? 'Reports and Excel exports' : (PAGE.view === 'admin' ? 'Admin diagnostics and maintenance' : 'Center attendance marking')));
+      $('attendanceDate').value = PAGE.date;
+      $('reportDateFrom').value = PAGE.date;
+      $('reportDateTo').value = PAGE.date;
+
+      $('markTab').addEventListener('click', () => switchView('mark'));
+      $('adjustTab').addEventListener('click', () => switchView('adjust'));
+      $('dashboardTab').addEventListener('click', () => switchView('dashboard'));
+      $('reportsTab').addEventListener('click', () => switchView('reports'));
+      $('adminTab').addEventListener('click', () => switchView('admin'));
+      $('searchBtn').addEventListener('click', searchCandidate);
+      $('markBtn').addEventListener('click', markAttendance);
+      $('loadBulkBtn').addEventListener('click', loadBulkAttendance);
+      $('submitBulkBtn').addEventListener('click', submitBulkAttendance);
+      $('allPresentBtn').addEventListener('click', () => setAllBulkStatus('Present'));
+      $('allAbsentBtn').addEventListener('click', () => setAllBulkStatus('Absent'));
+      $('bulkFilter').addEventListener('input', renderBulkAttendance);
+      $('bulkTable').addEventListener('change', handleBulkStatusChange);
+      $('bulkTable').addEventListener('input', handleBulkStatusChange);
+      $('resetSessionBtn').addEventListener('click', resetSavedSession);
+      $('refreshDash').addEventListener('click', loadDashboard);
+      $('clearDash').addEventListener('click', clearDashboardFilters);
+      $('attendanceSearchBtn').addEventListener('click', searchAttendance);
+      $('adjustSearchBtn').addEventListener('click', searchParticipantForAdjustment);
+      $('submitAdjustBtn').addEventListener('click', submitParticipantAdjustment);
+      $('resetAdjustBtn').addEventListener('click', resetAdjustmentForm);
+      $('adjustmentSearchBtn').addEventListener('click', searchAdjustments);
+      $('previewReportBtn').addEventListener('click', previewReport);
+      $('exportReportBtn').addEventListener('click', exportReport);
+      $('clearReportFiltersBtn').addEventListener('click', clearReportFilters);
+      $('adminDiagnoseUserBtn').addEventListener('click', adminDiagnoseUser);
+      $('adminSyncUserBtn').addEventListener('click', adminSyncUser);
+      $('adminSyncAllBtn').addEventListener('click', adminSyncAllUsers);
+      $('adminSetupBtn').addEventListener('click', adminRunSetup);
+      $('adminClearCacheBtn').addEventListener('click', adminClearCache);
+      $('adminAddReasonBtn').addEventListener('click', adminAddAbsenceReason);
+      $('adminAbsenceReasonList').addEventListener('click', handleAdminReasonAction);
+      document.querySelectorAll('[data-report-type]').forEach(button => {
+        button.addEventListener('click', () => setReportType(button.dataset.reportType));
+      });
+      $('candidateHistory').addEventListener('click', handleAttendanceAction);
+      $('recentTable').addEventListener('click', handleAttendanceAction);
+      ['adjustNewCenter', 'adjustNewBatch', 'adjustNewSlot'].forEach(id => {
+        $(id).addEventListener('change', handleAdjustmentTargetChange);
+      });
+      ['center', 'batch', 'slot', 'attendanceDate'].forEach(id => {
+        $(id).addEventListener('change', saveCurrentSession);
+      });
+      $('cnic').addEventListener('keydown', event => {
+        if (event.key === 'Enter') searchCandidate();
+      });
+      $('attendanceSearch').addEventListener('keydown', event => {
+        if (event.key === 'Enter') searchAttendance();
+      });
+      $('adjustCnic').addEventListener('keydown', event => {
+        if (event.key === 'Enter') searchParticipantForAdjustment();
+      });
+      $('adjustmentSearch').addEventListener('keydown', event => {
+        if (event.key === 'Enter') searchAdjustments();
+      });
+      $('reportQuery').addEventListener('keydown', event => {
+        if (event.key === 'Enter') previewReport();
+      });
+      $('adminUserEmail').addEventListener('keydown', event => {
+        if (event.key === 'Enter') adminDiagnoseUser();
+      });
+      $('adminAbsenceReason').addEventListener('keydown', event => {
+        if (event.key === 'Enter') adminAddAbsenceReason();
+      });
+
+      setReportType('absence');
+      switchView(PAGE.view);
+      setSelectLoading('center', 'Loading centers...');
+      setSelectLoading('batch', 'Loading batches...');
+      setSelectLoading('slot', 'Loading slots...');
+      setSelectLoading('dashCenter', 'Loading centers...');
+      setSelectLoading('dashBatch', 'Loading batches...');
+      setSelectLoading('adjustNewCenter', 'Loading centers...');
+      setSelectLoading('adjustNewBatch', 'Loading batches...');
+      setSelectLoading('adjustNewSlot', 'Loading slots...');
+      setBusy(true);
+      showLoading('Loading attendance data...');
+      google.script.run
+        .withSuccessHandler(boot => {
+          closeAlert();
+          state.boot = boot;
+          renderUserBadge();
+          applyRoleControls();
+          renderAdminAbsenceReasons();
+          fillSelect('center', boot.centers, 'Select center');
+          fillSelect('batch', boot.batches, 'Select batch');
+          fillSelect('slot', boot.slots, 'Select slot');
+          fillSelect('dashCenter', boot.centers, 'All centers');
+          fillSelect('dashBatch', boot.batches, 'All batches');
+          fillSelect('reportCenter', boot.centers, 'All centers');
+          fillSelect('reportBatch', boot.batches, 'All batches');
+          fillSelect('reportSlot', boot.slots, 'All slots');
+          fillAdjustmentCenters();
+
+          applySavedSession();
+          if (PAGE.hasCenterParam) $('center').value = PAGE.center;
+          if (PAGE.hasBatchParam) $('batch').value = PAGE.batch;
+          if (PAGE.hasSlotParam) $('slot').value = PAGE.slot;
+          if (PAGE.hasDateParam) $('attendanceDate').value = PAGE.date;
+          if (!$('attendanceDate').value) $('attendanceDate').value = PAGE.date;
+          saveCurrentSession();
+
+          setBusy(false);
+          if (PAGE.view === 'dashboard') loadDashboard();
+        })
+        .withFailureHandler(showFailure)
+        .getBootstrap(PAGE);
+    }
+
+    function switchView(view) {
+      const dashboard = view === 'dashboard';
+      const adjust = view === 'adjust';
+      const reports = view === 'reports';
+      const admin = view === 'admin';
+      $('markView').classList.toggle('hidden', dashboard || adjust || reports || admin);
+      $('adjustView').classList.toggle('hidden', !adjust);
+      $('dashboardView').classList.toggle('hidden', !dashboard);
+      $('reportsView').classList.toggle('hidden', !reports);
+      $('adminView').classList.toggle('hidden', !admin);
+      $('markTab').classList.toggle('active', !dashboard && !adjust && !reports && !admin);
+      $('adjustTab').classList.toggle('active', adjust);
+      $('dashboardTab').classList.toggle('active', dashboard);
+      $('reportsTab').classList.toggle('active', reports);
+      $('adminTab').classList.toggle('active', admin);
+      if (dashboard && state.boot) loadDashboard();
+    }
+
+    function renderUserBadge() {
+      const user = state.boot && state.boot.user;
+      const badge = $('userBadge');
+      if (!user || !badge) return;
+      badge.innerHTML = '<strong>' + escapeHtml(user.role.toUpperCase()) + '</strong> | ' + escapeHtml(user.email);
+      badge.classList.remove('hidden');
+    }
+
+    function applyRoleControls() {
+      const user = state.boot && state.boot.user;
+      if (!user) return;
+      $('searchBtn').disabled = !user.canViewDashboard && !user.canMark;
+      $('markBtn').disabled = true;
+      $('loadBulkBtn').classList.toggle('hidden', !user.canMark);
+      $('submitBulkBtn').classList.toggle('hidden', !user.canMark);
+      $('allPresentBtn').classList.toggle('hidden', !user.canMark);
+      $('allAbsentBtn').classList.toggle('hidden', !user.canMark);
+      $('adjustTab').classList.toggle('hidden', !user.canAdjust);
+      $('adjustSearchBtn').classList.toggle('hidden', !user.canAdjust);
+      $('submitAdjustBtn').classList.toggle('hidden', !user.canAdjust);
+      $('dashboardTab').classList.toggle('hidden', !user.canViewDashboard);
+      $('reportsTab').classList.toggle('hidden', !user.canViewDashboard);
+      $('adminTab').classList.toggle('hidden', !user.canAdmin);
+      if (!user.canAdmin && !$('adminView').classList.contains('hidden')) switchView('mark');
+    }
+
+    function fillSelect(id, values, placeholder) {
+      const select = $(id);
+      select.innerHTML = '';
+      select.disabled = false;
+      const first = document.createElement('option');
+      first.value = '';
+      first.textContent = placeholder;
+      select.appendChild(first);
+      values.forEach(value => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
+      });
+    }
+
+    function fillAdjustmentCenters() {
+      const allocations = adjustmentAllocations();
+      fillSelect('adjustNewCenter', uniqueClient_(allocations.map(row => row.center)), 'Select center');
+      fillSelect('adjustNewBatch', [], 'Select batch');
+      fillSelect('adjustNewSlot', [], 'Select slot');
+      updateAdjustmentTargetSummary();
+    }
+
+    function fillAdjustmentBatches() {
+      const center = $('adjustNewCenter').value;
+      const allocations = adjustmentAllocations().filter(row => !center || row.center === center);
+      fillSelect('adjustNewBatch', uniqueClient_(allocations.map(row => row.batch)), 'Select batch');
+      fillSelect('adjustNewSlot', [], 'Select slot');
+      updateAdjustmentTargetSummary();
+    }
+
+    function fillAdjustmentSlots() {
+      const center = $('adjustNewCenter').value;
+      const batch = $('adjustNewBatch').value;
+      const allocations = adjustmentAllocations().filter(row => {
+        if (center && row.center !== center) return false;
+        if (batch && row.batch !== batch) return false;
+        return true;
+      });
+      fillSelect('adjustNewSlot', uniqueClient_(allocations.map(row => row.slot)), 'Select slot');
+      updateAdjustmentTargetSummary();
+    }
+
+    function adjustmentAllocations() {
+      return (state.boot && state.boot.allocations) || [];
+    }
+
+    function selectedAdjustmentAllocation() {
+      const center = $('adjustNewCenter').value;
+      const batch = $('adjustNewBatch').value;
+      const slot = $('adjustNewSlot').value;
+      return adjustmentAllocations().find(row => row.center === center && row.batch === batch && row.slot === slot) || null;
+    }
+
+    function uniqueClient_(values) {
+      const seen = {};
+      values.forEach(value => {
+        value = String(value || '').trim();
+        if (value) seen[value] = true;
+      });
+      return Object.keys(seen).sort((a, b) => a.localeCompare(b));
+    }
+
+    function setSelectLoading(id, label) {
+      const select = $(id);
+      if (!select) return;
+      select.innerHTML = '';
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = label;
+      select.appendChild(option);
+      select.disabled = true;
+    }
+
+    function currentSession() {
+      return {
+        center: $('center').value,
+        batch: $('batch').value,
+        slot: $('slot').value,
+        attendanceDate: $('attendanceDate').value
+      };
+    }
+
+    function applySavedSession() {
+      const saved = loadSavedSession();
+      if (!saved) {
+        updateSessionStatus();
+        return;
+      }
+      if (saved.center) $('center').value = saved.center;
+      if (saved.batch) $('batch').value = saved.batch;
+      if (saved.slot) $('slot').value = saved.slot;
+      if (saved.attendanceDate) $('attendanceDate').value = saved.attendanceDate;
+      updateSessionStatus();
+    }
+
+    function saveCurrentSession() {
+      const session = currentSession();
+      localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      updateSessionStatus();
+    }
+
+    function loadSavedSession() {
+      try {
+        return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function resetSavedSession() {
+      localStorage.removeItem(SESSION_KEY);
+      $('center').value = PAGE.hasCenterParam ? PAGE.center : '';
+      $('batch').value = PAGE.hasBatchParam ? PAGE.batch : '';
+      $('slot').value = PAGE.hasSlotParam ? PAGE.slot : '';
+      $('attendanceDate').value = PAGE.hasDateParam ? PAGE.date : PAGE.date;
+      updateSessionStatus();
+      setNotice('markNotice', 'Saved session selection reset. Select the next center, batch, slot, and date.', 'warn');
+      showToast('Saved session reset.');
+      showWarning('Session reset', 'Select the next center, batch, slot, and date.');
+    }
+
+    function updateSessionStatus() {
+      const session = currentSession();
+      const parts = [
+        session.center || 'No center',
+        session.batch || 'No batch',
+        session.slot || 'No slot',
+        session.attendanceDate || 'No date'
+      ];
+      $('sessionStatus').textContent = 'Saved session: ' + parts.join(' | ');
+    }
+
+    function searchCandidate() {
+      state.candidate = null;
+      $('markBtn').disabled = true;
+      $('candidatePanel').classList.remove('visible');
+      $('successBanner').classList.remove('show');
+      setNotice('markNotice', '', '');
+      setBusy(true);
+      showLoading('Searching candidate...');
+
+      google.script.run
+        .withSuccessHandler(result => {
+          closeAlert();
+          setBusy(false);
+          if (!serverOk(result)) {
+            setNotice('markNotice', serverMessage(result, 'Candidate search returned no response.'), 'err');
+            showError('Candidate not found', serverMessage(result, 'Candidate search returned no response.'));
+            return;
+          }
+          state.candidate = result.candidate;
+          renderCandidate(result.candidate, result.previousAttendance || []);
+          $('markBtn').disabled = !canMark_();
+          const historyCount = (result.previousAttendance || []).length;
+          const message = historyCount
+            ? 'Candidate found. Previous attendance records are shown on the right.'
+            : 'Candidate found. No previous attendance is recorded yet.';
+          setNotice('markNotice', message, 'ok');
+        })
+        .withFailureHandler(showFailure)
+        .searchCandidate($('cnic').value);
+    }
+
+    function renderCandidate(candidate, previousAttendance) {
+      $('candidateCnic').textContent = candidate.cnic;
+      const rows = [
+        ['Name', candidate.teacherName],
+        ['School', candidate.school],
+        ['Tehsil', candidate.tehsil],
+        ['Contact', candidate.contact],
+        ['Registered Center', candidate.trainingCenter],
+        ['Registered Batch', candidate.batch],
+        ['Group Code', candidate.groupCode],
+        ['Registered Slot', candidate.slot],
+        ['Session Time', candidate.sessionTime],
+        ['Batch Dates', [candidate.startDate, candidate.endDate].filter(Boolean).join(' to ')]
+      ];
+      $('candidateDetails').innerHTML = rows.map(row =>
+        '<div>' + escapeHtml(row[0]) + '</div><div>' + escapeHtml(row[1] || '') + '</div>'
+      ).join('');
+      renderCandidateHistory(previousAttendance || []);
+      $('candidatePanel').classList.add('visible');
+    }
+
+    function renderCandidateHistory(rows) {
+      rememberRecords(rows);
+      $('historyCount').textContent = rows.length ? rows.length + ' latest record(s)' : 'No records';
+      const html = [
+        '<thead><tr><th>Date</th><th>Center</th><th>Batch</th><th>Slot</th><th>Status</th><th>Reason</th><th>Marked By</th><th>Action</th></tr></thead>',
+        '<tbody>',
+        rows.length ? rows.map(row =>
+          '<tr><td>' + escapeHtml(row.attendanceDate) +
+          '</td><td>' + escapeHtml(row.markedCenter) +
+          '</td><td>' + escapeHtml(row.markedBatch) +
+          '</td><td>' + escapeHtml(row.markedSlot) +
+          '</td><td>' + statusPill(row.attendanceStatus) +
+          '</td><td>' + escapeHtml(absenceReasonLabel(row)) +
+          '</td><td>' + escapeHtml(row.markedBy) +
+          '</td><td>' + actionButtons(row) + '</td></tr>'
+        ).join('') : '<tr><td colspan="8" class="muted">No previous attendance found.</td></tr>',
+        '</tbody>'
+      ].join('');
+      $('candidateHistory').innerHTML = html;
+    }
+
+    function markAttendance() {
+      if (!state.candidate) return;
+      if (!canMark_()) {
+        showError('Access denied', 'Your role cannot mark attendance.');
+        return;
+      }
+      const payload = {
+        cnic: state.candidate.cnic,
+        attendanceDate: $('attendanceDate').value,
+        markedCenter: $('center').value,
+        markedBatch: $('batch').value,
+        markedSlot: $('slot').value,
+        notes: $('notes').value
+      };
+
+      if (!payload.markedCenter || !payload.markedBatch || !payload.markedSlot || !payload.attendanceDate) {
+        setNotice('markNotice', 'Select center, batch, slot, and date before marking attendance.', 'warn');
+        showWarning('Selection required', 'Select center, batch, slot, and date before marking attendance.');
+        return;
+      }
+
+      saveCurrentSession();
+      $('markBtn').disabled = true;
+      setBusy(true);
+      showLoading('Marking attendance...');
+      google.script.run
+        .withSuccessHandler(result => {
+          closeAlert();
+          setBusy(false);
+          $('markBtn').disabled = !state.candidate;
+          if (!serverOk(result)) {
+            const message = serverMessage(result, 'Attendance request returned no response.');
+            setNotice('markNotice', message, result && result.duplicate ? 'warn' : 'err');
+            if (result && result.previousAttendance) renderCandidateHistory(result.previousAttendance);
+            if (result && result.duplicate) {
+              showWarning('Already marked', message);
+            } else {
+              showError('Attendance not marked', message);
+            }
+            return;
+          }
+          const successText = result.message + ' Session: ' +
+            [payload.markedCenter, payload.markedBatch, payload.markedSlot, payload.attendanceDate].join(' | ');
+          setNotice('markNotice', successText, 'ok');
+          showSuccessBanner(successText);
+          showToast(successText);
+          showSuccess('Attendance Marked', successText);
+          renderCandidate(result.candidate, result.previousAttendance || []);
+          $('cnic').value = '';
+          $('notes').value = '';
+          state.candidate = null;
+          $('markBtn').disabled = true;
+          $('cnic').focus();
+        })
+        .withFailureHandler(showFailure)
+        .markAttendance(payload);
+    }
+
+    function bulkPayloadBase() {
+      return {
+        center: $('center').value,
+        batch: $('batch').value,
+        slot: $('slot').value,
+        attendanceDate: $('attendanceDate').value
+      };
+    }
+
+    function validateBulkSelection(payload) {
+      if (!payload.center || !payload.batch || !payload.slot || !payload.attendanceDate) {
+        showWarning('Selection required', 'Select center, batch, slot, and attendance date before loading bulk attendance.');
+        return false;
+      }
+      return true;
+    }
+
+    async function loadBulkAttendance() {
+      if (!canMark_()) {
+        showError('Access denied', 'Your role cannot use bulk attendance.');
+        return;
+      }
+      const payload = bulkPayloadBase();
+      if (!validateBulkSelection(payload)) return;
+      saveCurrentSession();
+      setBusy(true);
+      showLoading('Loading expected candidates...');
+      try {
+        const response = await runServer('getBulkAttendanceCandidates', payload);
+        closeAlert();
+        setBusy(false);
+        if (!serverOk(response)) {
+          showError('Bulk attendance not loaded', serverMessage(response, 'Bulk attendance request returned no response.'));
+          return;
+        }
+        state.bulkRows = response.candidates || [];
+        $('bulkPanel').classList.remove('hidden');
+        $('bulkContext').textContent = [payload.center, payload.batch, payload.slot, payload.attendanceDate].join(' | ');
+        renderBulkAttendance();
+        if (!state.bulkRows.length) {
+          setNotice('bulkNotice', 'No expected candidates found for this center, batch, and slot.', 'warn');
+          showWarning('No candidates found', 'No expected candidates found for this center, batch, and slot.');
+          return;
+        }
+        setNotice('bulkNotice', 'Loaded ' + state.bulkRows.length + ' candidate(s). Default is Present. Change only the absent candidates, then submit.', 'ok');
+      } catch (error) {
+        closeAlert();
+        setBusy(false);
+        showFailure(error);
+      }
+    }
+
+    function renderBulkAttendance() {
+      const query = $('bulkFilter').value.trim().toLowerCase();
+      const rows = state.bulkRows.filter(row => {
+        if (!query) return true;
+        return [row.teacherName, row.cnic, row.school, row.contact].join(' ').toLowerCase().indexOf(query) !== -1;
+      });
+
+      const html = [
+        '<thead><tr><th>SN</th><th>Name</th><th>CNIC</th><th>School</th><th>Contact</th><th>Status</th><th>Absence Reason</th><th>Saved</th></tr></thead>',
+        '<tbody>',
+        rows.length ? rows.map(row =>
+          '<tr><td>' + escapeHtml(row.sn) +
+          '</td><td>' + escapeHtml(row.teacherName) +
+          '</td><td>' + escapeHtml(row.cnic) +
+          '</td><td>' + escapeHtml(row.school) +
+          '</td><td>' + escapeHtml(row.contact) +
+          '</td><td>' + bulkStatusControls(row) +
+          '</td><td>' + bulkReasonControls(row) +
+          '</td><td>' + (row.alreadySaved ? '<span class="pill">Saved</span>' : '<span class="muted">New</span>') +
+          '</td></tr>'
+        ).join('') : '<tr><td colspan="8" class="muted">No candidates match this filter.</td></tr>',
+        '</tbody>'
+      ].join('');
+      $('bulkTable').innerHTML = html;
+      updateBulkCounts();
+    }
+
+    function bulkStatusControls(row) {
+      const name = 'bulkStatus_' + row.cnic;
+      const presentChecked = row.attendanceStatus !== 'Absent' ? ' checked' : '';
+      const absentChecked = row.attendanceStatus === 'Absent' ? ' checked' : '';
+      return '<label class="status-choice"><input type="radio" name="' + name + '" data-cnic="' + escapeHtml(row.cnic) + '" value="Present"' + presentChecked + '>Present</label>' +
+        '<label class="status-choice"><input type="radio" name="' + name + '" data-cnic="' + escapeHtml(row.cnic) + '" value="Absent"' + absentChecked + '>Absent</label>';
+    }
+
+    function bulkReasonControls(row) {
+      if (row.attendanceStatus !== 'Absent') return '<span class="muted">-</span>';
+      const reasons = absenceReasonNames();
+      if (!row.absenceReason) row.absenceReason = defaultAbsenceReason();
+      const isOther = row.absenceReason && row.absenceReason.toLowerCase() === 'other';
+      return '<div class="bulk-reason">' +
+        '<select data-bulk-reason="' + escapeHtml(row.cnic) + '">' + selectOptions(reasons, row.absenceReason) + '</select>' +
+        '<input class="bulk-other-reason' + (isOther ? '' : ' hidden') + '" data-bulk-other-reason="' + escapeHtml(row.cnic) + '" value="' + escapeHtml(row.absenceReasonDetail || '') + '" placeholder="Type reason">' +
+        '</div>';
+    }
+
+    function handleBulkStatusChange(event) {
+      const input = event.target.closest('input[type="radio"][data-cnic]');
+      const reason = event.target.closest('select[data-bulk-reason]');
+      const otherReason = event.target.closest('input[data-bulk-other-reason]');
+
+      if (input) {
+        const row = state.bulkRows.find(item => item.cnic === input.dataset.cnic);
+        if (!row) return;
+        row.attendanceStatus = input.value;
+        if (row.attendanceStatus === 'Absent' && !row.absenceReason) row.absenceReason = defaultAbsenceReason();
+        if (row.attendanceStatus === 'Present') {
+          row.absenceReason = '';
+          row.absenceReasonDetail = '';
+        }
+        renderBulkAttendance();
+        return;
+      }
+
+      if (reason) {
+        const row = state.bulkRows.find(item => item.cnic === reason.dataset.bulkReason);
+        if (!row) return;
+        row.absenceReason = reason.value;
+        if (row.absenceReason.toLowerCase() !== 'other') row.absenceReasonDetail = '';
+        renderBulkAttendance();
+        return;
+      }
+
+      if (otherReason) {
+        const row = state.bulkRows.find(item => item.cnic === otherReason.dataset.bulkOtherReason);
+        if (!row) return;
+        row.absenceReasonDetail = otherReason.value;
+        return;
+      }
+    }
+
+    function setAllBulkStatus(status) {
+      state.bulkRows.forEach(row => {
+        row.attendanceStatus = status;
+        if (status === 'Absent') {
+          row.absenceReason = row.absenceReason || defaultAbsenceReason();
+        } else {
+          row.absenceReason = '';
+          row.absenceReasonDetail = '';
+        }
+      });
+      renderBulkAttendance();
+    }
+
+    function updateBulkCounts() {
+      const total = state.bulkRows.length;
+      const absent = state.bulkRows.filter(row => row.attendanceStatus === 'Absent').length;
+      const present = total - absent;
+      $('bulkTotal').textContent = 'Total ' + total;
+      $('bulkPresent').textContent = 'Present ' + present;
+      $('bulkAbsent').textContent = 'Absent ' + absent;
+    }
+
+    function absenceReasonNames() {
+      const reasons = ((state.boot && state.boot.absenceReasons) || []).map(row => row.reason || row).filter(Boolean);
+      return reasons.length ? reasons : ['Will Full Absent', 'Other'];
+    }
+
+    function defaultAbsenceReason() {
+      const reasons = absenceReasonNames();
+      return reasons[0] || 'Will Full Absent';
+    }
+
+    function firstBulkReasonProblem() {
+      const absentRows = state.bulkRows.filter(row => row.attendanceStatus === 'Absent');
+      for (let i = 0; i < absentRows.length; i++) {
+        const row = absentRows[i];
+        if (!row.absenceReason) {
+          return 'Select an absence reason for ' + row.teacherName + ' (' + row.cnic + ').';
+        }
+        if (row.absenceReason.toLowerCase() === 'other' && !String(row.absenceReasonDetail || '').trim()) {
+          return 'Type the custom absence reason for ' + row.teacherName + ' (' + row.cnic + ').';
+        }
+      }
+      return '';
+    }
+
+    async function submitBulkAttendance() {
+      if (!canMark_()) {
+        showError('Access denied', 'Your role cannot submit bulk attendance.');
+        return;
+      }
+      const payload = bulkPayloadBase();
+      if (!validateBulkSelection(payload)) return;
+      if (!state.bulkRows.length) {
+        showWarning('Nothing to submit', 'Load the expected candidates first.');
+        return;
+      }
+
+      const reasonProblem = firstBulkReasonProblem();
+      if (reasonProblem) {
+        setNotice('bulkNotice', reasonProblem, 'warn');
+        showWarning('Absence reason required', reasonProblem);
+        return;
+      }
+
+      const total = state.bulkRows.length;
+      const absent = state.bulkRows.filter(row => row.attendanceStatus === 'Absent').length;
+      const present = total - absent;
+      const confirmation = await Swal.fire({
+        title: 'Submit bulk attendance?',
+        text: total + ' candidates | Present ' + present + ' | Absent ' + absent,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Submit'
+      });
+      if (!confirmation.isConfirmed) return;
+
+      payload.records = state.bulkRows.map(row => ({
+        cnic: row.cnic,
+        attendanceStatus: row.attendanceStatus,
+        absenceReason: row.attendanceStatus === 'Absent' ? row.absenceReason : '',
+        absenceReasonDetail: row.attendanceStatus === 'Absent' ? row.absenceReasonDetail : '',
+        notes: row.notes || ''
+      }));
+
+      setBusy(true);
+      showLoading('Saving bulk attendance...');
+      try {
+        const response = await runServer('submitBulkAttendance', payload);
+        closeAlert();
+        setBusy(false);
+        if (!serverOk(response)) {
+          showError('Bulk attendance failed', serverMessage(response, 'Bulk attendance request returned no response.'));
+          return;
+        }
+        setNotice('bulkNotice', response.message + ' Created ' + response.created + ', updated ' + response.updated + '.', 'ok');
+        state.bulkRows.forEach(row => row.alreadySaved = true);
+        renderBulkAttendance();
+        showSuccess('Bulk Attendance Saved', 'Total ' + response.total + ' | Present ' + response.present + ' | Absent ' + response.absent);
+      } catch (error) {
+        closeAlert();
+        setBusy(false);
+        showFailure(error);
+      }
+    }
+
+    function handleAdjustmentTargetChange(event) {
+      if (event.target.id === 'adjustNewCenter') fillAdjustmentBatches();
+      if (event.target.id === 'adjustNewBatch') fillAdjustmentSlots();
+      updateAdjustmentTargetSummary();
+    }
+
+    function updateAdjustmentTargetSummary() {
+      const allocation = selectedAdjustmentAllocation();
+      const label = allocation
+        ? [allocation.center, allocation.batch, allocation.slot].join(' | ')
+        : 'No target selected';
+      $('adjustTargetSummary').textContent = label;
+    }
+
+    function canAdjust_() {
+      return Boolean(state.boot && state.boot.user && state.boot.user.canAdjust);
+    }
+
+    function resetAdjustmentForm() {
+      state.adjustmentCandidate = null;
+      $('adjustCnic').value = '';
+      $('adjustReason').value = '';
+      $('adjustCandidatePanel').classList.remove('visible');
+      $('adjustFormPanel').classList.add('hidden');
+      $('adjustHistoryPanel').classList.add('hidden');
+      setNotice('adjustNotice', '', '');
+      fillAdjustmentCenters();
+      $('adjustCnic').focus();
+    }
+
+    async function searchParticipantForAdjustment() {
+      if (!canAdjust_()) {
+        showError('Access denied', 'Your role cannot adjust participants.');
+        return;
+      }
+      state.adjustmentCandidate = null;
+      $('adjustCandidatePanel').classList.remove('visible');
+      $('adjustFormPanel').classList.add('hidden');
+      $('adjustHistoryPanel').classList.add('hidden');
+      setNotice('adjustNotice', '', '');
+      setBusy(true);
+      showLoading('Searching participant...');
+      try {
+        const result = await runServer('searchParticipantForAdjustment', $('adjustCnic').value);
+        closeAlert();
+        setBusy(false);
+        if (!serverOk(result)) {
+          const message = serverMessage(result, 'Participant search returned no response.');
+          setNotice('adjustNotice', message, 'err');
+          showError('Participant not found', message);
+          return;
+        }
+        state.adjustmentCandidate = result.candidate;
+        renderAdjustmentCandidate(result.candidate);
+        renderAdjustmentHistory(result.previousAdjustments || []);
+        renderAdjustmentAttendance(result.previousAttendance || []);
+        $('adjustFormPanel').classList.remove('hidden');
+        $('adjustHistoryPanel').classList.remove('hidden');
+        $('adjustContext').textContent = result.candidate.teacherName + ' | Current: ' +
+          [result.candidate.trainingCenter, result.candidate.batch, result.candidate.slot].join(' | ');
+        setNotice('adjustNotice', 'Participant found. Select the new valid center, batch, and slot.', 'ok');
+      } catch (error) {
+        closeAlert();
+        setBusy(false);
+        showFailure(error);
+      }
+    }
+
+    function renderAdjustmentCandidate(candidate) {
+      $('adjustCandidateCnic').textContent = candidate.cnic;
+      const rows = [
+        ['Name', candidate.teacherName],
+        ['School', candidate.school],
+        ['Tehsil', candidate.tehsil],
+        ['Contact', candidate.contact],
+        ['Current Center', candidate.trainingCenter],
+        ['Current Batch', candidate.batch],
+        ['Group Code', candidate.groupCode],
+        ['Current Slot', candidate.slot],
+        ['Session Time', candidate.sessionTime],
+        ['Batch Dates', [candidate.startDate, candidate.endDate].filter(Boolean).join(' to ')]
+      ];
+      $('adjustCandidateDetails').innerHTML = rows.map(row =>
+        '<div>' + escapeHtml(row[0]) + '</div><div>' + escapeHtml(row[1] || '') + '</div>'
+      ).join('');
+      $('adjustCandidatePanel').classList.add('visible');
+    }
+
+    function renderAdjustmentHistory(rows) {
+      $('adjustHistoryCount').textContent = rows.length ? rows.length + ' latest record(s)' : 'No records';
+      $('adjustHistoryTable').innerHTML = adjustmentRowsTable(rows, 'No previous adjustments found.');
+    }
+
+    function renderAdjustmentAttendance(rows) {
+      $('adjustAttendanceCount').textContent = rows.length ? rows.length + ' latest record(s)' : 'No records';
+      const html = [
+        '<thead><tr><th>Date</th><th>Center</th><th>Batch</th><th>Slot</th><th>Status</th></tr></thead>',
+        '<tbody>',
+        rows.length ? rows.map(row =>
+          '<tr><td>' + escapeHtml(row.attendanceDate) +
+          '</td><td>' + escapeHtml(row.markedCenter) +
+          '</td><td>' + escapeHtml(row.markedBatch) +
+          '</td><td>' + escapeHtml(row.markedSlot) +
+          '</td><td>' + statusPill(row.attendanceStatus) + '</td></tr>'
+        ).join('') : '<tr><td colspan="5" class="muted">No attendance found.</td></tr>',
+        '</tbody>'
+      ].join('');
+      $('adjustAttendanceTable').innerHTML = html;
+    }
+
+    async function submitParticipantAdjustment() {
+      if (!canAdjust_()) {
+        showError('Access denied', 'Your role cannot adjust participants.');
+        return;
+      }
+      if (!state.adjustmentCandidate) {
+        showWarning('Search required', 'Search the participant by CNIC first.');
+        return;
+      }
+      const allocation = selectedAdjustmentAllocation();
+      if (!allocation) {
+        showWarning('Target required', 'Select a valid center, batch, and slot.');
+        return;
+      }
+      const payload = {
+        cnic: state.adjustmentCandidate.cnic,
+        newCenter: allocation.center,
+        newBatch: allocation.batch,
+        newSlot: allocation.slot,
+        reason: $('adjustReason').value
+      };
+      if (!payload.reason.trim()) {
+        showWarning('Reason required', 'Enter the reason for this participant adjustment.');
+        return;
+      }
+
+      const fromText = [state.adjustmentCandidate.trainingCenter, state.adjustmentCandidate.batch, state.adjustmentCandidate.slot].join(' | ');
+      const toText = [allocation.center, allocation.batch, allocation.slot].join(' | ');
+      const confirmation = await Swal.fire({
+        title: 'Adjust participant?',
+        text: state.adjustmentCandidate.teacherName + ' | From: ' + fromText + ' | To: ' + toText,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Submit Adjustment'
+      });
+      if (!confirmation.isConfirmed) return;
+
+      setBusy(true);
+      showLoading('Saving participant adjustment...');
+      try {
+        const response = await runServer('adjustParticipantAllocation', payload);
+        closeAlert();
+        setBusy(false);
+        if (!serverOk(response)) {
+          const message = serverMessage(response, 'Participant adjustment returned no response.');
+          setNotice('adjustNotice', message, 'err');
+          showError('Adjustment failed', message);
+          refreshAdjustmentCandidateAfterAmbiguousSubmit(payload.cnic);
+          return;
+        }
+        state.adjustmentCandidate = response.candidate;
+        renderAdjustmentCandidate(response.candidate);
+        renderAdjustmentHistory(response.previousAdjustments || []);
+        renderAdjustmentAttendance(response.previousAttendance || []);
+        $('adjustReason').value = '';
+        setNotice('adjustNotice', response.message, 'ok');
+        showSuccess('Participant Adjusted', response.message);
+      } catch (error) {
+        closeAlert();
+        setBusy(false);
+        showFailure(error);
+      }
+    }
+
+    async function refreshAdjustmentCandidateAfterAmbiguousSubmit(cnic) {
+      try {
+        const result = await runServer('searchParticipantForAdjustment', cnic);
+        if (!serverOk(result)) return;
+        state.adjustmentCandidate = result.candidate;
+        renderAdjustmentCandidate(result.candidate);
+        renderAdjustmentHistory(result.previousAdjustments || []);
+        renderAdjustmentAttendance(result.previousAttendance || []);
+      } catch (error) {
+        // The original error is already visible to the user.
+      }
+    }
+
+    function loadDashboard() {
+      setNotice('dashNotice', '', '');
+      setBusy(true);
+      showLoading('Loading dashboard...');
+      google.script.run
+        .withSuccessHandler(data => {
+          closeAlert();
+          setBusy(false);
+          $('mCandidates').textContent = data.totalCandidates;
+          $('mAttendance').textContent = data.totalAttendance;
+          $('mUnique').textContent = data.uniqueAttendees;
+          renderSummaryTable('centerTable', data.summaryByCenter);
+          renderSummaryTable('batchTable', data.summaryByBatch);
+          renderAttendanceTable('recentTable', data.recentRecords);
+          renderAdjustmentSummaryTable('adjustBatchTable', data.adjustmentSummaryByBatch || []);
+          renderAdjustmentSummaryTable('adjustCenterTable', data.adjustmentSummaryByCenter || []);
+          renderAdjustmentReportTable('adjustmentReportTable', data.recentAdjustments || []);
+          setNotice('dashNotice', 'Updated ' + data.generatedAt, 'ok');
+        })
+        .withFailureHandler(showFailure)
+        .getDashboardData({
+          date: $('dashDate').value,
+          center: $('dashCenter').value,
+          batch: $('dashBatch').value
+        });
+    }
+
+    function clearDashboardFilters() {
+      $('dashDate').value = '';
+      $('dashCenter').value = '';
+      $('dashBatch').value = '';
+      loadDashboard();
+    }
+
+    function searchAttendance() {
+      const query = $('attendanceSearch').value;
+      if (!query.trim()) {
+        loadDashboard();
+        return;
+      }
+      setBusy(true);
+      google.script.run
+        .withSuccessHandler(result => {
+          setBusy(false);
+          if (!serverOk(result)) {
+            setNotice('dashNotice', serverMessage(result, 'Attendance search returned no response.'), 'warn');
+            return;
+          }
+          renderAttendanceTable('recentTable', result.matches);
+          setNotice('dashNotice', result.matches.length + ' matching attendance record(s).', 'ok');
+        })
+        .withFailureHandler(showFailure)
+        .searchAttendance(query);
+    }
+
+    function searchAdjustments() {
+      const query = $('adjustmentSearch').value;
+      if (!query.trim()) {
+        loadDashboard();
+        return;
+      }
+      setBusy(true);
+      showLoading('Searching adjustments...');
+      google.script.run
+        .withSuccessHandler(result => {
+          closeAlert();
+          setBusy(false);
+          if (!serverOk(result)) {
+            setNotice('dashNotice', serverMessage(result, 'Adjustment search returned no response.'), 'warn');
+            return;
+          }
+          renderAdjustmentReportTable('adjustmentReportTable', result.matches);
+          setNotice('dashNotice', result.matches.length + ' matching adjustment record(s).', 'ok');
+        })
+        .withFailureHandler(showFailure)
+        .searchParticipantAdjustments(query);
+    }
+
+    function setReportType(type) {
+      state.reportType = type || 'absence';
+      document.querySelectorAll('[data-report-type]').forEach(button => {
+        button.classList.toggle('active', button.dataset.reportType === state.reportType);
+      });
+      const labels = {
+        absence: 'Absence',
+        attendanceSummary: 'Summary',
+        adjustedIn: 'Adjusted In',
+        adjustedOut: 'Adjusted Out',
+        movementHistory: 'Movement'
+      };
+      $('reportMetricType').textContent = labels[state.reportType] || 'Report';
+      $('reportStatus').disabled = state.reportType !== 'absence';
+      setNotice('reportNotice', '', '');
+    }
+
+    function currentReportPayload() {
+      return {
+        reportType: state.reportType,
+        dateFrom: $('reportDateFrom').value,
+        dateTo: $('reportDateTo').value,
+        center: $('reportCenter').value,
+        batch: $('reportBatch').value,
+        slot: $('reportSlot').value,
+        status: $('reportStatus').value,
+        query: $('reportQuery').value
+      };
+    }
+
+    async function previewReport() {
+      if (!(state.boot && state.boot.user && state.boot.user.canViewDashboard)) {
+        showError('Access denied', 'Your role cannot view reports.');
+        return;
+      }
+      setBusy(true);
+      showLoading('Generating report preview...');
+      try {
+        const response = await runServer('previewReport', currentReportPayload());
+        closeAlert();
+        setBusy(false);
+        if (!serverOk(response)) {
+          const message = serverMessage(response, 'Report preview returned no response.');
+          setNotice('reportNotice', message, 'err');
+          showError('Preview failed', message);
+          return;
+        }
+        renderReportPreview(response);
+        setNotice('reportNotice', 'Preview generated. Showing ' + response.previewRows + ' of ' + response.totalRows + ' row(s).', 'ok');
+      } catch (error) {
+        closeAlert();
+        setBusy(false);
+        showFailure(error);
+      }
+    }
+
+    async function exportReport() {
+      if (!(state.boot && state.boot.user && state.boot.user.canViewDashboard)) {
+        showError('Access denied', 'Your role cannot export reports.');
+        return;
+      }
+      const confirmation = await Swal.fire({
+        title: 'Export Excel report?',
+        text: 'The report will be generated as an XLSX file in Google Drive.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Export'
+      });
+      if (!confirmation.isConfirmed) return;
+
+      setBusy(true);
+      showLoading('Exporting Excel report...');
+      try {
+        const response = await runServer('exportReport', currentReportPayload());
+        closeAlert();
+        setBusy(false);
+        if (!serverOk(response)) {
+          const message = serverMessage(response, 'Report export returned no response.');
+          setNotice('reportNotice', message, 'err');
+          showError('Export failed', message);
+          return;
+        }
+        setNotice('reportNotice', 'Export ready: ' + response.fileName + ' (' + response.totalRows + ' row(s)).', 'ok');
+        Swal.fire({
+          icon: 'success',
+          title: 'Excel Report Ready',
+          html: '<p>' + escapeHtml(response.fileName) + '</p><p><a href="' + escapeHtml(response.url) + '" target="_blank" rel="noopener">Open downloaded report</a></p>'
+        });
+      } catch (error) {
+        closeAlert();
+        setBusy(false);
+        showFailure(error);
+      }
+    }
+
+    function clearReportFilters() {
+      $('reportDateFrom').value = PAGE.date;
+      $('reportDateTo').value = PAGE.date;
+      $('reportCenter').value = '';
+      $('reportBatch').value = '';
+      $('reportSlot').value = '';
+      $('reportStatus').value = 'absent';
+      $('reportQuery').value = '';
+      setReportType('absence');
+      $('reportPreviewTable').innerHTML = '';
+      $('reportPreviewCount').textContent = 'No preview generated';
+      $('reportMetricRows').textContent = '0';
+      $('reportMetricPreview').textContent = '0';
+    }
+
+    function adminUserEmail() {
+      return $('adminUserEmail').value.trim().toLowerCase();
+    }
+
+    function requireAdmin_() {
+      const user = state.boot && state.boot.user;
+      if (!user || !user.canAdmin) {
+        showError('Access denied', 'Only admins can use Admin Tools.');
+        return false;
+      }
+      return true;
+    }
+
+    async function adminDiagnoseUser() {
+      if (!requireAdmin_()) return;
+      const email = adminUserEmail();
+      if (!email) {
+        showWarning('Email required', 'Enter the user email you want to diagnose.');
+        return;
+      }
+
+      setBusy(true);
+      showLoading('Diagnosing user access...');
+      try {
+        const response = await runServer('adminToolAction', 'diagnoseUser', { email });
+        closeAlert();
+        setBusy(false);
+        if (!serverOk(response)) {
+          showAdminFailure(serverMessage(response, 'User diagnosis returned no response.'));
+          return;
+        }
+        renderAdminUserResult(response);
+        renderAdminRawResult(response, 'Diagnosis complete');
+        setNotice('adminNotice', response.message, response.ready ? 'ok' : 'warn');
+      } catch (error) {
+        closeAlert();
+        setBusy(false);
+        showFailure(error);
+      }
+    }
+
+    async function adminSyncUser() {
+      if (!requireAdmin_()) return;
+      const email = adminUserEmail();
+      if (!email) {
+        showWarning('Email required', 'Enter the user email you want to sync.');
+        return;
+      }
+
+      const confirmation = await Swal.fire({
+        title: 'Sync this user?',
+        text: 'Spreadsheet Drive access will be granted according to this user role.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Sync user'
+      });
+      if (!confirmation.isConfirmed) return;
+
+      setBusy(true);
+      showLoading('Syncing user permission...');
+      try {
+        const response = await runServer('adminToolAction', 'syncUser', { email });
+        closeAlert();
+        setBusy(false);
+        if (!serverOk(response)) {
+          showAdminFailure(serverMessage(response, 'User sync returned no response.'));
+          return;
+        }
+        renderAdminUserResult(response);
+        renderAdminRawResult(response, 'User synced');
+        setNotice('adminNotice', response.message, 'ok');
+        showSuccess('User Synced', response.message);
+      } catch (error) {
+        closeAlert();
+        setBusy(false);
+        showFailure(error);
+      }
+    }
+
+    async function adminSyncAllUsers() {
+      if (!requireAdmin_()) return;
+      const confirmation = await Swal.fire({
+        title: 'Sync all active users?',
+        text: 'Every active user in Users will receive spreadsheet Drive access according to role.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Sync all'
+      });
+      if (!confirmation.isConfirmed) return;
+
+      setBusy(true);
+      showLoading('Syncing all users...');
+      try {
+        const response = await runServer('adminToolAction', 'syncAllUsers', {});
+        closeAlert();
+        setBusy(false);
+        if (!serverOk(response)) {
+          showAdminFailure(serverMessage(response, 'Sync all users returned no response.'));
+          return;
+        }
+        renderAdminSystemResult(syncSummaryHtml(response), response.skipped && response.skipped.length ? 'warn' : 'ok');
+        renderAdminRawResult(response, 'All users synced');
+        setNotice('adminNotice', 'User permissions synced. Editors: ' + response.editorsAdded.length + ', viewers: ' + response.viewersAdded.length + ', skipped: ' + response.skipped.length + '.', response.skipped.length ? 'warn' : 'ok');
+      } catch (error) {
+        closeAlert();
+        setBusy(false);
+        showFailure(error);
+      }
+    }
+
+    async function adminRunSetup() {
+      if (!requireAdmin_()) return;
+      const result = await Swal.fire({
+        title: 'Run setup / repair?',
+        text: 'This repairs system sheets, headers, summaries, and syncs active user permissions. It does not delete attendance.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Run setup'
+      });
+      if (!result.isConfirmed) return;
+
+      setBusy(true);
+      showLoading('Running setup / repair...');
+      try {
+        const response = await runServer('adminToolAction', 'runSetup', {});
+        closeAlert();
+        setBusy(false);
+        if (!serverOk(response)) {
+          showAdminFailure(serverMessage(response, 'Setup returned no response.'));
+          return;
+        }
+        renderAdminSystemResult('Setup complete. Participants: ' + response.participantRows + ', attendance rows: ' + response.attendanceRows + '.', 'ok');
+        renderAdminRawResult(response, 'Setup complete');
+        setNotice('adminNotice', 'Setup / repair completed successfully.', 'ok');
+        showSuccess('Setup Complete', 'System sheets and user permissions are ready.');
+      } catch (error) {
+        closeAlert();
+        setBusy(false);
+        showFailure(error);
+      }
+    }
+
+    async function adminClearCache() {
+      if (!requireAdmin_()) return;
+      setBusy(true);
+      showLoading('Clearing portal cache...');
+      try {
+        const response = await runServer('adminToolAction', 'clearCache', {});
+        closeAlert();
+        setBusy(false);
+        if (!serverOk(response)) {
+          showAdminFailure(serverMessage(response, 'Clear cache returned no response.'));
+          return;
+        }
+        renderAdminSystemResult(response.message, 'ok');
+        renderAdminRawResult(response, 'Cache cleared');
+        setNotice('adminNotice', response.message, 'ok');
+        showSuccess('Cache Cleared', response.message);
+      } catch (error) {
+        closeAlert();
+        setBusy(false);
+        showFailure(error);
+      }
+    }
+
+    async function adminAddAbsenceReason() {
+      if (!requireAdmin_()) return;
+      const reason = $('adminAbsenceReason').value.trim();
+      if (!reason) {
+        showWarning('Reason required', 'Enter the absence reason you want to add.');
+        return;
+      }
+
+      setBusy(true);
+      showLoading('Adding absence reason...');
+      try {
+        const response = await runServer('adminToolAction', 'addAbsenceReason', { reason });
+        closeAlert();
+        setBusy(false);
+        if (!serverOk(response)) {
+          showAdminFailure(serverMessage(response, 'Absence reason was not added.'));
+          return;
+        }
+        updateAbsenceReasonState(response);
+        $('adminAbsenceReason').value = '';
+        renderAdminAbsenceReasons();
+        renderAdminRawResult(response, 'Absence reason added');
+        setNotice('adminNotice', response.message, 'ok');
+        showSuccess('Reason Added', response.message);
+      } catch (error) {
+        closeAlert();
+        setBusy(false);
+        showFailure(error);
+      }
+    }
+
+    function renderAdminAbsenceReasons() {
+      const catalog = ((state.boot && (state.boot.absenceReasonCatalog || state.boot.absenceReasons)) || []).filter(row => row && (row.reason || row));
+      const active = catalog.filter(row => row.active !== false);
+      const archived = catalog.filter(row => row.active === false);
+      const list = $('adminAbsenceReasonList');
+      const count = $('adminReasonCount');
+      if (!list || !count) return;
+      count.textContent = active.length + ' active reason(s)';
+      list.innerHTML = [
+        '<div class="reason-group"><div class="muted" style="width:100%; font-weight:700;">Active</div>' +
+          renderReasonItems(active, false) + '</div>',
+        archived.length ? '<div class="reason-group"><div class="muted" style="width:100%; font-weight:700;">Archived</div>' +
+          renderReasonItems(archived, true) + '</div>' : ''
+      ].join('');
+    }
+
+    function renderReasonItems(rows, archived) {
+      if (!rows.length) return '<span class="muted">No reasons.</span>';
+      return rows.map(item => {
+        const reason = item.reason || item;
+        const reasonKey = item.reasonKey || reason;
+        const isProtected = item.protected || reason.toLowerCase() === 'other';
+        if (archived) {
+          return '<div class="reason-item archived">' +
+            '<span class="pill">' + escapeHtml(reason) + '</span>' +
+            '<span class="muted">Archived</span>' +
+            '<button class="small" type="button" data-admin-reason-action="restore" data-reason-key="' + escapeHtml(reasonKey) + '" data-reason="' + escapeHtml(reason) + '">Restore</button>' +
+            '</div>';
+        }
+        return '<div class="reason-item">' +
+          '<span class="pill' + (isProtected ? ' absent' : '') + '">' + escapeHtml(reason) + '</span>' +
+          (isProtected ? '<span class="muted">System</span>' : '<button class="small" type="button" data-admin-reason-action="edit" data-reason-key="' + escapeHtml(reasonKey) + '" data-reason="' + escapeHtml(reason) + '">Edit</button>' +
+          '<button class="small danger" type="button" data-admin-reason-action="archive" data-reason-key="' + escapeHtml(reasonKey) + '" data-reason="' + escapeHtml(reason) + '">Delete</button>') +
+          '</div>';
+      }).join('');
+    }
+
+    function handleAdminReasonAction(event) {
+      const button = event.target.closest('button[data-admin-reason-action]');
+      if (!button) return;
+      const reason = button.dataset.reason || '';
+      const reasonKey = button.dataset.reasonKey || '';
+      if (button.dataset.adminReasonAction === 'edit') adminEditAbsenceReason(reasonKey, reason);
+      if (button.dataset.adminReasonAction === 'archive') adminArchiveAbsenceReason(reasonKey, reason);
+      if (button.dataset.adminReasonAction === 'restore') adminRestoreAbsenceReason(reasonKey, reason);
+    }
+
+    async function adminEditAbsenceReason(reasonKey, oldReason) {
+      if (!requireAdmin_()) return;
+      const result = await Swal.fire({
+        title: 'Edit absence reason',
+        input: 'text',
+        inputValue: oldReason,
+        inputLabel: 'New reason name',
+        showCancelButton: true,
+        confirmButtonText: 'Update',
+        inputValidator: value => {
+          if (!String(value || '').trim()) return 'Reason is required.';
+          if (String(value || '').trim().toLowerCase() === oldReason.toLowerCase()) return 'Type a different reason.';
+          if (String(value || '').trim().toLowerCase() === 'other') return 'Other is reserved for custom reasons.';
+          return null;
+        }
+      });
+      if (!result.isConfirmed) return;
+
+      setBusy(true);
+      showLoading('Updating absence reason...');
+      try {
+        const response = await runServer('adminToolAction', 'updateAbsenceReason', {
+          reasonKey,
+          newReason: result.value
+        });
+        closeAlert();
+        setBusy(false);
+        if (!serverOk(response)) {
+          showAdminFailure(serverMessage(response, 'Absence reason was not updated.'));
+          return;
+        }
+        updateAbsenceReasonState(response);
+        renderAdminAbsenceReasons();
+        renderAdminRawResult(response, 'Absence reason updated');
+        setNotice('adminNotice', response.message, 'ok');
+        showSuccess('Reason Updated', response.message);
+      } catch (error) {
+        closeAlert();
+        setBusy(false);
+        showFailure(error);
+      }
+    }
+
+    async function adminArchiveAbsenceReason(reasonKey, reason) {
+      if (!requireAdmin_()) return;
+      const result = await Swal.fire({
+        title: 'Delete absence reason?',
+        text: reason + ' will be removed from future dropdowns. Previous attendance records will not change.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Delete',
+        confirmButtonColor: '#c5221f'
+      });
+      if (!result.isConfirmed) return;
+
+      setBusy(true);
+      showLoading('Deleting absence reason...');
+      try {
+        const response = await runServer('adminToolAction', 'archiveAbsenceReason', { reasonKey });
+        closeAlert();
+        setBusy(false);
+        if (!serverOk(response)) {
+          showAdminFailure(serverMessage(response, 'Absence reason was not deleted.'));
+          return;
+        }
+        updateAbsenceReasonState(response);
+        renderAdminAbsenceReasons();
+        renderAdminRawResult(response, 'Absence reason deleted');
+        setNotice('adminNotice', response.message, 'ok');
+        showSuccess('Reason Deleted', response.message);
+      } catch (error) {
+        closeAlert();
+        setBusy(false);
+        showFailure(error);
+      }
+    }
+
+    async function adminRestoreAbsenceReason(reasonKey, reason) {
+      if (!requireAdmin_()) return;
+      const result = await Swal.fire({
+        title: 'Restore absence reason?',
+        text: reason + ' will appear again in future attendance dropdowns.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Restore'
+      });
+      if (!result.isConfirmed) return;
+
+      setBusy(true);
+      showLoading('Restoring absence reason...');
+      try {
+        const response = await runServer('adminToolAction', 'restoreAbsenceReason', { reasonKey });
+        closeAlert();
+        setBusy(false);
+        if (!serverOk(response)) {
+          showAdminFailure(serverMessage(response, 'Absence reason was not restored.'));
+          return;
+        }
+        updateAbsenceReasonState(response);
+        renderAdminAbsenceReasons();
+        renderAdminRawResult(response, 'Absence reason restored');
+        setNotice('adminNotice', response.message, 'ok');
+        showSuccess('Reason Restored', response.message);
+      } catch (error) {
+        closeAlert();
+        setBusy(false);
+        showFailure(error);
+      }
+    }
+
+    function updateAbsenceReasonState(response) {
+      state.boot.absenceReasons = response.absenceReasons || state.boot.absenceReasons || [];
+      state.boot.absenceReasonCatalog = response.absenceReasonCatalog || state.boot.absenceReasonCatalog || state.boot.absenceReasons || [];
+    }
+
+    function renderAdminUserResult(result) {
+      const statusType = result.ready ? 'ok' : 'warn';
+      const html = [
+        '<div><strong>' + escapeHtml(result.email) + '</strong></div>',
+        '<div class="kv" style="margin-top: 8px;">',
+        '<div>Listed</div><div>' + yesNo_(result.listedInUsers) + '</div>',
+        '<div>Active</div><div>' + yesNo_(result.activeInUsers) + '</div>',
+        '<div>Role</div><div>' + escapeHtml(result.role || '-') + '</div>',
+        '<div>Centers</div><div>' + escapeHtml(result.allowedCenters || '-') + '</div>',
+        '<div>Drive Access</div><div>' + escapeHtml(result.spreadsheetAccess || 'none') + '</div>',
+        '<div>App Authorization</div><div>' + escapeHtml(result.appAuthorization || 'User must approve Apps Script scopes on first open') + '</div>',
+        '<div>Status</div><div>' + escapeHtml(result.message || '') + '</div>',
+        '</div>'
+      ].join('');
+      const el = $('adminUserResult');
+      el.innerHTML = html;
+      el.className = 'admin-result ' + statusType;
+      el.classList.remove('hidden');
+    }
+
+    function renderAdminSystemResult(message, type) {
+      const el = $('adminSystemResult');
+      el.innerHTML = message;
+      el.className = 'admin-result ' + (type || 'ok');
+      el.classList.remove('hidden');
+    }
+
+    function renderAdminRawResult(response, status) {
+      $('adminRawResult').textContent = JSON.stringify(response || {}, null, 2);
+      $('adminResultStatus').textContent = status || 'Updated';
+    }
+
+    function showAdminFailure(message) {
+      setNotice('adminNotice', message, 'err');
+      renderAdminSystemResult(escapeHtml(message), 'err');
+      showError('Admin action failed', message);
+    }
+
+    function syncSummaryHtml(response) {
+      return [
+        '<strong>User permission sync complete</strong>',
+        '<div style="margin-top: 8px;">Editors synced: ' + response.editorsAdded.length + '</div>',
+        '<div>Viewers synced: ' + response.viewersAdded.length + '</div>',
+        '<div>Skipped: ' + response.skipped.length + '</div>'
+      ].join('');
+    }
+
+    function yesNo_(value) {
+      return value ? 'Yes' : 'No';
+    }
+
+    function renderReportPreview(report) {
+      $('reportPreviewTitle').textContent = report.title;
+      $('reportPreviewCount').textContent = report.previewRows + ' preview row(s) of ' + report.totalRows;
+      $('reportMetricRows').textContent = report.totalRows;
+      $('reportMetricPreview').textContent = report.previewRows;
+      const columns = report.columns || [];
+      const rows = report.rows || [];
+      const html = [
+        '<thead><tr>' + columns.map(column => '<th>' + escapeHtml(column) + '</th>').join('') + '</tr></thead>',
+        '<tbody>',
+        rows.length ? rows.map(row =>
+          '<tr>' + row.map(cell => '<td>' + escapeHtml(cell) + '</td>').join('') + '</tr>'
+        ).join('') : '<tr><td colspan="' + Math.max(1, columns.length) + '" class="muted">No rows found for this report.</td></tr>',
+        '</tbody>'
+      ].join('');
+      $('reportPreviewTable').innerHTML = html;
+    }
+
+    function renderSummaryTable(id, rows) {
+      const html = [
+        '<thead><tr><th>Name</th><th>Records</th><th>Unique</th></tr></thead>',
+        '<tbody>',
+        rows.length ? rows.map(row =>
+          '<tr><td>' + escapeHtml(row.label) + '</td><td>' + row.attendance + '</td><td>' + row.uniqueAttendees + '</td></tr>'
+        ).join('') : '<tr><td colspan="3" class="muted">No attendance yet.</td></tr>',
+        '</tbody>'
+      ].join('');
+      $(id).innerHTML = html;
+    }
+
+    function renderAdjustmentSummaryTable(id, rows) {
+      const html = [
+        '<thead><tr><th>Name</th><th>Moved In</th><th>Moved Out</th><th>Net</th></tr></thead>',
+        '<tbody>',
+        rows.length ? rows.map(row =>
+          '<tr><td>' + escapeHtml(row.label) +
+          '</td><td>' + row.movedIn +
+          '</td><td>' + row.movedOut +
+          '</td><td>' + row.netChange + '</td></tr>'
+        ).join('') : '<tr><td colspan="4" class="muted">No adjustments yet.</td></tr>',
+        '</tbody>'
+      ].join('');
+      $(id).innerHTML = html;
+    }
+
+    function renderAdjustmentReportTable(id, rows) {
+      $(id).innerHTML = adjustmentRowsTable(rows || [], 'No adjustment records found.');
+    }
+
+    function adjustmentRowsTable(rows, emptyMessage) {
+      return [
+        '<thead><tr><th>Date</th><th>Name</th><th>CNIC</th><th>Old Center</th><th>Old Batch</th><th>Old Slot</th><th>New Center</th><th>New Batch</th><th>New Slot</th><th>Changed By</th></tr></thead>',
+        '<tbody>',
+        rows.length ? rows.map(row =>
+          '<tr><td>' + escapeHtml(row.adjustmentDate || row.timestamp) +
+          '</td><td>' + escapeHtml(row.teacherName) +
+          '</td><td>' + escapeHtml(row.cnic) +
+          '</td><td>' + escapeHtml(row.oldCenter) +
+          '</td><td>' + escapeHtml(row.oldBatch) +
+          '</td><td>' + escapeHtml(row.oldSlot) +
+          '</td><td>' + escapeHtml(row.newCenter) +
+          '</td><td>' + escapeHtml(row.newBatch) +
+          '</td><td>' + escapeHtml(row.newSlot) +
+          '</td><td>' + escapeHtml(row.changedBy) + '</td></tr>'
+        ).join('') : '<tr><td colspan="10" class="muted">' + escapeHtml(emptyMessage) + '</td></tr>',
+        '</tbody>'
+      ].join('');
+    }
+
+    function renderAttendanceTable(id, rows) {
+      rememberRecords(rows);
+      const html = [
+        '<thead><tr><th>Date</th><th>Name</th><th>CNIC</th><th>Marked Center</th><th>Batch</th><th>Slot</th><th>Status</th><th>Reason</th><th>Registered Center</th><th>School</th><th>Action</th></tr></thead>',
+        '<tbody>',
+        rows.length ? rows.map(row =>
+          '<tr><td>' + escapeHtml(row.attendanceDate) +
+          '</td><td>' + escapeHtml(row.teacherName) +
+          '</td><td>' + escapeHtml(row.cnic) +
+          '</td><td>' + escapeHtml(row.markedCenter) +
+          '</td><td>' + escapeHtml(row.markedBatch) +
+          '</td><td>' + escapeHtml(row.markedSlot) +
+          '</td><td>' + statusPill(row.attendanceStatus) +
+          '</td><td>' + escapeHtml(absenceReasonLabel(row)) +
+          '</td><td>' + escapeHtml(row.registeredTrainingCenter) +
+          '</td><td>' + escapeHtml(row.school) +
+          '</td><td>' + actionButtons(row) + '</td></tr>'
+        ).join('') : '<tr><td colspan="11" class="muted">No records found.</td></tr>',
+        '</tbody>'
+      ].join('');
+      $(id).innerHTML = html;
+    }
+
+    function rememberRecords(rows) {
+      (rows || []).forEach(row => {
+        row.cnic = row.cnic || row.cNIC || '';
+        row.attendanceStatus = row.attendanceStatus === 'Absent' ? 'Absent' : 'Present';
+        row.absenceReason = row.absenceReason || '';
+        row.absenceReasonDetail = row.absenceReasonDetail || '';
+        if (row.attendanceKey) state.recordsByKey[row.attendanceKey] = row;
+      });
+    }
+
+    function actionButtons(row) {
+      const key = escapeHtml(row.attendanceKey || '');
+      if (!key) return '';
+      const user = state.boot && state.boot.user;
+      if (!user || (!user.canEdit && !user.canDelete)) return '';
+      const editButton = user.canEdit
+        ? '<button class="small" type="button" data-action="edit-attendance" data-key="' + key + '">Edit</button>'
+        : '';
+      const deleteButton = user.canDelete
+        ? '<button class="small danger" type="button" data-action="delete-attendance" data-key="' + key + '">Delete</button>'
+        : '';
+      return '<div class="actions" style="gap: 6px; flex-wrap: nowrap;">' +
+        editButton +
+        deleteButton +
+        '</div>';
+    }
+
+    function canMark_() {
+      return Boolean(state.boot && state.boot.user && state.boot.user.canMark);
+    }
+
+    function statusPill(status) {
+      const value = status === 'Absent' ? 'Absent' : 'Present';
+      return '<span class="pill ' + (value === 'Absent' ? 'absent' : 'present') + '">' + value + '</span>';
+    }
+
+    function absenceReasonLabel(row) {
+      if (!row || row.attendanceStatus !== 'Absent') return '';
+      return [row.absenceReason, row.absenceReasonDetail].filter(Boolean).join(': ');
+    }
+
+    function setNotice(id, message, type) {
+      const el = $(id);
+      el.textContent = message || '';
+      el.className = 'notice' + (message ? ' show ' + type : '');
+    }
+
+    function handleAttendanceAction(event) {
+      const button = event.target.closest('button[data-action]');
+      if (!button) return;
+      const record = state.recordsByKey[button.dataset.key];
+      if (!record) {
+        showError('Record not found', 'Refresh the candidate or dashboard and try again.');
+        return;
+      }
+      if (button.dataset.action === 'edit-attendance') {
+        if (!(state.boot && state.boot.user && state.boot.user.canEdit)) {
+          showError('Access denied', 'Your role cannot edit attendance.');
+          return;
+        }
+        editAttendanceRecord(record);
+      }
+      if (button.dataset.action === 'delete-attendance') {
+        if (!(state.boot && state.boot.user && state.boot.user.canDelete)) {
+          showError('Access denied', 'Your role cannot delete attendance.');
+          return;
+        }
+        deleteAttendanceRecord(record);
+      }
+    }
+
+    async function editAttendanceRecord(record) {
+      const result = await Swal.fire({
+        title: 'Edit Attendance',
+        html: editAttendanceHtml(record),
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Update',
+        didOpen: wireEditAttendanceReasonControls,
+        preConfirm: () => ({
+          attendanceKey: record.attendanceKey,
+          cnic: record.cnic || record.cNIC,
+          attendanceDate: document.getElementById('swalAttendanceDate').value,
+          markedCenter: document.getElementById('swalCenter').value,
+          markedBatch: document.getElementById('swalBatch').value,
+          markedSlot: document.getElementById('swalSlot').value,
+          attendanceStatus: document.getElementById('swalStatus').value,
+          absenceReason: document.getElementById('swalAbsenceReason').value,
+          absenceReasonDetail: document.getElementById('swalAbsenceReasonDetail').value,
+          notes: document.getElementById('swalNotes').value
+        })
+      });
+      if (!result.isConfirmed) return;
+
+      const payload = result.value;
+      if (!payload.attendanceDate || !payload.markedCenter || !payload.markedBatch || !payload.markedSlot) {
+        showWarning('Missing information', 'Date, center, batch, and slot are required.');
+        return;
+      }
+      if (payload.attendanceStatus === 'Absent' && !payload.absenceReason) {
+        showWarning('Missing information', 'Absence reason is required for an absent record.');
+        return;
+      }
+      if (payload.attendanceStatus === 'Absent' && payload.absenceReason.toLowerCase() === 'other' && !payload.absenceReasonDetail.trim()) {
+        showWarning('Missing information', 'Type the custom absence reason when Other is selected.');
+        return;
+      }
+
+      showLoading('Updating attendance...');
+      try {
+        const response = await runServer('updateAttendance', payload);
+        closeAlert();
+        if (!serverOk(response)) {
+          showError('Update failed', serverMessage(response, 'Attendance update returned no response.'));
+          return;
+        }
+        if (response.previousAttendance) renderCandidateHistory(response.previousAttendance);
+        if (!$('dashboardView').classList.contains('hidden')) loadDashboard();
+        showSuccess('Attendance Updated', response.message);
+      } catch (error) {
+        closeAlert();
+        showFailure(error);
+      }
+    }
+
+    async function deleteAttendanceRecord(record) {
+      const result = await Swal.fire({
+        title: 'Delete attendance?',
+        text: record.teacherName + ' | ' + record.attendanceDate + ' | ' + record.markedCenter,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Delete',
+        confirmButtonColor: '#c5221f'
+      });
+      if (!result.isConfirmed) return;
+
+      showLoading('Deleting attendance...');
+      try {
+        const response = await runServer('deleteAttendance', {
+          attendanceKey: record.attendanceKey,
+          cnic: record.cnic || record.cNIC
+        });
+        closeAlert();
+        if (!serverOk(response)) {
+          showError('Delete failed', serverMessage(response, 'Attendance delete returned no response.'));
+          return;
+        }
+        delete state.recordsByKey[record.attendanceKey];
+        if (response.previousAttendance) renderCandidateHistory(response.previousAttendance);
+        if (!$('dashboardView').classList.contains('hidden')) loadDashboard();
+        showSuccess('Attendance Deleted', response.message);
+      } catch (error) {
+        closeAlert();
+        showFailure(error);
+      }
+    }
+
+    function editAttendanceHtml(record) {
+      return [
+        '<div style="text-align:left">',
+        '<p style="margin:0 0 12px;"><strong>' + escapeHtml(record.teacherName) + '</strong><br><span style="color:#687385">' + escapeHtml(record.cnic || record.cNIC) + '</span></p>',
+        swalField('Attendance Date', '<input id="swalAttendanceDate" class="swal2-input" type="date" value="' + escapeHtml(record.attendanceDate) + '" style="width:100%; margin:0;">'),
+        swalField('Center', '<select id="swalCenter" class="swal2-select" style="width:100%; margin:0;">' + selectOptions(state.boot.centers, record.markedCenter) + '</select>'),
+        swalField('Batch', '<select id="swalBatch" class="swal2-select" style="width:100%; margin:0;">' + selectOptions(state.boot.batches, record.markedBatch) + '</select>'),
+        swalField('Slot', '<select id="swalSlot" class="swal2-select" style="width:100%; margin:0;">' + selectOptions(state.boot.slots, record.markedSlot) + '</select>'),
+        swalField('Status', '<select id="swalStatus" class="swal2-select" style="width:100%; margin:0;">' + selectOptions(['Present', 'Absent'], record.attendanceStatus || 'Present') + '</select>'),
+        '<div id="swalAbsenceReasonWrap">',
+        swalField('Absence Reason', '<select id="swalAbsenceReason" class="swal2-select" style="width:100%; margin:0;">' + selectOptions(absenceReasonNames(), record.absenceReason || defaultAbsenceReason()) + '</select>'),
+        '<div id="swalAbsenceDetailWrap">',
+        swalField('Other Reason', '<input id="swalAbsenceReasonDetail" class="swal2-input" value="' + escapeHtml(record.absenceReasonDetail || '') + '" style="width:100%; margin:0;" placeholder="Type reason">'),
+        '</div>',
+        '</div>',
+        swalField('Notes', '<textarea id="swalNotes" class="swal2-textarea" style="width:100%; margin:0;">' + escapeHtml(record.notes || '') + '</textarea>'),
+        '</div>'
+      ].join('');
+    }
+
+    function wireEditAttendanceReasonControls() {
+      const status = document.getElementById('swalStatus');
+      const reason = document.getElementById('swalAbsenceReason');
+      const wrap = document.getElementById('swalAbsenceReasonWrap');
+      const detailWrap = document.getElementById('swalAbsenceDetailWrap');
+      if (!status || !reason || !wrap || !detailWrap) return;
+      const update = () => {
+        const isAbsent = status.value === 'Absent';
+        wrap.style.display = isAbsent ? 'block' : 'none';
+        detailWrap.style.display = isAbsent && reason.value.toLowerCase() === 'other' ? 'block' : 'none';
+      };
+      status.addEventListener('change', update);
+      reason.addEventListener('change', update);
+      update();
+    }
+
+    function swalField(label, control) {
+      return '<label style="display:block; margin:10px 0 5px; color:#687385; font-size:12px; font-weight:700; text-transform:uppercase;">' +
+        escapeHtml(label) + '</label>' + control;
+    }
+
+    function selectOptions(values, selected) {
+      const list = (values || []).slice();
+      if (selected && list.indexOf(selected) === -1) list.unshift(selected);
+      return list.map(value => {
+        const isSelected = value === selected ? ' selected' : '';
+        return '<option value="' + escapeHtml(value) + '"' + isSelected + '>' + escapeHtml(value) + '</option>';
+      }).join('');
+    }
+
+    function runServer(name, ...args) {
+      return new Promise((resolve, reject) => {
+        const runner = google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject);
+        if (typeof runner[name] !== 'function') {
+          reject(new Error(
+            'Server function "' + name + '" is not available in this deployed web app version. Push the files, then create a new Apps Script deployment version.'
+          ));
+          return;
+        }
+        runner[name](...args);
+      });
+    }
+
+    function serverOk(response) {
+      return Boolean(response && response.ok);
+    }
+
+    function serverMessage(response, fallback) {
+      return response && response.message ? response.message : fallback;
+    }
+
+    function showLoading(title) {
+      Swal.fire({
+        title,
+        allowEscapeKey: false,
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+      });
+    }
+
+    function closeAlert() {
+      if (Swal && Swal.close) Swal.close();
+    }
+
+    function showSuccess(title, text) {
+      Swal.fire({ icon: 'success', title, text, timer: 2600, timerProgressBar: true });
+    }
+
+    function showWarning(title, text) {
+      Swal.fire({ icon: 'warning', title, text });
+    }
+
+    function showError(title, text) {
+      Swal.fire({ icon: 'error', title, text });
+    }
+
+    function showSuccessBanner(message) {
+      const el = $('successBanner');
+      el.textContent = message;
+      el.classList.add('show');
+    }
+
+    function showToast(message) {
+      const el = $('toast');
+      el.textContent = message;
+      el.classList.add('show');
+      clearTimeout(state.toastTimer);
+      state.toastTimer = setTimeout(() => el.classList.remove('show'), 4500);
+    }
+
+    function setBusy(isBusy) {
+      ['searchBtn', 'markBtn', 'loadBulkBtn', 'submitBulkBtn', 'allPresentBtn', 'allAbsentBtn', 'refreshDash', 'attendanceSearchBtn', 'adjustSearchBtn', 'submitAdjustBtn', 'adjustmentSearchBtn', 'previewReportBtn', 'exportReportBtn', 'adminDiagnoseUserBtn', 'adminSyncUserBtn', 'adminSyncAllBtn', 'adminSetupBtn', 'adminClearCacheBtn', 'adminAddReasonBtn'].forEach(id => {
+        const el = $(id);
+        if (!el) return;
+        el.dataset.busy = isBusy ? '1' : '0';
+        if (id === 'markBtn') {
+          if (isBusy) el.disabled = true;
+          return;
+        }
+        el.disabled = isBusy;
+      });
+    }
+
+    function showFailure(error) {
+      closeAlert();
+      setBusy(false);
+      $('markBtn').disabled = !state.candidate;
+      const message = error && error.message ? error.message : String(error);
+      setNotice('markNotice', message, 'err');
+      setNotice('dashNotice', message, 'err');
+      setNotice('adjustNotice', message, 'err');
+      setNotice('reportNotice', message, 'err');
+      setNotice('adminNotice', message, 'err');
+      showToast(message);
+      showError('Something went wrong', message);
+    }
+
+    function escapeHtml(value) {
+      return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    window.addEventListener('load', init);
+  </script>

@@ -1,0 +1,742 @@
+---
+import { aeoOptions } from "../../config/aeos";
+import { surveySteps } from "../../config/survey";
+import { zonalHeadOptions } from "../../config/zonal-heads";
+import AeoSelectField from "./AeoSelectField.astro";
+import FacilityToggleGroup from "./FacilityToggleGroup.astro";
+import ImageUploadField from "./ImageUploadField.astro";
+import LocationField from "./LocationField.astro";
+import StepProgress from "./StepProgress.astro";
+import SurveyField from "./SurveyField.astro";
+
+const stepDataJson = JSON.stringify(
+  surveySteps.map((step) => [step.title, step.description]),
+).replace(/</g, "\\u003c");
+const aeoOptionsJson = JSON.stringify(aeoOptions).replace(/</g, "\\u003c");
+const zonalHeadOptionsJson = JSON.stringify(zonalHeadOptions).replace(/</g, "\\u003c");
+---
+
+<form id="surveyForm" class="grid gap-5 lg:grid-cols-[20rem_1fr]" novalidate>
+  <StepProgress steps={surveySteps} />
+
+  <section class="overflow-hidden rounded-[1.25rem] border border-slate-200 bg-white shadow-sm">
+    <div class="border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p id="stepEyebrow" class="text-xs font-bold uppercase tracking-wide text-sky-700">{surveySteps[0].title}</p>
+          <h2 id="stepHeading" class="mt-1 text-2xl font-black tracking-normal text-slate-950">{surveySteps[0].description}</h2>
+        </div>
+        <div class="rounded-full bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">
+          <span id="mobileStepLabel">1 / {surveySteps.length}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="p-5 sm:p-6 lg:p-8">
+      {surveySteps.map((step, index) => (
+        <section class:list={["step-panel", index !== 0 && "hidden"]} data-step-panel={index} hidden={index !== 0}>
+          <div class:list={[
+            "grid gap-5",
+            step.id === "registration" ? "xl:grid-cols-3" : "",
+            step.id === "enrollment" ? "sm:grid-cols-2 xl:grid-cols-4" : "",
+            step.id === "facilities" ? "sm:grid-cols-2 xl:grid-cols-4" : "",
+            step.id !== "registration" && step.id !== "enrollment" && step.id !== "facilities" ? "xl:grid-cols-2" : "",
+          ]}>
+            {step.fields.map((field) =>
+              field.kind === "yesNo" ? (
+                <FacilityToggleGroup field={field} />
+              ) : field.kind === "location" ? (
+                <LocationField field={field} />
+              ) : field.kind === "image" ? (
+                <ImageUploadField field={field} />
+              ) : field.kind === "aeo" ? (
+                <AeoSelectField field={field} />
+              ) : (
+                <SurveyField field={field} />
+              )
+            )}
+          </div>
+        </section>
+      ))}
+    </div>
+
+    <footer class="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+      <button id="backButton" class="btn min-h-12 rounded-xl border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-100" type="button">
+        Back
+      </button>
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <button id="nextButton" class="btn min-h-12 rounded-xl border-0 bg-slate-950 px-8 text-white hover:bg-slate-800" type="button">
+          Continue
+        </button>
+        <button id="submitButton" class="btn hidden min-h-12 rounded-xl border-0 bg-emerald-600 px-8 text-white hover:bg-emerald-700" type="submit" hidden>
+          Submit Survey
+        </button>
+      </div>
+    </footer>
+  </section>
+</form>
+
+<script id="surveyStepData" type="application/json" set:html={stepDataJson}></script>
+<script id="aeoOptionsData" type="application/json" set:html={aeoOptionsJson}></script>
+<script id="zonalHeadOptionsData" type="application/json" set:html={zonalHeadOptionsJson}></script>
+
+<script>
+  import Swal from "sweetalert2";
+  import "sweetalert2/dist/sweetalert2.min.css";
+
+  const stepDataElement = document.getElementById("surveyStepData");
+  const aeoOptionsElement = document.getElementById("aeoOptionsData");
+  const zonalHeadOptionsElement = document.getElementById("zonalHeadOptionsData");
+  const steps = JSON.parse(stepDataElement?.textContent || "[]");
+  const aeoOptions = JSON.parse(aeoOptionsElement?.textContent || "[]");
+  const zonalHeadOptions = JSON.parse(zonalHeadOptionsElement?.textContent || "[]");
+  const surveyForm = document.getElementById("surveyForm");
+  const stepPanels = Array.from(document.querySelectorAll("[data-step-panel]"));
+  const stepButtons = Array.from(document.querySelectorAll("[data-step-button]"));
+  const backButton = document.getElementById("backButton");
+  const nextButton = document.getElementById("nextButton");
+  const submitButton = document.getElementById("submitButton");
+  const progressLabel = document.getElementById("progressLabel");
+  const progressPercent = document.getElementById("progressPercent");
+  const progressBar = document.getElementById("progressBar");
+  const stepEyebrow = document.getElementById("stepEyebrow");
+  const stepHeading = document.getElementById("stepHeading");
+  const mobileStepLabel = document.getElementById("mobileStepLabel");
+  const wingSelect = surveyForm.querySelector('select[name="wing"]');
+  const seSubmittedByField = surveyForm.querySelector("[data-se-submitted-by-field]");
+  const seSubmittedBySelect = surveyForm.querySelector('select[name="se_submitted_by"]');
+  const seAeoWingField = surveyForm.querySelector("[data-se-aeo-wing-field]");
+  const seAeoWingSelect = surveyForm.querySelector('select[name="se_aeo_wing"]');
+  const aeoField = surveyForm.querySelector("[data-aeo-field]");
+  const aeoSelect = surveyForm.querySelector("[data-aeo-select]");
+  const aeoSelectHint = document.getElementById("aeoSelectHint");
+  const zonalHeadFields = Array.from(surveyForm.querySelectorAll("[data-zonal-head-field]"));
+  const zonalHeadInstituteSelect = surveyForm.querySelector('select[name="zonal_head_institute_name"]');
+  const zonalHeadNameInput = surveyForm.querySelector('input[name="zonal_head_name"]');
+  const zonalHeadContactInput = surveyForm.querySelector('input[name="zonal_head_contact_no"]');
+  const dateOfVisitInput = surveyForm.querySelector('input[name="date_of_visit_report"]');
+  const locationLinkInput = surveyForm.querySelector('input[name="location_link_pin"]');
+  const hiddenCoordinatesInput = surveyForm.querySelector('input[name="hidden_location_coordinates"]');
+  const imageInputs = Array.from(surveyForm.querySelectorAll("[data-image-upload]"));
+  const openMapsButton = document.getElementById("openMapsButton");
+  const locationStatus = document.getElementById("locationStatus");
+  let currentStep = 0;
+
+  function showToast(icon, title) {
+    return Swal.fire({
+      toast: true,
+      position: "top-end",
+      icon,
+      title,
+      showConfirmButton: false,
+      timer: 2600,
+      timerProgressBar: true,
+    });
+  }
+
+  function updateStep(nextStep) {
+    currentStep = Math.max(0, Math.min(nextStep, steps.length - 1));
+
+    stepPanels.forEach((panel, index) => {
+      panel.hidden = index !== currentStep;
+      panel.classList.toggle("hidden", index !== currentStep);
+    });
+
+    stepButtons.forEach((button, index) => {
+      const isActive = index === currentStep;
+      const dot = button.querySelector(".step-dot");
+      button.classList.toggle("border-sky-200", isActive);
+      button.classList.toggle("bg-sky-50", isActive);
+      button.classList.toggle("shadow-sm", isActive);
+      dot?.classList.toggle("bg-sky-600", isActive);
+      dot?.classList.toggle("text-white", isActive);
+      dot?.classList.toggle("bg-slate-100", !isActive);
+      dot?.classList.toggle("text-slate-500", !isActive);
+    });
+
+    const percent = Math.round(((currentStep + 1) / steps.length) * 100);
+    progressLabel.textContent = `Step ${currentStep + 1} of ${steps.length}`;
+    progressPercent.textContent = `${percent}%`;
+    progressBar.value = currentStep + 1;
+    stepEyebrow.textContent = steps[currentStep][0];
+    stepHeading.textContent = steps[currentStep][1];
+    mobileStepLabel.textContent = `${currentStep + 1} / ${steps.length}`;
+
+    backButton.disabled = currentStep === 0;
+    nextButton.hidden = currentStep === steps.length - 1;
+    submitButton.hidden = currentStep !== steps.length - 1;
+    nextButton.classList.toggle("hidden", currentStep === steps.length - 1);
+    submitButton.classList.toggle("hidden", currentStep !== steps.length - 1);
+  }
+
+  function validateStep(stepIndex) {
+    const panel = stepPanels[stepIndex];
+    const controls = Array.from(panel.querySelectorAll("input:not(:disabled), select:not(:disabled), textarea:not(:disabled)"));
+    const invalidControl = controls.find((control) => !control.checkValidity());
+
+    if (invalidControl) {
+      invalidControl.reportValidity();
+      invalidControl.focus({ preventScroll: true });
+      invalidControl.scrollIntoView({ block: "center", behavior: "smooth" });
+      showToast("warning", "Please complete the highlighted field.");
+      return false;
+    }
+
+    return true;
+  }
+
+  function setFieldVisible(field, isVisible) {
+    if (!field) return;
+
+    field.hidden = !isVisible;
+    field.classList.toggle("hidden", !isVisible);
+  }
+
+  function getCurrentDateTimeLocalValue() {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    return now.toISOString().slice(0, 16);
+  }
+
+  function setVisitDateToNow() {
+    if (dateOfVisitInput && !dateOfVisitInput.value) {
+      dateOfVisitInput.value = getCurrentDateTimeLocalValue();
+    }
+  }
+
+  function setControlState(control, isEnabled, isRequired) {
+    if (!control) return;
+
+    control.disabled = !isEnabled;
+    control.required = isEnabled && isRequired;
+  }
+
+  function setSelectFieldVisible(field, select, isVisible, isRequired) {
+    setFieldVisible(field, isVisible);
+    setControlState(select, isVisible, isRequired);
+
+    if (!isVisible && select) {
+      select.value = "";
+    }
+  }
+
+  function setZonalHeadFieldsVisible(isVisible) {
+    zonalHeadFields.forEach((field) => {
+      setFieldVisible(field, isVisible);
+    });
+
+    setControlState(zonalHeadInstituteSelect, isVisible, true);
+    setControlState(zonalHeadNameInput, isVisible, false);
+    setControlState(zonalHeadContactInput, isVisible, false);
+
+    if (!isVisible) {
+      if (zonalHeadInstituteSelect) zonalHeadInstituteSelect.value = "";
+      if (zonalHeadNameInput) zonalHeadNameInput.value = "";
+      if (zonalHeadContactInput) zonalHeadContactInput.value = "";
+    }
+  }
+
+  function setAeoFieldVisible(isVisible) {
+    setFieldVisible(aeoField, isVisible);
+    setControlState(aeoSelect, isVisible, true);
+
+    if (!isVisible && aeoSelect) {
+      aeoSelect.innerHTML = "";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Select wing first";
+      aeoSelect.appendChild(placeholder);
+    }
+  }
+
+  function populateAeoOptions(sourceWing, contextLabel) {
+    const currentValue = aeoSelect.value;
+    const matchingAeos = aeoOptions.filter((aeo) => aeo.wing === sourceWing);
+
+    aeoSelect.innerHTML = "";
+
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Select AEO";
+    aeoSelect.appendChild(placeholder);
+
+    matchingAeos.forEach((aeo) => {
+      const option = document.createElement("option");
+      option.value = aeo.name;
+      option.textContent = `${aeo.name} - ${aeo.tehsil} / ${aeo.markaz}`;
+      option.dataset.tehsil = aeo.tehsil;
+      option.dataset.markaz = aeo.markaz;
+      aeoSelect.appendChild(option);
+    });
+
+    if (matchingAeos.some((aeo) => aeo.name === currentValue)) {
+      aeoSelect.value = currentValue;
+    }
+
+    if (aeoSelectHint) {
+      aeoSelectHint.textContent = `${matchingAeos.length} AEO option${matchingAeos.length === 1 ? "" : "s"} available for ${contextLabel}.`;
+    }
+  }
+
+  function updateAeoOptions() {
+    if (!wingSelect || !aeoSelect) return;
+
+    const selectedWing = wingSelect.value;
+    const seSubmittedBy = seSubmittedBySelect?.value || "";
+    const seAeoWing = seAeoWingSelect?.value || "";
+
+    setZonalHeadFieldsVisible(false);
+    setAeoFieldVisible(false);
+
+    if (!selectedWing) {
+      setSelectFieldVisible(seSubmittedByField, seSubmittedBySelect, false, false);
+      setSelectFieldVisible(seAeoWingField, seAeoWingSelect, false, false);
+
+      if (aeoSelectHint) {
+        aeoSelectHint.textContent = "Select wing first.";
+      }
+
+      return;
+    }
+
+    if (selectedWing === "MEE" || selectedWing === "WEE") {
+      setSelectFieldVisible(seSubmittedByField, seSubmittedBySelect, false, false);
+      setSelectFieldVisible(seAeoWingField, seAeoWingSelect, false, false);
+      setAeoFieldVisible(true);
+      populateAeoOptions(selectedWing, selectedWing);
+      return;
+    }
+
+    if (selectedWing !== "SE") return;
+
+    setSelectFieldVisible(seSubmittedByField, seSubmittedBySelect, true, true);
+
+    if (seSubmittedBy === "Zonal Head") {
+      setSelectFieldVisible(seAeoWingField, seAeoWingSelect, false, false);
+      setZonalHeadFieldsVisible(true);
+
+      if (aeoSelectHint) {
+        aeoSelectHint.textContent = "SE wing record will be submitted by zonal head.";
+      }
+
+      return;
+    }
+
+    if (seSubmittedBy === "AEO") {
+      setSelectFieldVisible(seAeoWingField, seAeoWingSelect, true, true);
+
+      if (seAeoWing === "MEE" || seAeoWing === "WEE") {
+        setAeoFieldVisible(true);
+        populateAeoOptions(seAeoWing, `${seAeoWing} AEO submitting SE`);
+        return;
+      }
+
+      if (aeoSelectHint) {
+        aeoSelectHint.textContent = "Select MEE or WEE AEO wing.";
+      }
+
+      return;
+    }
+
+    setSelectFieldVisible(seAeoWingField, seAeoWingSelect, false, false);
+
+    if (aeoSelectHint) {
+      aeoSelectHint.textContent = "Select who is submitting the SE wing record.";
+    }
+  }
+
+  function updateZonalHeadDetails() {
+    if (!zonalHeadInstituteSelect || !zonalHeadNameInput || !zonalHeadContactInput) return;
+
+    const selectedInstitute = zonalHeadInstituteSelect.value;
+    const matchedHead = zonalHeadOptions.find((option) => option.institute === selectedInstitute);
+
+    zonalHeadNameInput.value = matchedHead?.headName || "";
+    zonalHeadContactInput.value = matchedHead?.headPhone || "";
+  }
+
+  function setLocationStatus(message, tone = "neutral") {
+    if (!locationStatus) return;
+
+    const toneClasses = {
+      neutral: "border-slate-200 bg-slate-50 text-slate-600",
+      success: "border-emerald-200 bg-emerald-50 text-emerald-800",
+      warning: "border-amber-200 bg-amber-50 text-amber-800",
+      error: "border-rose-200 bg-rose-50 text-rose-800",
+    };
+
+    locationStatus.className = `rounded-xl border px-3 py-2 text-sm font-semibold ${toneClasses[tone]}`;
+    locationStatus.textContent = message;
+  }
+
+  function extractCoordinatesFromLocationText(value) {
+    const text = String(value || "").trim();
+    const coordinatePatterns = [
+      /@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/,
+      /[?&](?:q|query|ll)=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/,
+      /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/,
+      /^(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)$/,
+    ];
+
+    for (const pattern of coordinatePatterns) {
+      const match = text.match(pattern);
+      if (!match) continue;
+
+      const latitude = Number(match[1]);
+      const longitude = Number(match[2]);
+
+      if (
+        Number.isFinite(latitude) &&
+        Number.isFinite(longitude) &&
+        Math.abs(latitude) <= 90 &&
+        Math.abs(longitude) <= 180
+      ) {
+        return `${latitude.toFixed(7)},${longitude.toFixed(7)}`;
+      }
+    }
+
+    return "";
+  }
+
+  function updateLocationFromLink() {
+    if (!locationLinkInput || !openMapsButton) return;
+
+    const value = locationLinkInput.value.trim();
+    const defaultMapsUrl = openMapsButton.dataset.defaultMapsUrl || "https://www.google.com/maps";
+    const coordinates = extractCoordinatesFromLocationText(value);
+
+    if (hiddenCoordinatesInput) {
+      hiddenCoordinatesInput.value = coordinates;
+    }
+
+    if (value.startsWith("http")) {
+      openMapsButton.href = value;
+    } else {
+      openMapsButton.href = defaultMapsUrl;
+    }
+
+    if (!value) {
+      setLocationStatus("Paste the shared Google Maps link for the institute location.");
+    } else if (coordinates) {
+      setLocationStatus(`Coordinates found in pasted link: ${coordinates}.`, "success");
+    } else {
+      setLocationStatus("Location link saved.", "success");
+    }
+  }
+
+  function readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.addEventListener("load", () => resolve(String(reader.result)));
+      reader.addEventListener("error", () => reject(new Error("Unable to read selected image.")));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function validateImageFile(input) {
+    const fieldLabel = input.closest(".survey-field")?.querySelector(".survey-label")?.textContent?.replace("*", "").trim() || "Image";
+    const file = input.files?.[0];
+
+    if (!file) {
+      return "";
+    }
+
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      return `${fieldLabel} must be a JPG, PNG, or WEBP image.`;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      return `${fieldLabel} must be 2 MB or smaller.`;
+    }
+
+    return "";
+  }
+
+  async function readApiError(response, fallback) {
+    try {
+      const body = await response.json();
+      return body.error || body.message || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  backButton.addEventListener("click", () => updateStep(currentStep - 1));
+
+  nextButton.addEventListener("click", () => {
+    updateStep(currentStep + 1);
+    surveyForm.scrollIntoView({ block: "start", behavior: "smooth" });
+  });
+
+  stepButtons.forEach((button, index) => {
+    button.addEventListener("click", () => {
+      updateStep(index);
+    });
+  });
+
+  wingSelect?.addEventListener("change", updateAeoOptions);
+  seSubmittedBySelect?.addEventListener("change", updateAeoOptions);
+  seAeoWingSelect?.addEventListener("change", updateAeoOptions);
+  zonalHeadInstituteSelect?.addEventListener("change", updateZonalHeadDetails);
+  locationLinkInput?.addEventListener("input", updateLocationFromLink);
+  locationLinkInput?.addEventListener("change", updateLocationFromLink);
+
+  surveyForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setVisitDateToNow();
+
+    for (let index = 0; index < steps.length; index += 1) {
+      updateStep(index);
+      if (!validateStep(index)) {
+        return;
+      }
+    }
+
+    const formData = new FormData(surveyForm);
+    const payload = Object.fromEntries(formData.entries());
+
+    for (const imageInput of imageInputs) {
+      const validationError = validateImageFile(imageInput);
+      if (validationError) {
+        await Swal.fire({
+          icon: "warning",
+          title: "Review image",
+          text: validationError,
+          confirmButtonText: "Review image",
+          confirmButtonColor: "#0f172a",
+        });
+        imageInput.focus({ preventScroll: true });
+        imageInput.scrollIntoView({ block: "center", behavior: "smooth" });
+        return;
+      }
+
+      const fieldName = imageInput.dataset.imageField;
+      const file = imageInput.files?.[0];
+      if (file) {
+        payload[`${fieldName}_base64`] = await readFileAsBase64(file);
+        payload[`${fieldName}_file_name`] = file.name;
+      }
+      delete payload[`${fieldName}_file`];
+    }
+
+    submitButton.disabled = true;
+    submitButton.classList.add("loading");
+
+    Swal.fire({
+      title: "Submitting survey",
+      text: "Saving the record to the district survey database.",
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+      didOpen: () => Swal.showLoading(),
+    });
+
+    try {
+      const response = await fetch("/api/survey", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorMessage = await readApiError(response, "Unable to submit survey.");
+        await Swal.fire({
+          icon: response.status === 400 ? "warning" : "error",
+          title: "Submission failed",
+          text: errorMessage,
+          confirmButtonText: "Review form",
+          confirmButtonColor: "#0f172a",
+        });
+        return;
+      }
+
+      const result = await response.json();
+      await Swal.fire({
+        icon: "success",
+        title: "Survey submitted",
+        text: `${result.institution_name || "The institute"} has been added to the survey records.`,
+        confirmButtonText: "Add another record",
+        confirmButtonColor: "#059669",
+      });
+
+      surveyForm.reset();
+      setVisitDateToNow();
+      updateAeoOptions();
+      updateZonalHeadDetails();
+      updateLocationFromLink();
+      updateStep(0);
+      surveyForm.scrollIntoView({ block: "start", behavior: "smooth" });
+    } catch {
+      await Swal.fire({
+        icon: "error",
+        title: "Network error",
+        text: "Please check the connection and try again.",
+        confirmButtonText: "Close",
+        confirmButtonColor: "#0f172a",
+      });
+    } finally {
+      submitButton.disabled = false;
+      submitButton.classList.remove("loading");
+    }
+  });
+
+  setVisitDateToNow();
+  updateAeoOptions();
+  updateZonalHeadDetails();
+  updateLocationFromLink();
+  updateStep(0);
+</script>
+
+<style is:global>
+  .survey-field {
+    display: grid;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+
+  .step-panel {
+    display: grid;
+    gap: 1.25rem;
+  }
+
+  .step-panel.hidden {
+    display: none;
+  }
+
+  .step-panel[hidden],
+  .survey-field[hidden],
+  .facility-field[hidden] {
+    display: none !important;
+  }
+
+  .survey-label,
+  .facility-field legend {
+    color: rgb(51 65 85);
+    font-size: 0.875rem;
+    font-weight: 800;
+    line-height: 1.3;
+  }
+
+  .survey-label span,
+  .facility-field legend span {
+    color: rgb(220 38 38);
+  }
+
+  .survey-input,
+  .survey-textarea,
+  .survey-file-input {
+    width: 100%;
+    border: 1px solid rgb(203 213 225);
+    border-radius: 0.875rem;
+    background: rgb(248 250 252);
+    color: rgb(15 23 42);
+    font-size: 1rem;
+    min-height: 3.25rem;
+    padding: 0.8rem 1rem;
+    outline: none;
+    transition:
+      border-color 160ms ease,
+      box-shadow 160ms ease,
+      background-color 160ms ease;
+  }
+
+  .survey-textarea {
+    min-height: 7rem;
+    resize: vertical;
+  }
+
+  .survey-input:focus,
+  .survey-textarea:focus,
+  .survey-file-input:focus {
+    border-color: rgb(2 132 199);
+    background: white;
+    box-shadow: 0 0 0 4px rgb(14 165 233 / 0.16);
+  }
+
+  .survey-file-input {
+    cursor: pointer;
+    padding: 0.65rem 0.8rem;
+  }
+
+  .survey-file-input::file-selector-button {
+    margin-right: 0.85rem;
+    min-height: 2.25rem;
+    border: 0;
+    border-radius: 0.7rem;
+    background: rgb(15 23 42);
+    color: white;
+    cursor: pointer;
+    font-weight: 900;
+    padding: 0 0.95rem;
+  }
+
+  .survey-input:invalid:not(:placeholder-shown),
+  .survey-textarea:invalid:not(:placeholder-shown),
+  .survey-file-input:invalid {
+    border-color: rgb(248 113 113);
+  }
+
+  .facility-field {
+    min-width: 0;
+    border: 1px solid rgb(226 232 240);
+    border-radius: 1rem;
+    background: rgb(248 250 252);
+    padding: 1rem;
+  }
+
+  .facility-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    margin-top: 0.85rem;
+  }
+
+  .facility-options label {
+    cursor: pointer;
+  }
+
+  .facility-options input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .facility-options span {
+    display: grid;
+    min-height: 2.75rem;
+    place-items: center;
+    border: 1px solid rgb(203 213 225);
+    border-radius: 0.75rem;
+    background: white;
+    color: rgb(51 65 85);
+    font-weight: 900;
+    transition:
+      border-color 160ms ease,
+      background-color 160ms ease,
+      color 160ms ease,
+      box-shadow 160ms ease;
+  }
+
+  .facility-options input:checked + span {
+    border-color: rgb(5 150 105);
+    background: rgb(209 250 229);
+    color: rgb(6 95 70);
+    box-shadow: 0 0 0 3px rgb(16 185 129 / 0.16);
+  }
+
+  .facility-options input:focus-visible + span {
+    box-shadow: 0 0 0 4px rgb(14 165 233 / 0.18);
+  }
+
+  @media (max-width: 640px) {
+    .step-button {
+      padding: 0.65rem;
+    }
+
+    .step-button span:last-child span:last-child {
+      display: none;
+    }
+  }
+</style>

@@ -1,0 +1,80 @@
+    <section id="markView" class="grid two">
+      <div class="panel">
+        <div class="session-strip">
+          <span id="sessionStatus">No saved session selected.</span>
+          <button id="resetSessionBtn" type="button" style="min-height: 28px; padding: 4px 8px;">Reset</button>
+        </div>
+        <div class="field">
+          <label for="center">Center</label>
+          <select id="center"></select>
+        </div>
+        <div class="field">
+          <label for="batch">Batch</label>
+          <select id="batch"></select>
+        </div>
+        <div class="field">
+          <label for="slot">Slot</label>
+          <select id="slot"></select>
+        </div>
+        <div class="field">
+          <label for="attendanceDate">Attendance Date</label>
+          <input id="attendanceDate" type="date">
+        </div>
+        <div class="field">
+          <label for="cnic">Candidate CNIC</label>
+          <input id="cnic" inputmode="numeric" autocomplete="off" placeholder="3520100000000">
+        </div>
+        <div class="actions">
+          <button class="primary" id="searchBtn" type="button">Search</button>
+          <button class="success" id="markBtn" type="button" disabled>Mark Present</button>
+          <button id="loadBulkBtn" type="button">Load Bulk</button>
+        </div>
+        <div id="markNotice" class="notice"></div>
+      </div>
+
+      <div class="panel candidate" id="candidatePanel">
+        <div class="success-banner" id="successBanner"></div>
+        <div class="actions" style="justify-content: space-between; margin-top: 0;">
+          <h2 style="font-size: 18px; margin: 0;">Candidate Details</h2>
+          <span class="muted" id="candidateCnic"></span>
+        </div>
+        <div class="kv" id="candidateDetails"></div>
+        <div style="margin-top: 14px;">
+          <div class="actions" style="justify-content: space-between; margin: 0 0 8px;">
+            <h3 style="font-size: 15px; margin: 0;">Previous Attendance</h3>
+            <span class="muted" id="historyCount"></span>
+          </div>
+          <div class="table-wrap"><table id="candidateHistory" class="compact-table"></table></div>
+        </div>
+        <div class="field" style="margin-top: 12px;">
+          <label for="notes">Notes</label>
+          <textarea id="notes"></textarea>
+        </div>
+      </div>
+
+      <div class="panel full hidden" id="bulkPanel">
+        <div class="bulk-summary">
+          <div>
+            <h2 style="font-size: 18px; margin: 0;">Bulk Attendance</h2>
+            <div class="muted" id="bulkContext"></div>
+          </div>
+          <div class="actions">
+            <span class="pill" id="bulkTotal">Total 0</span>
+            <span class="pill present" id="bulkPresent">Present 0</span>
+            <span class="pill absent" id="bulkAbsent">Absent 0</span>
+          </div>
+        </div>
+        <div class="actions" style="justify-content: space-between; margin-bottom: 10px;">
+          <div class="actions">
+            <button id="allPresentBtn" type="button">All Present</button>
+            <button id="allAbsentBtn" type="button">All Absent</button>
+          </div>
+          <div style="display:flex; gap:8px; min-width:min(100%, 360px);">
+            <input id="bulkFilter" placeholder="Filter by name, CNIC, school">
+            <button class="success" id="submitBulkBtn" type="button">Submit Bulk</button>
+          </div>
+        </div>
+        <div id="bulkNotice" class="notice"></div>
+        <div class="table-wrap"><table id="bulkTable" class="compact-table"></table></div>
+      </div>
+    </section>

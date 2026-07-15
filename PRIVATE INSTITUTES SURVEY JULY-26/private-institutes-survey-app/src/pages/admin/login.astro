@@ -1,0 +1,55 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import "../../styles/global.css";
+import { SignIn } from "@clerk/astro/components";
+import { getPrimaryEmail, getApprovedAdminEmails, isAuthEnabled } from "../../lib/admin-auth";
+
+export const prerender = false;
+
+const authEnabled = isAuthEnabled();
+
+if (!authEnabled) {
+  return Astro.redirect("/admin");
+}
+
+const auth = Astro.locals.auth();
+
+if (auth.isAuthenticated) {
+  const user = await Astro.locals.currentUser();
+  const email = getPrimaryEmail(user);
+
+  if (email && getApprovedAdminEmails().includes(email)) {
+    return Astro.redirect("/admin");
+  }
+
+  return Astro.redirect("/admin/unauthorized");
+}
+---
+
+<Layout>
+  <main class="min-h-screen bg-base-300 px-4 py-8 text-base-content sm:px-6 lg:px-8" data-theme="night">
+    <section class="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-2xl flex-col justify-center">
+      <div class="card border border-base-content/10 bg-base-100 shadow-2xl">
+        <div class="card-body items-center gap-6 p-6 text-center sm:p-10">
+          <div class="space-y-2">
+            <div class="badge badge-primary badge-lg">Admin Login</div>
+            <h1 class="text-3xl font-bold tracking-normal">Survey Dashboard Access</h1>
+            <p class="text-base-content/70">
+              Sign in with an approved Gmail account to view private institutes survey records.
+            </p>
+          </div>
+
+          <div class="w-full max-w-md">
+            {authEnabled && (
+              <SignIn
+                fallbackRedirectUrl="/admin"
+                signUpFallbackRedirectUrl="/admin"
+                routing="hash"
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</Layout>

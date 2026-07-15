@@ -1,0 +1,77 @@
+<section id="reportsView" class="grid hidden">
+  <div class="panel">
+    <div class="bulk-summary">
+      <div>
+        <h2 style="font-size: 18px; margin: 0;">Reports</h2>
+        <div class="muted">Generate previews and Excel exports</div>
+      </div>
+      <div class="actions">
+        <button class="tab active" id="reportAbsenceType" type="button" data-report-type="absence">Absence</button>
+        <button class="tab" id="reportSummaryType" type="button" data-report-type="attendanceSummary">Summary</button>
+        <button class="tab" id="reportAdjustedInType" type="button" data-report-type="adjustedIn">Adjusted In</button>
+        <button class="tab" id="reportAdjustedOutType" type="button" data-report-type="adjustedOut">Adjusted Out</button>
+        <button class="tab" id="reportMovementType" type="button" data-report-type="movementHistory">Movement</button>
+      </div>
+    </div>
+
+    <div class="grid three">
+      <div class="field">
+        <label for="reportDateFrom">From Date</label>
+        <input id="reportDateFrom" type="date">
+      </div>
+      <div class="field">
+        <label for="reportDateTo">To Date</label>
+        <input id="reportDateTo" type="date">
+      </div>
+      <div class="field">
+        <label for="reportStatus">Status</label>
+        <select id="reportStatus">
+          <option value="absent">Absent + Not Marked</option>
+          <option value="all">All statuses</option>
+          <option value="present">Present only</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="grid three">
+      <div class="field">
+        <label for="reportCenter">Center</label>
+        <select id="reportCenter"></select>
+      </div>
+      <div class="field">
+        <label for="reportBatch">Batch</label>
+        <select id="reportBatch"></select>
+      </div>
+      <div class="field">
+        <label for="reportSlot">Slot</label>
+        <select id="reportSlot"></select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="reportQuery">Search</label>
+      <input id="reportQuery" placeholder="CNIC, name, school, center, email">
+    </div>
+
+    <div class="actions">
+      <button class="primary" id="previewReportBtn" type="button">Generate Preview</button>
+      <button class="success" id="exportReportBtn" type="button">Export Excel</button>
+      <button id="clearReportFiltersBtn" type="button">Clear Filters</button>
+    </div>
+    <div id="reportNotice" class="notice"></div>
+  </div>
+
+  <div class="grid three">
+    <div class="metric"><span class="muted">Total Rows</span><strong id="reportMetricRows">0</strong></div>
+    <div class="metric"><span class="muted">Preview Rows</span><strong id="reportMetricPreview">0</strong></div>
+    <div class="metric"><span class="muted">Report</span><strong id="reportMetricType" style="font-size: 18px;">Absence</strong></div>
+  </div>
+
+  <div class="panel">
+    <div class="actions" style="justify-content: space-between; margin-top: 0;">
+      <h2 style="font-size: 17px; margin: 0;" id="reportPreviewTitle">Report Preview</h2>
+      <span class="muted" id="reportPreviewCount">No preview generated</span>
+    </div>
+    <div class="table-wrap"><table id="reportPreviewTable" class="compact-table"></table></div>
+  </div>
+</section>

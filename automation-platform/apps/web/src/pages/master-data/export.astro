@@ -1,0 +1,16 @@
+---
+import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
+---
+
+<MasterDataLayout title="Export Master Data" description="Download current schools and officer records as portable CSV files." page="export">
+  <div class="export-grid">
+    <article class="export-card"><h3>Schools</h3><p>All active and archived schools with hierarchy references, heads, and metadata.</p><a class="btn btn-sm btn-primary" id="export-schools" style="margin-top:15px">↓ Download schools CSV</a></article>
+    <article class="export-card"><h3>Officers</h3><p>All AEO and DDEO records with roles, contacts, and administrative references.</p><a class="btn btn-sm btn-primary" id="export-officers" style="margin-top:15px">↓ Download officers CSV</a></article>
+  </div>
+  <p class="notice" style="margin-top:15px">Exports include relation IDs and can be validated or re-imported through the Import page.</p>
+  <script>
+    const API = import.meta.env.PUBLIC_API_BASE_URL || "http://localhost:8020";
+    (document.getElementById("export-schools") as HTMLAnchorElement).href = `${API}/api/v1/master-data/exports/schools.csv`;
+    (document.getElementById("export-officers") as HTMLAnchorElement).href = `${API}/api/v1/master-data/exports/officers.csv`;
+  </script>
+</MasterDataLayout>

@@ -1,0 +1,19 @@
+---
+interface Props {
+  id: string;
+  active: "overview" | "deliveries" | "issues" | "artifacts";
+}
+
+const { id, active } = Astro.props;
+const root = `/whatsapp/previews/${id}`;
+const links = [
+  ["overview", "Overview", root],
+  ["deliveries", "Planned deliveries", `${root}/deliveries`],
+  ["issues", "Validation issues", `${root}/issues`],
+  ["artifacts", "Attachments", `${root}/artifacts`],
+];
+---
+
+<nav class="preview-tabs" aria-label="Dispatch preview pages">
+  {links.map(([key, label, href]) => <a class:list={{ active: active === key }} href={href}>{label}</a>)}
+</nav>

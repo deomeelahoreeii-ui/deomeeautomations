@@ -1,0 +1,10 @@
+node_modules/
+.env
+.pnpm-store/
+auth_info_baileys/
+data/*
+!data/.gitkeep
+logs/
+*.log
+*.tmp
+*.cache

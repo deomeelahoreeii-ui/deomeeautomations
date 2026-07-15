@@ -1,0 +1,273 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import "../../styles/global.css";
+import { isAuthEnabled, requireApprovedAdmin } from "../../lib/admin-auth";
+import {
+  buildAeoRecordsUrl,
+  getAeoRecords,
+  parseAeoRecordFilter,
+  type AeoRecordRow,
+} from "../../lib/admin-aeo-distribution";
+import { getDb } from "../../lib/d1";
+
+export const prerender = false;
+
+const adminAuth = await requireApprovedAdmin(Astro);
+if (!adminAuth.authorized) {
+  return adminAuth.response;
+}
+
+const authEnabled = isAuthEnabled();
+const db = getDb(Astro);
+const requestUrl = new URL(Astro.request.url);
+const filter = parseAeoRecordFilter(requestUrl.searchParams);
+const records = filter ? await getAeoRecords(db, filter) : [];
+const csvUrl = filter ? `${buildAeoRecordsUrl("/api/admin/aeo-records", filter)}&format=csv` : "";
+
+function displayValue(value: unknown): string {
+  const cleaned = String(value ?? "").trim();
+  return cleaned.length > 0 ? cleaned : "Not available";
+}
+
+function formatNumber(value: unknown): string {
+  const number = Number(value ?? 0);
+  return new Intl.NumberFormat("en-PK").format(Number.isFinite(number) ? number : 0);
+}
+
+function formatDate(value: unknown): string {
+  const cleaned = String(value ?? "").trim();
+  if (!cleaned) return "Not available";
+
+  const date = new Date(cleaned);
+  if (Number.isNaN(date.getTime())) return cleaned;
+
+  return new Intl.DateTimeFormat("en-PK", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function getMapHref(record: AeoRecordRow): string {
+  const link = String(record.location_link_pin ?? "").trim();
+  if (link.startsWith("http://") || link.startsWith("https://")) return link;
+
+  const coordinates = String(record.hidden_location_coordinates ?? "").trim();
+  if (coordinates) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coordinates)}`;
+
+  return "";
+}
+
+function hasFacilityGap(record: AeoRecordRow): boolean {
+  return Number(record.facility_gap ?? 0) > 0;
+}
+
+function buildDashboardSearchUrl(record: AeoRecordRow): string {
+  const params = new URLSearchParams();
+  params.set("search", displayValue(record.institution_name));
+  params.set("pageSize", "25");
+
+  return `/admin?${params.toString()}`;
+}
+
+const totalStudents = records.reduce((sum, record) => sum + Number(record.no_of_students ?? 0), 0);
+const totalTeachers = records.reduce((sum, record) => sum + Number(record.no_of_teachers ?? 0), 0);
+const registeredRecords = records.filter((record) => record.registration_status === "Registered").length;
+const issueRecords = records.filter((record) =>
+  record.registration_status === "Unregistered" ||
+  record.registration_status === "Expired" ||
+  hasFacilityGap(record)
+).length;
+const titleName = filter?.aeoName ?? "AEO records";
+const titleWing = filter?.reportingWing ?? "Not selected";
+---
+
+<Layout>
+  <main class="min-h-screen bg-[#f3f6fb] px-4 py-5 text-slate-950 sm:px-6 lg:px-8">
+    <section class="mx-auto w-full max-w-7xl space-y-5">
+      <header class="overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-sm">
+        <div class="grid gap-0 xl:grid-cols-[1fr_auto]">
+          <div class="px-5 py-6 sm:px-7">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-sky-100 px-3 py-1 text-xs font-black uppercase tracking-wide text-sky-800">Admin</span>
+              <span class="rounded-full bg-indigo-100 px-3 py-1 text-xs font-black uppercase tracking-wide text-indigo-800">AEO Records</span>
+              {!authEnabled && (
+                <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-black uppercase tracking-wide text-amber-800">Auth disabled</span>
+              )}
+            </div>
+            <h1 class="mt-4 text-3xl font-black tracking-normal text-slate-950 sm:text-4xl">
+              {displayValue(titleName)}
+            </h1>
+            <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600 sm:text-base">
+              Institute records submitted under the {displayValue(titleWing)} reporting wing.
+            </p>
+          </div>
+          <div class="flex flex-wrap items-end gap-2 border-t border-slate-200 bg-slate-950 px-5 py-5 xl:border-l xl:border-t-0 xl:px-6">
+            <a class="btn min-h-11 rounded-xl border-white/10 bg-white/10 text-white hover:bg-white/20" href="/admin/aeo-distribution">
+              Back to AEO Wise
+            </a>
+            {filter && (
+              <a class="btn min-h-11 rounded-xl border-0 bg-sky-500 text-white hover:bg-sky-600" href={csvUrl}>
+                Download CSV
+              </a>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {!filter ? (
+        <section class="rounded-[1.25rem] border border-amber-200 bg-amber-50 p-6 shadow-sm">
+          <h2 class="text-xl font-black text-amber-950">Select an AEO group first</h2>
+          <p class="mt-2 text-sm font-semibold leading-6 text-amber-800">
+            Open this page from the AEO-wise distribution table so the exact AEO and reporting wing can be selected.
+          </p>
+          <a class="btn mt-4 min-h-11 rounded-xl border-0 bg-slate-950 text-white hover:bg-slate-800" href="/admin/aeo-distribution">
+            Open AEO distribution
+          </a>
+        </section>
+      ) : (
+        <>
+          <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+            <div class="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
+              <div class="text-sm font-bold text-slate-500">Submitted Records</div>
+              <div class="mt-3 text-4xl font-black text-slate-950">{formatNumber(records.length)}</div>
+            </div>
+            <div class="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
+              <div class="text-sm font-bold text-slate-500">Students</div>
+              <div class="mt-3 text-4xl font-black text-sky-700">{formatNumber(totalStudents)}</div>
+            </div>
+            <div class="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
+              <div class="text-sm font-bold text-slate-500">Teachers</div>
+              <div class="mt-3 text-4xl font-black text-indigo-700">{formatNumber(totalTeachers)}</div>
+            </div>
+            <div class="rounded-[1.25rem] border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+              <div class="text-sm font-bold text-emerald-700">Registered</div>
+              <div class="mt-3 text-4xl font-black text-emerald-900">{formatNumber(registeredRecords)}</div>
+            </div>
+            <div class="rounded-[1.25rem] border border-rose-200 bg-rose-50 p-5 shadow-sm">
+              <div class="text-sm font-bold text-rose-700">Attention Records</div>
+              <div class="mt-3 text-4xl font-black text-rose-900">{formatNumber(issueRecords)}</div>
+            </div>
+          </section>
+
+          <section class="rounded-[1.25rem] border border-slate-200 bg-white shadow-sm">
+            <div class="flex flex-col gap-3 border-b border-slate-200 p-5 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p class="text-xs font-black uppercase tracking-wide text-sky-700">Records</p>
+                <h2 class="mt-1 text-2xl font-black tracking-normal">Submitted Institutes</h2>
+                <p class="mt-1 text-sm font-semibold text-slate-500">
+                  {formatNumber(records.length)} institute record{records.length === 1 ? "" : "s"} for {displayValue(titleName)}.
+                </p>
+              </div>
+              <a class="btn min-h-11 rounded-xl border-slate-300 bg-white px-4 text-slate-700 hover:bg-slate-100" href={csvUrl}>
+                Download table
+              </a>
+            </div>
+
+            <div class="overflow-x-auto">
+              <table class="w-full min-w-[1180px] text-left text-sm">
+                <thead>
+                  <tr class="border-b border-slate-200 bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-500">
+                    <th class="px-5 py-3">#</th>
+                    <th class="px-3 py-3">Institute</th>
+                    <th class="px-3 py-3">Type</th>
+                    <th class="px-3 py-3">Tehsil</th>
+                    <th class="px-3 py-3">Status</th>
+                    <th class="px-3 py-3">Coverage</th>
+                    <th class="px-3 py-3">Facilities</th>
+                    <th class="px-3 py-3">Submitted</th>
+                    <th class="px-5 py-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {records.length === 0 ? (
+                    <tr>
+                      <td class="px-5 py-8 text-slate-500" colspan="9">No institute records found for this AEO group.</td>
+                    </tr>
+                  ) : (
+                    records.map((record, index) => {
+                      const facilityGap = hasFacilityGap(record);
+                      const mapHref = getMapHref(record);
+                      return (
+                        <tr class="border-b border-slate-100 align-top last:border-0">
+                          <th class="px-5 py-4 text-slate-500">{index + 1}</th>
+                          <td class="min-w-80 px-3 py-4">
+                            <div class="font-black leading-snug text-slate-950">{displayValue(record.institution_name)}</div>
+                            <div class="mt-1 text-xs leading-5 text-slate-500">{displayValue(record.complete_address)}</div>
+                            <div class="mt-2 flex flex-wrap gap-1.5 text-xs font-bold">
+                              <span class="rounded-full bg-slate-100 px-2 py-1 text-slate-600">UC: {displayValue(record.union_council_name)}</span>
+                              <span class="rounded-full bg-slate-100 px-2 py-1 text-slate-600">PP {displayValue(record.pp_no)}</span>
+                              <span class="rounded-full bg-slate-100 px-2 py-1 text-slate-600">NA {displayValue(record.na_no)}</span>
+                            </div>
+                          </td>
+                          <td class="px-3 py-4">
+                            <span class="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-black text-sky-800">
+                              {displayValue(record.institute_type)}
+                            </span>
+                          </td>
+                          <td class="px-3 py-4 font-bold">{displayValue(record.tehsil)}</td>
+                          <td class="min-w-48 px-3 py-4">
+                            <span class:list={[
+                              "rounded-full px-2.5 py-1 text-xs font-black",
+                              record.registration_status === "Registered" ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800",
+                            ]}>
+                              {displayValue(record.registration_status)}
+                            </span>
+                            <div class="mt-2 text-xs leading-5 text-slate-500">License: {displayValue(record.registration_license_no)}</div>
+                            <div class="text-xs leading-5 text-slate-500">Building: {displayValue(record.building_status)} / {displayValue(record.building_ownership)}</div>
+                          </td>
+                          <td class="px-3 py-4 leading-6">
+                            <div>Students: <span class="font-black">{formatNumber(record.no_of_students)}</span></div>
+                            <div>Teachers: <span class="font-black">{formatNumber(record.no_of_teachers)}</span></div>
+                            <div class="text-xs text-slate-500">Rooms: {formatNumber(record.no_of_classrooms)}</div>
+                          </td>
+                          <td class="min-w-56 px-3 py-4 text-xs leading-5">
+                            <span class:list={[
+                              "rounded-full px-2.5 py-1 text-xs font-black",
+                              facilityGap ? "bg-rose-100 text-rose-800" : "bg-emerald-100 text-emerald-800",
+                            ]}>
+                              {facilityGap ? "Gap found" : "No gap marked"}
+                            </span>
+                            <div class="mt-2 text-slate-500">Water {displayValue(record.drinking_water_facility)} / Fire {displayValue(record.fire_safety_available)}</div>
+                            <div class="text-slate-500">CCTV {displayValue(record.cctv_installed)} / Ramp {displayValue(record.ramp_available)}</div>
+                          </td>
+                          <td class="min-w-44 px-3 py-4 text-slate-600">
+                            <div class="font-bold text-slate-900">{formatDate(record.submitted_at)}</div>
+                            <div class="mt-1 text-xs text-slate-500">Visit: {formatDate(record.date_of_visit_report)}</div>
+                          </td>
+                          <td class="px-5 py-4">
+                            <div class="flex min-w-36 flex-col gap-2">
+                              <a class="rounded-lg bg-slate-950 px-3 py-2 text-center text-xs font-black text-white hover:bg-slate-800" href={buildDashboardSearchUrl(record)}>
+                                Dashboard
+                              </a>
+                              {mapHref ? (
+                                <a class="rounded-lg bg-sky-100 px-3 py-2 text-center text-xs font-black text-sky-800 hover:bg-sky-200" href={mapHref} rel="noopener noreferrer" target="_blank">
+                                  Map
+                                </a>
+                              ) : (
+                                <span class="rounded-lg bg-slate-100 px-3 py-2 text-center text-xs font-black text-slate-500">No map</span>
+                              )}
+                              {record.outside_main_gate_image_url && (
+                                <a class="rounded-lg bg-indigo-100 px-3 py-2 text-center text-xs font-black text-indigo-800 hover:bg-indigo-200" href={record.outside_main_gate_image_url} rel="noopener noreferrer" target="_blank">
+                                  Gate Image
+                                </a>
+                              )}
+                              {record.inside_institute_image_url && (
+                                <a class="rounded-lg bg-indigo-100 px-3 py-2 text-center text-xs font-black text-indigo-800 hover:bg-indigo-200" href={record.inside_institute_image_url} rel="noopener noreferrer" target="_blank">
+                                  Inside Image
+                                </a>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      )}
+    </section>
+  </main>
+</Layout>

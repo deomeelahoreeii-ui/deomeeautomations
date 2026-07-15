@@ -1,0 +1,24 @@
+---
+import DataTable from "../../components/DataTable.astro";
+import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
+---
+
+<WhatsAppLayout title="Deliveries" description="Searchable queue and WhatsApp acknowledgement history." page="deliveries">
+  <div class="toolbar"><select class="select select-bordered select-sm" id="delivery-status"><option value="">All statuses</option><option value="queued">Queued</option><option value="delivered">Delivered</option><option value="sent_pending_confirmation">Pending confirmation</option><option value="failed">Failed</option><option value="timed_out">Timed out</option></select><span class="toolbar-status" id="delivery-total">Loading…</span></div>
+  <article class="master-card"><DataTable id="deliveries-table" pageSize={10} emptyText="No WhatsApp deliveries have been recorded." /></article>
+  <script>
+    import { actions } from "astro:actions";
+    import { badge, stack } from "../../scripts/table-cells";
+    import { showError } from "../../scripts/alerts";
+    await customElements.whenDefined("astro-data-table"); const table = document.getElementById("deliveries-table") as any;
+    async function loadPage(pageIndex: number, pageSize: number) { const result = await actions.whatsapp.deliveries({ status: (document.getElementById("delivery-status") as HTMLSelectElement).value, page: pageIndex + 1, pageSize }); if (result.error) throw result.error; const data = result.data as any; document.getElementById("delivery-total")!.textContent = `${data.total} deliveries`; return {rows: data.items, total: data.total}; }
+    try { await table.configure({manualPagination: true, loadPage, columns: [
+      {accessorKey:"recipient_name", header:"Recipient", enableSorting:false, cell:({row}:any)=>stack(row.original.recipient_name || "Unnamed", row.original.target)},
+      {accessorKey:"recipient_type", header:"Type", enableSorting:false},
+      {accessorKey:"status", header:"Status", enableSorting:false, cell:({row}:any)=>badge(row.original.status.replaceAll("_"," "), ["failed","timed_out"].includes(row.original.status)?"error":row.original.status==="queued"?"warning":"")},
+      {accessorKey:"queued_at", header:"Queued", enableSorting:false, cell:({row}:any)=>new Date(row.original.queued_at).toLocaleString()},
+      {accessorKey:"error", header:"Result", enableSorting:false, cell:({row}:any)=>row.original.error || `Stream ${row.original.queue_stream || "—"} #${row.original.queue_sequence || "—"}`},
+    ]}); } catch(error) { await showError(error); }
+    document.getElementById("delivery-status")!.addEventListener("change",()=>void table.refresh(true));
+  </script>
+</WhatsAppLayout>

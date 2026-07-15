@@ -1,0 +1,257 @@
+---
+import DataTable from "../../components/DataTable.astro";
+import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
+---
+
+<AntiDengueLayout
+  title="Manual Reports"
+  description="Upload a portal export when automated collection is unavailable, then review its dry-run output before dispatch."
+  page="manual-reports"
+>
+  <button class="btn btn-sm btn-ghost" id="refresh-manual" type="button" slot="actions">↻ Refresh</button>
+
+  <div class="notice manual-safety">
+    Manual reports always run in preview-only mode. Uploading or processing a file can never send a WhatsApp message.
+  </div>
+
+  <section class="manual-grid">
+    <article class="master-card upload-card">
+      <div class="panel-heading compact">
+        <div><p class="eyebrow">Immutable intake</p><h2>Upload portal report</h2></div>
+        <span class="environment-pill">Maximum 50 MB</span>
+      </div>
+      <form id="manual-upload-form">
+        <label class="upload-drop" id="upload-drop">
+          <input id="manual-file" type="file" accept=".xls,.xlsx,.csv" required />
+          <span class="upload-icon">⇧</span>
+          <strong id="upload-title">Choose or drop a portal report</strong>
+          <small id="upload-detail">Excel (.xls/.xlsx) and CSV are supported</small>
+        </label>
+        <button class="btn btn-primary w-full" id="upload-button" type="submit">Validate &amp; process</button>
+      </form>
+    </article>
+
+    <article class="master-card preflight-card">
+      <div class="panel-heading compact"><div><p class="eyebrow">Preflight</p><h2>Detected report</h2></div></div>
+      <div id="preflight-empty" class="empty-state">Upload a file to inspect its schema, row count and school coverage.</div>
+      <div id="preflight-result" hidden>
+        <div class="preflight-metrics">
+          <div><span>Rows</span><strong id="preflight-rows">—</strong></div>
+          <div><span>Schools</span><strong id="preflight-schools">—</strong></div>
+          <div><span>Columns</span><strong id="preflight-columns">—</strong></div>
+          <div><span>Schema</span><strong id="preflight-schema">—</strong></div>
+        </div>
+        <div id="preflight-messages" class="preflight-messages"></div>
+      </div>
+    </article>
+  </section>
+
+  <section class="manual-history">
+    <div class="section-title-row"><div><p class="eyebrow">Source history</p><h2>Manual report intake</h2></div></div>
+    <div class="toolbar directory-toolbar">
+      <input class="input input-bordered input-sm search-input" id="manual-search" placeholder="Search filename or checksum…" />
+      <select class="select select-bordered select-sm" id="manual-status">
+        <option value="">All validation states</option>
+        <option value="valid">Valid</option>
+        <option value="invalid">Invalid</option>
+      </select>
+      <span class="toolbar-status" id="manual-total">Loading…</span>
+    </div>
+    <article class="master-card"><DataTable id="manual-reports-table" pageSize={10} emptyText="No manual reports have been uploaded." /></article>
+  </section>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { actionButtons, badge, stack } from "../../scripts/table-cells";
+    import { closeAlert, confirmAction, showError, showLoading, showSuccess } from "../../scripts/alerts";
+
+    const API = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const table = el("manual-reports-table") as any;
+    const fileInput = el<HTMLInputElement>("manual-file");
+    let hasActiveJobs = false;
+    let pollTimer: number | undefined;
+
+    function bytes(value: number) {
+      if (value < 1024) return `${value} B`;
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+      return `${(value / 1024 / 1024).toFixed(1)} MB`;
+    }
+
+    function updateSelectedFile() {
+      const file = fileInput.files?.[0];
+      el("upload-title").textContent = file?.name || "Choose or drop a portal report";
+      el("upload-detail").textContent = file ? `${bytes(file.size)} · ready for preflight` : "Excel (.xls/.xlsx) and CSV are supported";
+    }
+
+    function showPreflight(source: any) {
+      const meta = source.detected_metadata || {};
+      el("preflight-empty").hidden = true;
+      el("preflight-result").hidden = false;
+      el("preflight-rows").textContent = String(meta.row_count ?? "—");
+      el("preflight-schools").textContent = String(meta.school_count ?? "—");
+      el("preflight-columns").textContent = String(meta.column_count ?? "—");
+      el("preflight-schema").textContent = source.schema_version || "Unknown";
+      const messages = el("preflight-messages");
+      messages.replaceChildren();
+      const entries = [
+        ...source.validation_errors.map((message: string) => ["error", message]),
+        ...source.validation_warnings.map((message: string) => ["warning", message]),
+      ];
+      if (!entries.length) entries.push(["valid", "Required report columns were detected."]);
+      for (const [tone, message] of entries) {
+        const row = document.createElement("p");
+        row.className = `preflight-message ${tone}`;
+        row.textContent = message;
+        messages.append(row);
+      }
+    }
+
+    async function loadPage(pageIndex: number, pageSize: number) {
+      const result = await actions.antidengue.manualReports({
+        search: el<HTMLInputElement>("manual-search").value,
+        status: el<HTMLSelectElement>("manual-status").value,
+        page: pageIndex + 1,
+        pageSize,
+      });
+      if (result.error) throw result.error;
+      const data = result.data as any;
+      hasActiveJobs = data.items.some((item: any) => ["queued", "running"].includes(item.latest_job?.status));
+      el("manual-total").textContent = `${data.total} uploads`;
+      return { rows: data.items, total: data.total };
+    }
+
+    async function hardDeleteSource(source: any) {
+      if (!await confirmAction(
+        "Permanently delete this upload?",
+        "The immutable source, processing attempts, logs, frozen previews, and managed generated files will be removed. This cannot be undone.",
+        "Delete permanently",
+      )) return;
+      const result = await actions.antidengue.hardDeleteManualReport({ id: source.id });
+      if (result.error) { await showError(result.error); return; }
+      await showSuccess("Manual upload deleted", "Its processing history and managed files were permanently removed.");
+      await table.refresh(true);
+    }
+
+    async function processSource(source: any) {
+      const previous = source.latest_job;
+      if (previous && !await confirmAction(
+        "Reprocess this immutable report?",
+        "A new dry-run processing attempt will be created. The original upload remains unchanged.",
+        "Reprocess",
+      )) return;
+      showLoading("Queueing manual report", "The validated source will be processed as a dry run.");
+      const result = await actions.antidengue.processManualReport({ id: source.id });
+      if (result.error) { closeAlert(); await showError(result.error); return; }
+      closeAlert();
+      await showSuccess("Manual report queued", "Processing will generate reports for Preview & Approval; nothing will be sent.");
+      const job = result.data as any;
+      window.location.href = `/?job_id=${job.id}`;
+    }
+
+    await customElements.whenDefined("astro-data-table");
+    try {
+      await table.configure({
+        manualPagination: true,
+        loadPage,
+        columns: [
+          { accessorKey: "original_name", header: "Source file", enableSorting: false, cell: ({ row }: any) => stack(row.original.original_name, `${bytes(row.original.size_bytes)} · ${row.original.sha256.slice(0, 12)}…`) },
+          { id: "detected", header: "Detected", enableSorting: false, cell: ({ row }: any) => stack(`${row.original.detected_metadata?.row_count ?? 0} rows`, `${row.original.detected_metadata?.school_count ?? 0} schools`) },
+          { accessorKey: "validation_status", header: "Validation", enableSorting: false, cell: ({ row }: any) => stack(row.original.validation_status, row.original.validation_warnings.length ? `${row.original.validation_warnings.length} warning(s)` : "Schema checked") },
+          { id: "processing", header: "Processing", enableSorting: false, cell: ({ row }: any) => row.original.latest_job ? stack(row.original.latest_job.status, new Date(row.original.latest_job.created_at).toLocaleString()) : badge("Not processed", "inactive") },
+          { accessorKey: "created_at", header: "Uploaded", enableSorting: false, cell: ({ row }: any) => new Date(row.original.created_at).toLocaleString() },
+          { id: "actions", header: "", enableSorting: false, cell: ({ row }: any) => actionButtons([
+            { label: "Download", onClick: () => window.open(`${API}/api/v1/antidengue/manual-reports/${row.original.id}/download`, "_blank") },
+            ...(row.original.latest_job
+              ? [{ label: "Activity", onClick: () => { window.location.href = `/?job_id=${row.original.latest_job.id}`; } }]
+              : []),
+            ...(row.original.validation_status === "valid" && !["queued", "running"].includes(row.original.latest_job?.status)
+              ? [{ label: row.original.latest_job ? "Reprocess" : "Process", onClick: () => void processSource(row.original) }]
+              : []),
+            ...(row.original.latest_job?.status === "succeeded"
+              ? [{ label: "Preview", onClick: () => { window.location.href = `/whatsapp/previews?source_job_id=${row.original.latest_job.id}`; } }]
+              : []),
+            ...(!["queued", "running"].includes(row.original.latest_job?.status)
+              ? [{ label: "Delete permanently", tone: "danger", onClick: () => void hardDeleteSource(row.original) }]
+              : []),
+          ]) },
+        ],
+      });
+    } catch (error) { await showError(error); }
+
+    fileInput.addEventListener("change", updateSelectedFile);
+    const drop = el("upload-drop");
+    for (const eventName of ["dragenter", "dragover"]) drop.addEventListener(eventName, (event) => { event.preventDefault(); drop.classList.add("dragging"); });
+    for (const eventName of ["dragleave", "drop"]) drop.addEventListener(eventName, (event) => { event.preventDefault(); drop.classList.remove("dragging"); });
+    drop.addEventListener("drop", (event) => {
+      const files = (event as DragEvent).dataTransfer?.files;
+      if (!files?.length) return;
+      const transfer = new DataTransfer(); transfer.items.add(files[0]); fileInput.files = transfer.files; updateSelectedFile();
+    });
+
+    el<HTMLFormElement>("manual-upload-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      const button = el<HTMLButtonElement>("upload-button");
+      button.disabled = true;
+      showLoading("Validating report", "Uploading an immutable copy and inspecting its schema.");
+      try {
+        const body = new FormData(); body.append("file", file);
+        const response = await fetch(`${API}/api/v1/antidengue/manual-reports/uploads`, { method: "POST", body });
+        const data = await response.json();
+        if (!response.ok) {
+          const detail = typeof data.detail === "object" ? data.detail.message : data.detail;
+          throw new Error(detail || "The report could not be uploaded");
+        }
+        showPreflight(data);
+        await table.refresh(true);
+        if (data.validation_status !== "valid") {
+          closeAlert();
+          await showError(new Error(data.validation_errors.join(" ") || "The report schema is invalid."));
+          return;
+        }
+        const queued = await actions.antidengue.processManualReport({ id: data.id });
+        if (queued.error) throw queued.error;
+        closeAlert();
+        await showSuccess("Report validated and queued", `${data.detected_metadata.row_count} rows and ${data.detected_metadata.school_count} schools were detected. Processing is preview-only.`);
+        const job = queued.data as any;
+        window.location.href = `/?job_id=${job.id}`;
+      } catch (error) { closeAlert(); await showError(error); }
+      finally { button.disabled = false; }
+    });
+
+    el("manual-search").addEventListener("input", () => void table.refresh(true));
+    el("manual-status").addEventListener("change", () => void table.refresh(true));
+    el("refresh-manual").addEventListener("click", () => void table.refresh(false));
+    async function pollWhileActive() {
+      if (!hasActiveJobs) return;
+      await table.refresh(false);
+      if (hasActiveJobs) pollTimer = window.setTimeout(() => void pollWhileActive(), 4000);
+    }
+    if (hasActiveJobs) pollTimer = window.setTimeout(() => void pollWhileActive(), 4000);
+    window.addEventListener("beforeunload", () => window.clearTimeout(pollTimer));
+  </script>
+
+  <style>
+    .manual-safety { margin-bottom: 16px; }
+    .manual-grid { display: grid; grid-template-columns: minmax(320px, .8fr) minmax(420px, 1.2fr); gap: 16px; }
+    .upload-card, .preflight-card { padding: 22px; }
+    .upload-drop { min-height: 210px; border: 1px dashed var(--color-base-300); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; cursor: pointer; background: color-mix(in srgb, var(--color-info) 4%, white); margin: 16px 0 12px; transition: .15s ease; }
+    .upload-drop:hover, .upload-drop.dragging { border-color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 8%, white); }
+    .upload-drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+    .upload-icon { font-size: 32px; color: var(--color-primary); margin-bottom: 8px; }
+    .upload-drop strong { font-size: 15px; }
+    .upload-drop small { margin-top: 5px; color: var(--color-base-content); opacity: .55; }
+    .preflight-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 18px 0; }
+    .preflight-metrics div { border: 1px solid var(--color-base-300); border-radius: 9px; padding: 13px; }
+    .preflight-metrics span { display: block; font-size: 10px; color: var(--color-base-content); opacity: .55; }
+    .preflight-metrics strong { display: block; font-size: 17px; margin-top: 3px; overflow-wrap: anywhere; }
+    .preflight-messages { display: grid; gap: 8px; }
+    .preflight-message { border-radius: 8px; padding: 10px 12px; font-size: 12px; background: #edf8f5; color: #176b57; }
+    .preflight-message.warning { background: #fff7e8; color: #925b05; }
+    .preflight-message.error { background: #fff0f1; color: #a52630; }
+    .manual-history { margin-top: 22px; }
+    @media (max-width: 980px) { .manual-grid { grid-template-columns: 1fr; } }
+  </style>
+</AntiDengueLayout>

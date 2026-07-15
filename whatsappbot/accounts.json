@@ -1,0 +1,16 @@
+{
+  "accounts": [
+    {
+      "auth_dir": "auth_info_baileys",
+      "enabled": true,
+      "id": "default",
+      "name": "Primary WhatsApp"
+    },
+    {
+      "auth_dir": "auth_info_baileys_ahmad-ufone",
+      "enabled": false,
+      "id": "ahmad-ufone",
+      "name": "Ahmad Ufone"
+    }
+  ]
+}

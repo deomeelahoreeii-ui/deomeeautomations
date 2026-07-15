@@ -1,0 +1,27 @@
+[project]
+name = "pmdu-management-system"
+version = "0.1.0"
+description = "PMDU portal scrape, artifact, notification, and Paperless automation"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "aiohttp>=3.13.5",
+    "boto3>=1.43.14",
+    "duckdb>=1.5.2",
+    "lxml>=6.1.0",
+    "nats-py>=2.14.0",
+    "openpyxl>=3.1.5",
+    "orjson>=3.11.8",
+    "pandas>=3.0.3",
+    "pdfplumber>=0.11.9",
+    "playwright>=1.59.0",
+    "pypdf>=6.11.0",
+    "pillow>=12.0.0",
+    "python-dotenv>=1.2.2",
+    "pytesseract>=0.3.13",
+    "rapidocr-onnxruntime>=1.4.4",
+    "rapidfuzz>=3.14.3",
+    "reportlab>=4.5.0",
+    "requests>=2.34.2",
+    "yarl>=1.23.0",
+]

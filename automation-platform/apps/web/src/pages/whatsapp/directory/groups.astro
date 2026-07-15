@@ -1,0 +1,87 @@
+---
+import DataTable from "../../../components/DataTable.astro";
+import WhatsAppDirectoryNav from "../../../components/WhatsAppDirectoryNav.astro";
+import WhatsAppLayout from "../../../layouts/WhatsAppLayout.astro";
+---
+
+<WhatsAppLayout title="Detected WhatsApp Groups" description="Live group directory discovered from the connected gateway." page="directory">
+  <button class="btn btn-sm btn-primary" id="sync-directory" slot="actions">↻ Sync directory</button>
+  <WhatsAppDirectoryNav active="groups" />
+
+  <section class="directory-stats" id="directory-stats">
+    <article><span>Detected groups</span><strong>—</strong></article>
+    <article><span>Dispatch destinations</span><strong>—</strong></article>
+    <article><span>Known contacts</span><strong>—</strong></article>
+    <article><span>LID mappings</span><strong>—</strong></article>
+  </section>
+
+  <div class="toolbar directory-toolbar">
+    <input class="input input-bordered input-sm search-input" id="group-search" placeholder="Search group name or JID…" />
+    <select class="select select-bordered select-sm" id="group-availability">
+      <option value="all">All detected groups</option>
+      <option value="available">Currently available</option>
+      <option value="unavailable">No longer detected</option>
+    </select>
+    <span class="toolbar-status" id="group-total">Loading…</span>
+  </div>
+  <article class="master-card"><DataTable id="directory-groups-table" pageSize={10} emptyText="No groups have been detected. Sync the directory while the gateway is connected." /></article>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { actionButtons, badge, stack } from "../../../scripts/table-cells";
+    import { closeAlert, showError, showLoading, showSuccess } from "../../../scripts/alerts";
+    await customElements.whenDefined("astro-data-table");
+    const table = document.getElementById("directory-groups-table") as any;
+    let timer: number | undefined;
+
+    async function loadSummary() {
+      const result = await actions.whatsapp.directorySummary();
+      if (result.error) throw result.error;
+      const data = result.data as any;
+      const values = [data.groups, data.configured_groups, data.contacts, data.lid_mappings];
+      document.querySelectorAll("#directory-stats strong").forEach((node, index) => node.textContent = String(values[index] ?? 0));
+    }
+
+    async function loadPage(pageIndex: number, pageSize: number) {
+      const result = await actions.whatsapp.directoryGroups({
+        search: (document.getElementById("group-search") as HTMLInputElement).value,
+        availability: (document.getElementById("group-availability") as HTMLSelectElement).value as any,
+        page: pageIndex + 1,
+        pageSize,
+      });
+      if (result.error) throw result.error;
+      const data = result.data as any;
+      document.getElementById("group-total")!.textContent = `${data.total} groups`;
+      return { rows: data.items, total: data.total };
+    }
+
+    try {
+      await loadSummary();
+      await table.configure({ manualPagination: true, loadPage, columns: [
+        { accessorKey: "name", header: "Detected group", enableSorting: false, cell: ({row}: any) => stack(row.original.name, row.original.jid) },
+        { accessorKey: "participant_count", header: "Participants", enableSorting: false },
+        { accessorKey: "available", header: "Gateway", enableSorting: false, cell: ({row}: any) => badge(row.original.available ? "Available" : "Unavailable", row.original.available ? "" : "inactive") },
+        { id: "assignment", header: "Dispatch assignment", enableSorting: false, cell: ({row}: any) => row.original.configured_id ? stack(row.original.wing_name, row.original.purpose) : badge("Not configured", "warning") },
+        { id: "actions", header: "", enableSorting: false, cell: ({row}: any) => actionButtons([{ label: "View members", onClick: () => { window.location.href = `/whatsapp/directory/groups/${row.original.id}`; } }]) },
+      ]});
+    } catch (error) { await showError(error); }
+
+    document.getElementById("group-availability")!.addEventListener("change", () => void table.refresh(true));
+    document.getElementById("group-search")!.addEventListener("input", () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void table.refresh(true), 250);
+    });
+    document.getElementById("sync-directory")!.addEventListener("click", async () => {
+      try {
+        showLoading("Synchronizing directory", "Reading groups and identity mappings from the connected gateway…");
+        const result = await actions.whatsapp.syncDirectory();
+        if (result.error) throw result.error;
+        closeAlert();
+        const data = result.data as any;
+        await showSuccess("Directory synchronized", `${data.groups} groups and ${data.contacts} contacts are now searchable.`);
+        await loadSummary();
+        await table.refresh(true);
+      } catch (error) { closeAlert(); await showError(error); }
+    });
+  </script>
+</WhatsAppLayout>

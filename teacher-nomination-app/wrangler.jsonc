@@ -1,0 +1,31 @@
+{
+	"compatibility_date": "2026-06-01",
+	"compatibility_flags": [
+		"global_fetch_strictly_public",
+		"nodejs_compat"
+	],
+	"name": "teacher-nomination-app",
+	"main": "@astrojs/cloudflare/entrypoints/server",
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "pectaa_db",
+			"database_id": "local-pectaa-db"
+		}
+	],
+	"env": {
+		"production": {
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "pectaa_production_db",
+					"database_id": "497d2c4a-7e49-42ac-835e-236b821c502f",
+					"remote": true
+				}
+			]
+		}
+	},
+	"observability": {
+		"enabled": true
+	}
+}

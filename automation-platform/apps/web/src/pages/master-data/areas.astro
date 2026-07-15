@@ -1,0 +1,22 @@
+---
+import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
+---
+
+<MasterDataLayout title="Administrative Areas" description="Review the hierarchy used for school and officer placement." page="areas">
+  <div class="area-grid" id="area-grid"><article class="area-card"><h3>Loading structure…</h3></article></div>
+  <script>
+    const API = import.meta.env.PUBLIC_API_BASE_URL || "http://localhost:8020";
+    const labels: Record<string, string> = { districts: "Districts", departments: "Departments", wings: "Wings", tehsils: "Tehsils", markazes: "Markazes" };
+    const response = await fetch(`${API}/api/v1/master-data/areas`);
+    const data = await response.json();
+    const grid = document.getElementById("area-grid")!;
+    grid.innerHTML = "";
+    for (const [key, rows] of Object.entries(data) as [string, any[]][]) {
+      const article = document.createElement("article");
+      article.className = "area-card";
+      const names = rows.slice(0, 8).map((row) => row.name).join(", ");
+      article.innerHTML = `<h3>${labels[key] || key}</h3><p>${names || 'No active records'}</p><strong>${rows.length}</strong>`;
+      grid.append(article);
+    }
+  </script>
+</MasterDataLayout>

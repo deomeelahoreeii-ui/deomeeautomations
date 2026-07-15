@@ -1,0 +1,87 @@
+---
+import DataTable from "../../components/DataTable.astro";
+import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
+---
+
+<MasterDataLayout
+  title="Master Data Dashboard"
+  description="Schools, officers, heads, jurisdictions, and administrative coverage."
+  page="dashboard"
+>
+  <button class="btn btn-sm btn-primary" id="refresh-dashboard" slot="actions">↻ Refresh</button>
+
+  <section class="master-stats" id="dashboard-stats">
+    {['Schools', 'AEOs', 'DDEOs', 'School heads', 'Missing heads', 'Unmapped'].map((label) => (
+      <article class="master-stat"><span>{label}</span><strong>—</strong><small>Loading…</small></article>
+    ))}
+  </section>
+
+  <section class="master-grid-two">
+    <article class="master-card">
+      <div class="master-card-header">
+        <div><h2>Coverage by tehsil</h2><p>Schools and assigned education officers.</p></div>
+      </div>
+      <DataTable id="tehsil-table" pageSize={10} />
+    </article>
+
+    <article class="master-card">
+      <div class="master-card-header"><div><h2>Structure</h2><p>Active administrative hierarchy.</p></div></div>
+      <DataTable id="structure-table" pageSize={10} />
+    </article>
+  </section>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { stack } from "../../scripts/table-cells";
+    const statDefinitions = [
+      ["Schools", "schools", "Active school records", ""],
+      ["AEOs", "aeos", "Active AEO records", ""],
+      ["DDEOs", "ddeos", "Active DDEO records", ""],
+      ["School heads", "school_heads", "Schools with a named head", ""],
+      ["Missing heads", "missing_heads", "Needs attention", "warning"],
+      ["Unmapped", "unmapped_aeo", "Schools without AEO mapping", "error"],
+    ];
+
+    async function loadDashboard() {
+      const result = await actions.masterData.dashboard();
+      if (result.error) throw result.error;
+      const data = result.data as any;
+      const stats = document.getElementById("dashboard-stats");
+      stats!.replaceChildren();
+      for (const [label, key, note, tone] of statDefinitions) {
+        const card = document.createElement("article");
+        card.className = `master-stat ${tone}`;
+        card.innerHTML = `<span>${label}</span><strong>${data.counts[key]}</strong><small>${note}</small>`;
+        stats!.append(card);
+      }
+      await customElements.whenDefined("astro-data-table");
+      await (document.getElementById("tehsil-table") as any).configure({
+        data: data.tehsils,
+        columns: [
+          { accessorKey: "name", header: "Tehsil", cell: ({ row }: any) => stack(row.original.name) },
+          { accessorKey: "schools", header: "Schools" },
+          { accessorKey: "school_heads", header: "Heads" },
+          { accessorKey: "aeos", header: "AEOs" },
+          { accessorKey: "ddeos", header: "DDEOs" },
+          { accessorKey: "missing_markaz", header: "Markaz pending" },
+        ],
+      });
+      await (document.getElementById("structure-table") as any).configure({
+        data: [
+          { name: "Wings", note: "Administrative school wings", count: data.counts.wings },
+          { name: "Tehsils", note: "Active tehsils", count: data.counts.tehsils },
+          { name: "Markazes", note: "Active AEO scopes", count: data.counts.markazes },
+          { name: "Markaz pending", note: "Secondary assignments pending", count: data.counts.pending_markaz },
+          { name: "Inactive schools", note: "Archived records", count: data.counts.inactive_schools },
+        ],
+        columns: [
+          { accessorKey: "name", header: "Structure", cell: ({ row }: any) => stack(row.original.name, row.original.note) },
+          { accessorKey: "count", header: "Count" },
+        ],
+      });
+    }
+
+    document.getElementById("refresh-dashboard")!.addEventListener("click", loadDashboard);
+    loadDashboard().catch((error) => console.error(error));
+  </script>
+</MasterDataLayout>

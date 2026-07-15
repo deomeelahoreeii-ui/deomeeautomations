@@ -1,0 +1,66 @@
+---
+import DataTable from "../../../../components/DataTable.astro";
+import WhatsAppDirectoryNav from "../../../../components/WhatsAppDirectoryNav.astro";
+import WhatsAppLayout from "../../../../layouts/WhatsAppLayout.astro";
+
+const groupId = Astro.params.id || "";
+---
+
+<WhatsAppLayout title="WhatsApp Group Details" description="Detected group metadata, identity mappings and searchable membership." page="directory">
+  <button class="btn btn-sm btn-primary" id="sync-members" slot="actions">↻ Refresh members</button>
+  <WhatsAppDirectoryNav active="groups" />
+  <a class="directory-back" href="/whatsapp/directory/groups">← Back to detected groups</a>
+  <section class="wa-panel group-detail-header" id="group-details"><h2>Loading group…</h2></section>
+  <div class="toolbar directory-toolbar">
+    <input class="input input-bordered input-sm search-input" id="member-search" placeholder="Search member name, phone JID or LID…" />
+    <span class="toolbar-status" id="member-total">Loading…</span>
+  </div>
+  <article class="master-card"><DataTable id="group-members-table" pageSize={10} emptyText="No members have been synchronized. Use Refresh members." /></article>
+
+  <script define:vars={{ groupId }}>window.whatsappDirectoryGroupId = groupId;</script>
+  <script>
+    import { actions } from "astro:actions";
+    import { badge, stack } from "../../../../scripts/table-cells";
+    import { closeAlert, showError, showLoading, showSuccess } from "../../../../scripts/alerts";
+    declare global { interface Window { whatsappDirectoryGroupId: string } }
+    await customElements.whenDefined("astro-data-table");
+    const id = window.whatsappDirectoryGroupId;
+    const table = document.getElementById("group-members-table") as any;
+    let timer: number | undefined;
+
+    async function loadGroup() {
+      const result = await actions.whatsapp.directoryGroup({id});
+      if (result.error) throw result.error;
+      const group = result.data as any;
+      document.getElementById("group-details")!.innerHTML = `<div><span class="eyebrow">Detected group</span><h2>${group.name}</h2><p>${group.jid}</p></div><div class="group-detail-facts"><span><strong>${group.participant_count}</strong> participants</span><span>${group.configured_id ? `<strong>${group.wing_name}</strong> dispatch destination` : `<strong>Not configured</strong> for dispatch`}</span><span><strong>${group.available ? "Available" : "Unavailable"}</strong> gateway status</span></div>`;
+    }
+    async function loadPage(pageIndex: number, pageSize: number) {
+      const result = await actions.whatsapp.groupMembers({id, search: (document.getElementById("member-search") as HTMLInputElement).value, page: pageIndex + 1, pageSize});
+      if (result.error) throw result.error;
+      const data = result.data as any;
+      document.getElementById("member-total")!.textContent = `${data.total} synchronized members`;
+      return {rows: data.items, total: data.total};
+    }
+    try {
+      await loadGroup();
+      await table.configure({manualPagination: true, loadPage, columns: [
+        {accessorKey: "display_name", header: "Member", enableSorting: false, cell: ({row}: any) => stack(row.original.display_name || "Unnamed member", row.original.admin_role || "Member")},
+        {accessorKey: "phone_jid", header: "Phone JID", enableSorting: false},
+        {accessorKey: "lid_jid", header: "LID", enableSorting: false},
+        {accessorKey: "contact_id", header: "Mapping", enableSorting: false, cell: ({row}: any) => badge(row.original.contact_id ? "Resolved" : "Unresolved", row.original.contact_id ? "" : "warning")},
+      ]});
+    } catch (error) { await showError(error); }
+    document.getElementById("member-search")!.addEventListener("input", () => { window.clearTimeout(timer); timer = window.setTimeout(() => void table.refresh(true), 250); });
+    document.getElementById("sync-members")!.addEventListener("click", async () => {
+      try {
+        showLoading("Synchronizing group members", "Reading current member identities from WhatsApp…");
+        const result = await actions.whatsapp.syncGroupMembers({id});
+        if (result.error) throw result.error;
+        closeAlert();
+        await showSuccess("Members synchronized", `${(result.data as any).members} members are now searchable.`);
+        await loadGroup();
+        await table.refresh(true);
+      } catch (error) { closeAlert(); await showError(error); }
+    });
+  </script>
+</WhatsAppLayout>

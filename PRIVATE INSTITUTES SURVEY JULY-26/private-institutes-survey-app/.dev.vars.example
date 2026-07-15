@@ -1,0 +1,7 @@
+AUTH_ENABLED="false"
+PUBLIC_CLERK_PUBLISHABLE_KEY="pk_test_replace_with_clerk_publishable_key"
+CLERK_SECRET_KEY="sk_test_replace_with_clerk_secret_key"
+PUBLIC_CLERK_SIGN_IN_URL="/admin/login"
+PUBLIC_CLERK_SIGN_UP_URL="/admin/login"
+PUBLIC_CLERK_PROXY_URL=""
+ADMIN_EMAILS="deo.mee.lahore.eii@gmail.com,pomubbsher@gmail.com"

@@ -1,0 +1,37 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import "../../styles/global.css";
+import { UserButton } from "@clerk/astro/components";
+import { getApprovedAdminEmails } from "../../lib/admin-auth";
+
+const approvedEmails = getApprovedAdminEmails();
+---
+
+<Layout>
+  <main class="min-h-screen bg-base-300 px-4 py-8 text-base-content sm:px-6 lg:px-8" data-theme="night">
+    <section class="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-2xl flex-col justify-center">
+      <div class="card border border-error/30 bg-base-100 shadow-2xl">
+        <div class="card-body items-center gap-5 p-6 text-center sm:p-10">
+          <div class="badge badge-error badge-lg">Admin Access Restricted</div>
+          <div class="space-y-2">
+            <h1 class="text-3xl font-bold tracking-normal">This account is not approved</h1>
+            <p class="text-base-content/70">
+              The administrative dashboard is limited to approved district management Gmail accounts.
+            </p>
+          </div>
+
+          <div class="alert alert-info text-left">
+            <span>
+              Approved account: {approvedEmails.join(", ")}
+            </span>
+          </div>
+
+          <div class="flex items-center gap-3 rounded-box border border-base-content/10 bg-base-200 px-4 py-3">
+            <span class="text-sm text-base-content/70">Switch account</span>
+            <UserButton />
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</Layout>

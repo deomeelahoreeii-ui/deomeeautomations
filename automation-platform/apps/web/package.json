@@ -1,0 +1,23 @@
+{
+  "name": "automation-platform-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/node": "^11.0.2",
+    "@tailwindcss/vite": "latest",
+    "@tanstack/table-core": "^8.21.3",
+    "astro": "latest",
+    "daisyui": "latest",
+    "sweetalert2": "^11.26.25",
+    "tailwindcss": "latest"
+  },
+  "devDependencies": {
+    "typescript": "latest"
+  }
+}

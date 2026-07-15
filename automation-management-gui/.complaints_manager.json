@@ -1,0 +1,412 @@
+{
+  "antidengue_date": "2026-07-13",
+  "antidengue_mode": "daily",
+  "antidengue_new_dispatch_group": {
+    "attach_excel": true,
+    "delay_ms": "1500",
+    "enabled": true,
+    "manual_only": false,
+    "markaz_ref": "",
+    "message_mode": "full_report",
+    "name": "",
+    "route_kind": "tehsil",
+    "target": "",
+    "tehsil_ref": ""
+  },
+  "antidengue_new_school_form": {
+    "active": true,
+    "deos_wise": "M-EE",
+    "department_ref": "8d8b98a74514b90",
+    "district_ref": "2e3f7b649a3332d",
+    "emis": "",
+    "head_contact": "",
+    "head_name": "",
+    "last_result": "Saved school 35220592 - GPS WACHOWAL EX-MCL.",
+    "last_saved_emis": "35220592",
+    "last_success": true,
+    "markaz_ref": "35360483c647781",
+    "name": "",
+    "notes": "",
+    "school_level": "Primary",
+    "school_type": "Male",
+    "shift": "Single",
+    "tehsil_ref": "e4a231166ed6e43",
+    "wing_ref": "0cc48ac9ad17e51"
+  },
+  "antidengue_schedules": [],
+  "antidengue_times": "8:30, 9:00, 9:30, 10:00, 10:30, 11:00, 11:30, 12:00, 12:30, 13:00, 13:30",
+  "antidengue_weekdays": "0,1,2,3,4,5",
+  "command_values": {
+    "antidengue_manual_file": {
+      "dry_run": "false",
+      "file": ""
+    },
+    "antidengue_pocketbase_import_officers": {},
+    "antidengue_pocketbase_migrate": {},
+    "antidengue_run": {
+      "PORTAL_LOGIN_MODE": "auto"
+    },
+    "crm_apply_deo_replies": {
+      "dry_run": "false",
+      "no_backup": "false",
+      "pending_dir": "crm-compliances/pending",
+      "replies_file": "crm-compliances/pending/pending-complaint-replies-two-columns.csv"
+    },
+    "crm_build_reply_context": {
+      "NOCODB_BASE_TITLE": "CRM Reply Knowledge Base",
+      "NOCODB_EMAIL": "ahmadkakarr@gmail.com",
+      "NOCODB_PASSWORD": "P@kistan2541",
+      "NOCODB_URL": "https://crm-replies.lab.internal",
+      "complaint_number": "",
+      "include_unverified_policy": "false",
+      "nocodb_base": "",
+      "nocodb_email": "",
+      "nocodb_password": "",
+      "nocodb_url": "",
+      "output_dir": "crm-reply-context-packs",
+      "output_mode": "complaint-folder",
+      "pending_dir": "crm-compliances/pending",
+      "top_examples": "5",
+      "write_prompt_text": "true"
+    },
+    "crm_convert_letters": {},
+    "crm_delete_old_versions": {},
+    "crm_excel_rows_to_pdfs": {
+      "input_dir": "/home/ahmad/Desktop/crm/pending-upload",
+      "output_dir": "crm-main-complaints",
+      "overwrite": "true"
+    },
+    "crm_filter_excel_duplicates": {
+      "input_dir": "phase1-crm/unprocessed-crm/sheets",
+      "input_file": "phase1-crm/unprocessed-crm/sheets/unfiltered.xlsx",
+      "output_dir": "phase1-crm/unprocessed-crm/filtered"
+    },
+    "crm_filter_pdf_duplicates": {
+      "db": "crm-cache.sqlite",
+      "input_dir": "phase1-crm/unprocessed-crm/pdf",
+      "output_dir": "phase1-crm/unprocessed-crm/filtered",
+      "paperless_limit": "",
+      "skip_paperless_refresh": "false"
+    },
+    "crm_fix_status": {},
+    "crm_generate_letters": {},
+    "crm_ingest_not_relevant": {
+      "artifact_dir": "artifacts/crm-not-relevant",
+      "cache_only": "true",
+      "clear_artifact_dir": "true",
+      "crm_cache_db": "crm-cache.sqlite",
+      "input_dir": "crm-not-relevant"
+    },
+    "crm_ingest_pending": {
+      "allow_placeholder_number": "true",
+      "artifact_dir": "artifacts/crm-pending",
+      "cache_only": "true",
+      "clear_artifact_dir": "true",
+      "crm_cache_db": "crm-cache.sqlite",
+      "input_dir": "crm-main-complaints"
+    },
+    "crm_open_latest_compliance_preview": {},
+    "crm_patch_paperless": {
+      "PAPERLESS_DRY_RUN": "false",
+      "PAPERLESS_MAX_CASES": "",
+      "artifact_dir": "artifacts/crm-pending"
+    },
+    "crm_prepare_compliance_folders": {
+      "--dry-run": "false",
+      "--limit": "",
+      "--overwrite": "true",
+      "CRM_COMPLIANCE_PENDING_DIR": "crm-compliances/pending",
+      "CRM_COMPLIANCE_SAMPLE_DIR": "crm-compliances/pending/sample",
+      "NOCODB_BASE_TITLE": "CRM Reply Knowledge Base",
+      "NOCODB_EMAIL": "ahmadkakarr@gmail.com",
+      "NOCODB_PASSWORD": "P@kistan2541",
+      "NOCODB_URL": "https://crm-replies.lab.internal",
+      "build_context_packs": "false",
+      "context_top_examples": "5",
+      "include_unverified_policy": "true",
+      "nocodb_base": "",
+      "nocodb_email": "",
+      "nocodb_password": "",
+      "nocodb_url": "",
+      "pending_dir": "",
+      "sample_dir": ""
+    },
+    "crm_prepare_duplicate_notices": {
+      "dispatch_dir": "",
+      "input_file": "",
+      "output_dir": "phase1-crm/unprocessed-crm/filtered",
+      "status": "all"
+    },
+    "crm_prepare_reviewed_number_missing": {
+      "artifact_dir": "artifacts/crm-pending",
+      "cache_only": "true",
+      "clear_artifact_dir": "true",
+      "crm_cache_db": "crm-cache.sqlite",
+      "input_dir": "phase1-crm/unprocessed-crm/filtered/fresh/number-missing"
+    },
+    "crm_preview_compliances": {
+      "attachment_mode": "combined",
+      "preview_csv": "crm-compliances/crm-dispatch-list.csv",
+      "preview_date": "",
+      "preview_limit": ""
+    },
+    "crm_pull_paperless_state": {},
+    "crm_review_number_missing": {
+      "open_folder": "true",
+      "review_dir": "phase1-crm/unprocessed-crm/filtered/fresh/number-missing"
+    },
+    "crm_send_compliances": {
+      "--csv": "crm-compliances/crm-dispatch-list.csv",
+      "--date": "",
+      "--dry-run": "false",
+      "--limit": "",
+      "attachment_mode": "combined",
+      "send_at": ""
+    },
+    "crm_send_duplicate_notices": {
+      "dispatch_csv": "",
+      "dispatch_dir": "",
+      "dry_run": "false",
+      "input_file": "",
+      "output_dir": "phase1-crm/unprocessed-crm/filtered",
+      "status": "all"
+    },
+    "crm_sync_reply_knowledge": {
+      "NOCODB_BASE_TITLE": "CRM Reply Knowledge Base",
+      "NOCODB_EMAIL": "ahmadkakarr@gmail.com",
+      "NOCODB_PASSWORD": "P@kistan2541",
+      "NOCODB_URL": "https://crm-replies.lab.internal",
+      "clear": "true",
+      "nocodb_base": "",
+      "nocodb_email": "",
+      "nocodb_password": "",
+      "nocodb_url": "",
+      "pending_dir": "crm-compliances/pending"
+    },
+    "crm_sync_reply_knowledge_paperless": {
+      "NOCODB_BASE_TITLE": "CRM Reply Knowledge Base",
+      "NOCODB_EMAIL": "ahmadkakarr@gmail.com",
+      "NOCODB_PASSWORD": "P@kistan2541",
+      "NOCODB_URL": "https://crm-replies.lab.internal",
+      "clear": "false",
+      "dry_run": "false",
+      "limit": "",
+      "min_reply_chars": "120",
+      "nocodb_base": "",
+      "nocodb_email": "",
+      "nocodb_password": "",
+      "nocodb_url": "",
+      "status": "Submitted"
+    },
+    "crm_upload_compliances": {
+      "compliances_dir": "crm-compliances/pending",
+      "dispatch_csv": "crm-compliances/crm-dispatch-list.csv",
+      "no_update_dispatch_list": "false"
+    },
+    "crm_upload_not_relevant": {
+      "PAPERLESS_DRY_RUN": "false",
+      "PAPERLESS_MAX_CASES": "",
+      "artifact_dir": "artifacts/crm-not-relevant"
+    },
+    "crm_upload_pending": {
+      "PAPERLESS_DRY_RUN": "false",
+      "PAPERLESS_MAX_CASES": "",
+      "artifact_dir": "artifacts/crm-pending"
+    },
+    "notify_open_latest_preview": {},
+    "notify_preview": {
+      "--files": "combined-pdf",
+      "--mode": "",
+      "--scope": "current-pmdu-under-investigation",
+      "--tehsil": "",
+      "--to": "ddeo"
+    },
+    "notify_send": {
+      "--files": "combined-pdf",
+      "--mode": "",
+      "--scope": "all",
+      "--tehsil": "",
+      "--to": "aeo"
+    },
+    "paperless_check": {
+      "artifact_dir": "artifacts",
+      "artifact_scope": "current-scrape"
+    },
+    "paperless_patch": {
+      "PAPERLESS_DRY_RUN": "false",
+      "PAPERLESS_MAX_CASES": "",
+      "artifact_dir": "artifacts",
+      "artifact_scope": "current-scrape"
+    },
+    "paperless_sync": {
+      "PAPERLESS_DRY_RUN": "false",
+      "PAPERLESS_MAX_CASES": "",
+      "artifact_dir": "artifacts",
+      "artifact_scope": "current-scrape"
+    },
+    "pmdu_archive_processed": {
+      "archive_root": "archives/pmdu",
+      "label": "history"
+    },
+    "pmdu_archive_processed_dry_run": {
+      "archive_root": "archives/pmdu",
+      "label": "history"
+    },
+    "pmdu_cleanup_previews": {
+      "include_notification_downloads": "true",
+      "kind": "all"
+    },
+    "pmdu_cleanup_previews_dry_run": {
+      "include_notification_downloads": "false",
+      "kind": "all"
+    },
+    "pmdu_delete_old_versions": {},
+    "pmdu_diagnostics_organize": {
+      "diagnostics_root": "diagnostics/pmdu"
+    },
+    "pmdu_diagnostics_preview": {
+      "diagnostics_root": "diagnostics/pmdu"
+    },
+    "pmdu_end_to_end": {},
+    "pmdu_followup_open_latest_preview": {},
+    "pmdu_followup_preview": {
+      "allow_second_today": "false",
+      "complaint": "",
+      "files": "combined-pdf",
+      "force": "false",
+      "max_cases": "",
+      "recipient": "ddeo",
+      "tehsil": "",
+      "type": "reminder"
+    },
+    "pmdu_followup_send": {
+      "allow_second_today": "false",
+      "complaint": "",
+      "files": "combined-pdf",
+      "force": "false",
+      "max_cases": "",
+      "recipient": "aeo",
+      "tehsil": "",
+      "type": "reminder"
+    },
+    "pmdu_generate_inquiry_letters": {
+      "artifact_dir": "artifacts",
+      "force": "true",
+      "issue_date": "2026-06-17",
+      "max_cases": "",
+      "output_root": "inquiry_letters_to_ddeos",
+      "source": "paperless",
+      "status": "Under Investigation"
+    },
+    "pmdu_inquiry_date_apply": {
+      "complaint": "",
+      "issue_date": "today",
+      "output_root": "inquiry_letters_to_ddeos"
+    },
+    "pmdu_inquiry_date_preview": {
+      "complaint": "",
+      "issue_date": "today",
+      "output_root": "inquiry_letters_to_ddeos"
+    },
+    "pmdu_phase1": {
+      "PMDU_HEADLESS": "false",
+      "PMDU_MAX_DETAILS": ""
+    },
+    "pmdu_phase2": {
+      "PMDU_PHASE2_INPUT_SCOPE": "scraped-queue",
+      "PMDU_PHASE2_MAX_FILES": ""
+    },
+    "pmdu_pull_paperless_state": {},
+    "pmdu_restore_status": {},
+    "pmdu_scraped_data_cleanup": {
+      "artifact_dir": "artifacts",
+      "include_artifacts": "false",
+      "raw_html_dir": "raw_html"
+    },
+    "pmdu_scraped_data_cleanup_preview": {
+      "artifact_dir": "artifacts",
+      "include_artifacts": "false",
+      "raw_html_dir": "raw_html"
+    },
+    "sms_campaign_create": {
+      "campaign_id": "pectaa-kot-lakhpat-day1-absent",
+      "column": "Contact",
+      "country_code": "92",
+      "description": "",
+      "file": "/home/ahmad/Desktop/crm/absent-dashboard/TODAY/PECTAA KOT LAKHPAT LAHORE.xlsx",
+      "message": "Respected Teacher, you were absent on Day 1 PECTAA training at Kot Lakhpat Lahore. Contact Kiran Mehmood 03364807750. Attend Sat training and confirm. Thanks\n",
+      "sheet": "Sheet1"
+    },
+    "sms_campaign_delete": {
+      "campaign_id": "/home/ahmad/code/deomeeautomations/add-to-whatsapp-group/lahore-ht-test.xlsx::Sheet1::contact_no"
+    },
+    "sms_campaign_failed": {
+      "campaign_id": "lahore-head-test-2026"
+    },
+    "sms_campaign_list": {},
+    "sms_campaign_reconcile": {
+      "campaign_id": "day3-training-absentee-ghss-islamia-multan-road"
+    },
+    "sms_campaign_send": {
+      "campaign_id": "pectaa-kot-lakhpat-day1-absent",
+      "column": "Contact",
+      "consent_confirmed": "true",
+      "country_code": "92",
+      "day_limit": "2000",
+      "delay_seconds": "8",
+      "description": "",
+      "execute": "true",
+      "file": "/home/ahmad/Desktop/crm/absent-dashboard/TODAY/PECTAA KOT LAKHPAT LAHORE.xlsx",
+      "hour_limit": "1500",
+      "max_attempts": "3",
+      "minute_limit": "100",
+      "retry_failed": "false",
+      "sheet": "Sheet1",
+      "sim_number": "1",
+      "ttl": "6600",
+      "watch_poll_seconds": "30",
+      "watch_timeout_seconds": "7200",
+      "watch_until_complete": "true"
+    },
+    "sms_campaign_show": {
+      "campaign_id": "day3-training-absentee-ghss-islamia-multan-road"
+    },
+    "sms_campaign_update": {
+      "campaign_id": "walton-day1-absent",
+      "column": "Contact",
+      "country_code": "92",
+      "description": "",
+      "file": "/home/ahmad/Desktop/crm/absent-dashboard/TODAY/GGHS Walton.xlsx",
+      "message": "Respected Teacher, you were absent today from PECTAA training at GGHS Walton. Contact Ms Abida Asghar 03344162548. Attend Sat training and confirm. Thanks",
+      "sheet": "Sheet1"
+    },
+    "whatsapp_account_add": {},
+    "whatsapp_accounts": {},
+    "whatsapp_group_import": {
+      "consent_confirmed": "true",
+      "count": "50",
+      "country_code": "92",
+      "delay_ms": "15000",
+      "end": "",
+      "execute": "true",
+      "file": "lahore-ht-test.xlsx",
+      "group_jid": "120363427986416654@g.us",
+      "selection": "last",
+      "sheet": "",
+      "start": "",
+      "wait_timeout": "1800",
+      "worker_ready_timeout": "120"
+    },
+    "whatsapp_group_membership_audit": {
+      "country_code": "92",
+      "file": "lahore-ht-test.xlsx",
+      "group_jid": "",
+      "health_subject": "whatsapp.worker.health",
+      "members_subject": "whatsapp.worker.group-members",
+      "output": "reports/not-members-report.xlsx",
+      "sheet": "",
+      "worker_id": "default",
+      "worker_ready_timeout": "120"
+    }
+  }
+}

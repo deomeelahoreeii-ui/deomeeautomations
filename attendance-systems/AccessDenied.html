@@ -1,0 +1,167 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #15202b;
+      --muted: #687385;
+      --line: #dfe4ea;
+      --blue: #1a73e8;
+      --red: #c5221f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      align-items: center;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      font-family: Arial, Helvetica, sans-serif;
+      justify-content: center;
+      margin: 0;
+      min-height: 100vh;
+      padding: 18px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      max-width: 680px;
+      padding: 24px;
+      width: 100%;
+    }
+    .badge {
+      background: #fce8e6;
+      border: 1px solid #f4b9b5;
+      border-radius: 999px;
+      color: var(--red);
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .02em;
+      padding: 5px 10px;
+      text-transform: uppercase;
+    }
+    h1 {
+      font-size: 24px;
+      line-height: 1.25;
+      margin: 14px 0 8px;
+    }
+    p {
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.5;
+      margin: 8px 0;
+    }
+    .account {
+      background: #f1f3f4;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--text);
+      font-weight: 700;
+      margin: 14px 0;
+      padding: 10px 12px;
+      word-break: break-word;
+    }
+    .steps {
+      border-top: 1px solid var(--line);
+      margin-top: 18px;
+      padding-top: 16px;
+    }
+    .step {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 28px minmax(0, 1fr);
+      margin: 10px 0;
+    }
+    .num {
+      align-items: center;
+      background: #eef4ff;
+      border-radius: 50%;
+      color: #174ea6;
+      display: flex;
+      font-weight: 700;
+      height: 28px;
+      justify-content: center;
+      width: 28px;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    a, button {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+      min-height: 40px;
+      padding: 9px 13px;
+      text-decoration: none;
+    }
+    a.primary {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #fff;
+    }
+    .error {
+      background: #fff7f6;
+      border: 1px solid #f4b9b5;
+      border-radius: 6px;
+      color: #8f160f;
+      margin-top: 16px;
+      padding: 10px 12px;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <span class="badge">Access not configured</span>
+    <h1><?= title ?> is not available for this account</h1>
+    <p>This portal is restricted. Your account must be active in the Users sheet and must also have Google Drive access to the attendance spreadsheet.</p>
+    <div class="account">Signed in as: <?= email ?></div>
+
+    <section class="steps">
+      <div class="step">
+        <div class="num">1</div>
+        <p>Ask the admin to confirm this exact email is active in the Users sheet.</p>
+      </div>
+      <div class="step">
+        <div class="num">2</div>
+        <p>Ask the admin to run <strong>syncUsersToSpreadsheetPermissions()</strong> and then <strong>clearAttendanceSystemCache()</strong>.</p>
+      </div>
+      <div class="step">
+        <div class="num">3</div>
+        <p>Use the retry button below. If Google asks for authorization, allow the requested access. If this is the wrong Google account, switch accounts first.</p>
+      </div>
+    </section>
+
+    <div class="actions">
+      <a class="primary" href="<?= retryUrl ?>">Retry access</a>
+      <a href="<?= switchAccountUrl ?>" target="_top">Switch Google account</a>
+      <button type="button" onclick="tryCloseTab()">Close tab</button>
+    </div>
+
+    <div class="error"><?= message ?></div>
+  </main>
+
+  <script>
+    function tryCloseTab() {
+      window.open('', '_self');
+      window.close();
+      setTimeout(function () {
+        if (!window.closed) {
+          alert('Your browser blocked automatic tab closing. Please close this tab manually.');
+        }
+      }, 250);
+    }
+  </script>
+</body>
+</html>

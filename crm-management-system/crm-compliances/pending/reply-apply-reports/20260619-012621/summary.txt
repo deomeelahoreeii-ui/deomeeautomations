@@ -1,0 +1,22 @@
+Apply DEO Replies Run Report
+Generated at: 2026-06-19T01:26:22
+Workbook: /home/ahmad/code/deomeeautomations/crm-management-system/crm-compliances/pending/complaints-number-complaints-details-with-replies.xlsx
+Pending folder: /home/ahmad/code/deomeeautomations/crm-management-system/crm-compliances/pending
+Mode: dry run
+
+Summary
+- workbook_rows: 54
+- replies_loaded: 54
+- updated: 0
+- dry_run_updates: 54
+- skipped_no_reply: 1
+- skipped_no_folder: 0
+- skipped_no_deo_report: 0
+- skipped_no_remarks_cell: 0
+- duplicate_rows: 0
+
+Files
+- summary.json
+- summary.txt
+- details.csv
+- run.log

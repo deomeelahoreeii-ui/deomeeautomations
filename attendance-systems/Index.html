@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <div>
+        <h1 id="title"></h1>
+        <div class="muted" id="subtitle"></div>
+        <div class="user-badge hidden" id="userBadge"></div>
+      </div>
+      <nav class="tabs">
+        <button class="tab" id="markTab" type="button">Mark Attendance</button>
+        <button class="tab" id="adjustTab" type="button">Adjust Participant</button>
+        <button class="tab" id="dashboardTab" type="button">Dashboard</button>
+        <button class="tab" id="reportsTab" type="button">Reports</button>
+        <button class="tab" id="adminTab" type="button">Admin Tools</button>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <?!= include('MarkView'); ?>
+    <?!= include('AdjustView'); ?>
+    <?!= include('DashboardView'); ?>
+    <?!= include('ReportsView'); ?>
+    <?!= include('AdminToolsView'); ?>
+  </main>
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script>
+    const PAGE = <?!= pageConfigJson ?>;
+  </script>
+  <?!= include('ClientScript'); ?>
+</body>
+</html>

@@ -1,0 +1,32 @@
+{
+  "name": "teacher-nomination-app",
+  "type": "module",
+  "version": "0.0.1",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "build:production": "bun scripts/build-production.ts",
+    "deploy:production": "bun scripts/build-production.ts && bun scripts/patch-production-wrangler.ts && bunx wrangler deploy",
+    "seed:local": "bun seed.ts --local --db pectaa_db",
+    "seed:production": "bun seed.ts --remote --db pectaa_production_db",
+    "preview": "astro preview",
+    "astro": "astro",
+    "generate-types": "wrangler types"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "^13.6.0",
+    "@clerk/astro": "^3.3.2",
+    "@tailwindcss/vite": "^4.3.0",
+    "astro": "^6.4.2",
+    "daisyui": "^5.5.20",
+    "imagekit": "^6.0.0",
+    "tailwindcss": "^4.3.0",
+    "wrangler": "^4.96.0"
+  },
+  "overrides": {
+    "vite": "^7"
+  }
+}

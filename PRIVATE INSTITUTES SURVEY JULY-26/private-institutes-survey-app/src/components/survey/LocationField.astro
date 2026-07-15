@@ -1,0 +1,35 @@
+---
+import type { SurveyField } from "../../config/survey";
+
+type Props = {
+  field: SurveyField;
+};
+
+const { field } = Astro.props;
+---
+
+<div class="survey-field xl:col-span-2">
+  <span class="survey-label">{field.label} {field.required && <span>*</span>}</span>
+  <div class="grid gap-3 lg:grid-cols-[1fr_auto]">
+    <input
+      class="survey-input"
+      name={field.name}
+      placeholder="Paste shared Google Maps location link"
+      required={field.required}
+      type="text"
+    />
+    <a
+      id="openMapsButton"
+      class="btn min-h-[3.25rem] rounded-xl border-slate-300 bg-white px-4 text-slate-700 hover:bg-slate-100"
+      data-default-maps-url="https://www.google.com/maps/search/?api=1&query=Current%20Location"
+      href="https://www.google.com/maps/search/?api=1&query=Current%20Location"
+      rel="noopener noreferrer"
+      target="_blank"
+    >
+      Open Maps
+    </a>
+  </div>
+  <div id="locationStatus" class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600">
+    Paste the shared Google Maps link for the institute location.
+  </div>
+</div>

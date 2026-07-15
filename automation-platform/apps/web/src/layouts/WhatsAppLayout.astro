@@ -1,0 +1,31 @@
+---
+import AppLayout from "./AppLayout.astro";
+
+interface Props {
+  title: string;
+  description: string;
+  page: string;
+}
+
+const { title, description, page } = Astro.props;
+const links = [
+  ["dashboard", "Overview", "/whatsapp/"],
+  ["connection", "Connections", "/whatsapp/connection"],
+  ["directory", "Directory", "/whatsapp/directory/groups"],
+  ["routing", "Routing", "/whatsapp/audiences"],
+  ["previews", "Preview & Approval", "/whatsapp/previews"],
+  ["deliveries", "Deliveries", "/whatsapp/deliveries"],
+  ["activity", "Activity", "/whatsapp/activity"],
+  ["settings", "Settings", "/whatsapp/settings"],
+];
+---
+
+<AppLayout title={title} eyebrow="WhatsApp Gateway" description={description} active="whatsapp">
+  <slot name="actions" slot="actions" />
+  <nav class="section-tabs" aria-label="WhatsApp pages">
+    {links.map(([id, label, href]) => (
+      <a class:list={{ active: page === id }} href={href}>{label}</a>
+    ))}
+  </nav>
+  <slot />
+</AppLayout>

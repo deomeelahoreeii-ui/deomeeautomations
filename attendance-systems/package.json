@@ -1,0 +1,19 @@
+{
+  "name": "pectaa-attendance-appscript",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "clasp": "clasp",
+    "login": "clasp login",
+    "status": "clasp status",
+    "pull": "clasp pull",
+    "push": "clasp push",
+    "push:force": "clasp push --force",
+    "open": "clasp open",
+    "deployments": "clasp deployments"
+  },
+  "devDependencies": {
+    "@google/clasp": "^3.0.6-alpha"
+  }
+}

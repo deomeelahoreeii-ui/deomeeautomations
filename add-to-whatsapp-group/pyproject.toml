@@ -1,0 +1,26 @@
+[project]
+name = "add-to-whatsapp-group"
+version = "1.0.0"
+description = "Queue configurable Excel contact ranges for WhatsApp group membership"
+requires-python = ">=3.12"
+dependencies = [
+    "nats-py>=2.11.0",
+    "openpyxl>=3.1.5",
+]
+
+[project.scripts]
+add-to-whatsapp-group = "whatsapp_group_importer.cli:main"
+audit-whatsapp-group-members = "whatsapp_group_importer.audit_cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["pytest>=8.4.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["whatsapp_group_importer"]

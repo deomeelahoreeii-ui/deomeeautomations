@@ -1,0 +1,43 @@
+---
+import type { SurveyStep } from "../../config/survey";
+
+type Props = {
+  steps: readonly SurveyStep[];
+};
+
+const { steps } = Astro.props;
+---
+
+<aside class="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-4 lg:self-start">
+  <div class="flex items-center justify-between gap-3">
+    <div>
+      <p class="text-xs font-bold uppercase tracking-wide text-slate-500">Progress</p>
+      <p id="progressLabel" class="mt-1 text-sm font-bold text-slate-950">Step 1 of {steps.length}</p>
+    </div>
+    <div class="grid h-14 w-14 place-items-center rounded-full bg-slate-950 text-sm font-black text-white">
+      <span id="progressPercent">{Math.round((1 / steps.length) * 100)}%</span>
+    </div>
+  </div>
+
+  <progress id="progressBar" class="progress progress-primary mt-4 h-2 w-full" value="1" max={steps.length}></progress>
+
+  <ol class="mt-5 space-y-2">
+    {steps.map((step, index) => (
+      <li>
+        <button
+          class="step-button group flex w-full items-start gap-3 rounded-2xl border border-transparent p-3 text-left transition"
+          data-step-button={index}
+          type="button"
+        >
+          <span class="step-dot grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-sm font-black text-slate-500 transition">
+            {index + 1}
+          </span>
+          <span class="min-w-0">
+            <span class="block text-sm font-black text-slate-800">{step.title}</span>
+            <span class="mt-0.5 block text-xs leading-5 text-slate-500">{step.description}</span>
+          </span>
+        </button>
+      </li>
+    ))}
+  </ol>
+</aside>

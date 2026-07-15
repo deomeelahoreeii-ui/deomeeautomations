@@ -1,0 +1,799 @@
+---
+import Layout from "../layouts/Layout.astro";
+import "../styles/global.css";
+import { env } from "cloudflare:workers";
+import { UserButton } from "@clerk/astro/components";
+import { requireApprovedAdmin } from "../lib/admin-auth";
+
+type D1Result<T> = {
+  results?: T[];
+};
+
+type D1PreparedStatement = {
+  bind(...values: unknown[]): D1PreparedStatement;
+  first<T = unknown>(): Promise<T | null>;
+  all<T = unknown>(): Promise<D1Result<T>>;
+};
+
+type D1Database = {
+  prepare(query: string): D1PreparedStatement;
+};
+
+type WorkerEnv = {
+  DB?: D1Database;
+};
+
+type RuntimeLocals = typeof Astro.locals & {
+  runtime?: {
+    env?: WorkerEnv;
+  };
+};
+
+type TotalMetric = {
+  total: number;
+};
+
+type SubjectMetric = {
+  applied_subject: string | null;
+  total: number;
+};
+
+type SubmissionRecord = {
+  id: number;
+  cnic: string | null;
+  applied_subject: string | null;
+  custom_passing_year: string | null;
+  custom_percentage: string | null;
+  degree_image_url: string | null;
+  timestamp: string | null;
+  teacher_name: string | null;
+  mobile_no: string | null;
+  designation: string | null;
+  district: string | null;
+  tehsil: string | null;
+  school: string | null;
+  emis: number | null;
+  degree_level: string | null;
+  degree_subject: string | null;
+  personal_no: string | null;
+};
+
+const targetSubjects = ["Math", "Islamiat", "Computer Science", "Social Studies"];
+
+const adminAuth = await requireApprovedAdmin(Astro);
+if (!adminAuth.authorized) {
+  return adminAuth.response;
+}
+
+const adminEmail = adminAuth.email;
+
+function getDb(): D1Database {
+  const importedEnv = env as WorkerEnv;
+  if (importedEnv.DB) {
+    return importedEnv.DB;
+  }
+
+  const runtimeEnv = (Astro.locals as RuntimeLocals).runtime?.env;
+  if (runtimeEnv?.DB) {
+    return runtimeEnv.DB;
+  }
+
+  throw new Error("Cloudflare D1 binding DB is not available.");
+}
+
+function displayValue(value: unknown): string {
+  const cleaned = String(value ?? "").trim();
+  return cleaned.length > 0 ? cleaned : "Not available";
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return "Not available";
+
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const date = new Date(normalized);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-PK", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+const db = getDb();
+
+const totalRow = await db
+  .prepare("SELECT COUNT(*) AS total FROM pectaa_marking_2026")
+  .first<TotalMetric>();
+
+const subjectResult = await db
+  .prepare(
+    `
+      SELECT applied_subject, COUNT(*) AS total
+      FROM pectaa_marking_2026
+      GROUP BY applied_subject
+      ORDER BY applied_subject
+    `,
+  )
+  .all<SubjectMetric>();
+
+const submissionsResult = await db
+  .prepare(
+    `
+      SELECT
+        n.id,
+        n.cnic,
+        n.applied_subject,
+        n.custom_passing_year,
+        n.custom_percentage,
+        n.degree_image_url,
+        n.timestamp,
+        t.teacher_name,
+        t.mobile_no,
+        t.designation,
+        t.district,
+        t.tehsil,
+        t.school,
+        t.emis,
+        t.degree_level,
+        t.degree_subject,
+        t.personal_no
+      FROM pectaa_marking_2026 n
+      LEFT JOIN teachers t ON t.cnic = n.cnic
+      ORDER BY n.timestamp DESC, n.id DESC
+    `,
+  )
+  .all<SubmissionRecord>();
+
+const totalNominations = totalRow?.total ?? 0;
+const subjectMetrics = new Map(
+  (subjectResult.results ?? []).map((metric) => [
+    displayValue(metric.applied_subject),
+    metric.total,
+  ]),
+);
+const submissions = submissionsResult.results ?? [];
+
+const exportRows = submissions.map((record) => ({
+  id: record.id,
+  cnic: record.cnic,
+  teacher_name: record.teacher_name,
+  mobile_no: record.mobile_no,
+  designation: record.designation,
+  district: record.district,
+  tehsil: record.tehsil,
+  school: record.school,
+  emis: record.emis,
+  personal_no: record.personal_no,
+  applied_subject: record.applied_subject,
+  custom_passing_year: record.custom_passing_year,
+  custom_percentage: record.custom_percentage,
+  degree_image_url: record.degree_image_url,
+  degree_level: record.degree_level,
+  degree_subject: record.degree_subject,
+  timestamp: record.timestamp,
+}));
+
+const exportJson = JSON.stringify(exportRows).replace(/</g, "\\u003c");
+---
+
+<Layout>
+  <main class="min-h-screen bg-base-300 px-4 py-6 text-base-content sm:px-6 lg:px-8" data-theme="night">
+    <section class="mx-auto w-full max-w-7xl space-y-6">
+      <header class="flex flex-col gap-4 rounded-box border border-base-content/10 bg-base-100 p-5 shadow-xl lg:flex-row lg:items-center lg:justify-between">
+        <div class="space-y-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="badge badge-primary badge-lg">Admin</div>
+            <div class="badge badge-outline">PECTAA Marking 2026</div>
+          </div>
+          <div>
+            <h1 class="text-3xl font-bold tracking-normal">District Nomination Dashboard</h1>
+            <p class="mt-1 text-base-content/70">
+              Track nomination progress, review manual verification cases, and export records.
+            </p>
+          </div>
+        </div>
+
+        <button id="downloadCsvButton" class="btn btn-primary">
+          Download Excel / CSV
+        </button>
+        <div class="flex items-center gap-3 rounded-box border border-base-content/10 bg-base-200 px-3 py-2">
+          <div class="text-right">
+            <div class="text-xs uppercase text-base-content/50">Signed in</div>
+            <div class="text-sm font-semibold">{adminEmail}</div>
+          </div>
+          <UserButton />
+        </div>
+      </header>
+
+      <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <div class="stats border border-primary/30 bg-base-100 shadow-xl xl:col-span-1">
+          <div class="stat">
+            <div class="stat-title">Total Nominations</div>
+            <div class="stat-value text-primary">{totalNominations}</div>
+            <div class="stat-desc">Received so far</div>
+          </div>
+        </div>
+
+        {targetSubjects.map((subject) => (
+          <div class="stats border border-base-content/10 bg-base-100 shadow-xl">
+            <div class="stat">
+              <div class="stat-title">{subject}</div>
+              <div class="stat-value text-2xl">{subjectMetrics.get(subject) ?? 0}</div>
+              <div class="stat-desc">Subject nominations</div>
+            </div>
+          </div>
+        ))}
+      </section>
+
+      <section class="card border border-base-content/10 bg-base-100 shadow-xl">
+        <div class="card-body gap-4 p-0">
+          <div class="flex flex-col gap-2 px-5 pt-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 class="text-xl font-bold">Submission Records</h2>
+              <p class="text-sm text-base-content/60">
+                {submissions.length} relational record{submissions.length === 1 ? "" : "s"} loaded from D1.
+              </p>
+            </div>
+            <div class="badge badge-outline">Live SSR data</div>
+          </div>
+
+          <div class="max-h-[68vh] overflow-auto">
+            <table class="table table-zebra table-md table-pin-rows text-sm">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Teacher</th>
+                  <th class="cursor-pointer select-none" data-sort-key="cnic" data-sort-type="number">
+                    <span class="inline-flex items-center gap-1">
+                      CNIC
+                      <span class="text-base-content/40" data-sort-indicator>↕</span>
+                    </span>
+                  </th>
+                  <th class="cursor-pointer select-none" data-sort-key="subject" data-sort-type="string">
+                    <span class="inline-flex items-center gap-1">
+                      Subject
+                      <span class="text-base-content/40" data-sort-indicator>↕</span>
+                    </span>
+                  </th>
+                  <th class="cursor-pointer select-none" data-sort-key="verification" data-sort-type="string">
+                    <span class="inline-flex items-center gap-1">
+                      Verification
+                      <span class="text-base-content/40" data-sort-indicator>↕</span>
+                    </span>
+                  </th>
+                  <th>Contact</th>
+                  <th>Posting</th>
+                  <th>Degree</th>
+                  <th>Fallback Inputs</th>
+                  <th>Certificate</th>
+                  <th class="cursor-pointer select-none" data-sort-key="submitted" data-sort-type="date">
+                    <span class="inline-flex items-center gap-1">
+                      Submitted
+                      <span class="text-base-content/40" data-sort-indicator>↕</span>
+                    </span>
+                  </th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="submissionsTableBody">
+                {submissions.length === 0 ? (
+                  <tr>
+                    <td colspan="12">
+                      <div class="alert alert-info my-4">
+                        <span>No nominations have been submitted yet.</span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  submissions.map((record, index) => {
+                    const manualVerification =
+                      Boolean(record.custom_passing_year) ||
+                      Boolean(record.custom_percentage) ||
+                      Boolean(record.degree_image_url);
+
+                    return (
+                      <tr data-sort-row>
+                        <th data-row-index>{index + 1}</th>
+                        <td class="align-top">
+                          <div class="font-semibold leading-snug">{displayValue(record.teacher_name)}</div>
+                          <div class="text-xs text-base-content/60">{displayValue(record.designation)}</div>
+                        </td>
+                        <td class="align-top font-mono text-sm" data-sort-key="cnic" data-sort-value={record.cnic ?? ""}>
+                          {displayValue(record.cnic)}
+                        </td>
+                        <td class="align-top" data-sort-key="subject" data-sort-value={record.applied_subject ?? ""}>
+                          <div class="badge badge-md badge-primary border-0 text-primary-content shadow-sm">
+                            {displayValue(record.applied_subject)}
+                          </div>
+                        </td>
+                        <td
+                          class="align-top"
+                          data-sort-key="verification"
+                          data-sort-value={manualVerification ? "manual verification required" : "auto matched"}
+                        >
+                          {manualVerification ? (
+                            <div class="badge badge-md badge-warning border-0 text-warning-content shadow-sm">
+                              Manual Verification Required
+                            </div>
+                          ) : (
+                            <div class="badge badge-md badge-success border-0 text-success-content shadow-sm">
+                              Auto Matched
+                            </div>
+                          )}
+                        </td>
+                        <td class="align-top leading-snug">
+                          <div class="font-medium">{displayValue(record.mobile_no)}</div>
+                          <div class="text-xs text-base-content/60">Personal: {displayValue(record.personal_no)}</div>
+                        </td>
+                        <td class="min-w-80 align-top leading-snug">
+                          <div class="font-medium leading-snug">{displayValue(record.school)}</div>
+                          <div class="text-xs text-base-content/60">
+                            {displayValue(record.district)} / {displayValue(record.tehsil)} / EMIS {displayValue(record.emis)}
+                          </div>
+                        </td>
+                        <td class="min-w-64 align-top leading-snug">
+                          <div class="font-medium">{displayValue(record.degree_level)}</div>
+                          <div class="text-xs text-base-content/60">{displayValue(record.degree_subject)}</div>
+                        </td>
+                        <td class="align-top leading-snug">
+                          <div class="text-sm">Year: {displayValue(record.custom_passing_year)}</div>
+                          <div class="text-sm">Percentage: {displayValue(record.custom_percentage)}</div>
+                        </td>
+                        <td class="align-top">
+                          {record.degree_image_url ? (
+                            <a
+                              class="btn btn-xs btn-info border-0 text-info-content shadow-sm"
+                              href={record.degree_image_url}
+                              rel="noopener noreferrer"
+                              target="_blank"
+                            >
+                              Open Certificate
+                            </a>
+                          ) : (
+                            <span class="text-sm text-base-content/50">Not required</span>
+                          )}
+                        </td>
+                        <td
+                          class="min-w-44 align-top"
+                          data-sort-key="submitted"
+                          data-sort-value={record.timestamp ?? ""}
+                        >
+                          {formatDate(record.timestamp)}
+                        </td>
+                        <td class="align-top">
+                          <div class="flex min-w-32 gap-2">
+                            <button
+                              class="btn btn-xs btn-accent border-0 text-accent-content shadow-sm"
+                              data-action="edit-submission"
+                              data-id={record.id}
+                              data-teacher-name={displayValue(record.teacher_name)}
+                              data-cnic={record.cnic ?? ""}
+                              data-applied-subject={record.applied_subject ?? ""}
+                              data-custom-passing-year={record.custom_passing_year ?? ""}
+                              data-custom-percentage={record.custom_percentage ?? ""}
+                              data-degree-image-url={record.degree_image_url ?? ""}
+                              type="button"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              class="btn btn-xs btn-error border-0 text-error-content shadow-sm"
+                              data-action="delete-submission"
+                              data-id={record.id}
+                              data-teacher-name={displayValue(record.teacher_name)}
+                              data-cnic={record.cnic ?? ""}
+                              type="button"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <dialog id="editSubmissionModal" class="modal">
+      <div class="modal-box max-w-2xl border border-base-content/10 bg-base-100">
+        <form method="dialog">
+          <button class="btn btn-circle btn-ghost btn-sm absolute right-3 top-3" type="submit">
+            ✕
+          </button>
+        </form>
+
+        <h2 class="text-2xl font-bold tracking-normal">Edit Submission</h2>
+        <p id="editSubmissionContext" class="mt-1 text-sm text-base-content/60"></p>
+
+        <form id="editSubmissionForm" class="mt-5 grid gap-4 sm:grid-cols-2">
+          <input id="editSubmissionId" type="hidden" />
+
+          <label class="form-control">
+            <span class="label">
+              <span class="label-text">Applied Subject</span>
+            </span>
+            <select id="editAppliedSubject" class="select select-bordered" required>
+              <option value="">Select subject</option>
+              <option value="Math">Math</option>
+              <option value="Islamiat">Islamiat</option>
+              <option value="Computer Science">Computer Science</option>
+              <option value="Social Studies">Social Studies</option>
+            </select>
+          </label>
+
+          <label class="form-control">
+            <span class="label">
+              <span class="label-text">Passing Year</span>
+            </span>
+            <input
+              id="editPassingYear"
+              class="input input-bordered"
+              inputmode="numeric"
+              maxlength="4"
+              placeholder="Optional"
+              type="text"
+            />
+          </label>
+
+          <label class="form-control">
+            <span class="label">
+              <span class="label-text">Percentage</span>
+            </span>
+            <input
+              id="editPercentage"
+              class="input input-bordered"
+              inputmode="decimal"
+              placeholder="Optional"
+              type="text"
+            />
+          </label>
+
+          <label class="form-control">
+            <span class="label">
+              <span class="label-text">Certificate URL</span>
+            </span>
+            <input
+              id="editDegreeImageUrl"
+              class="input input-bordered"
+              placeholder="Optional HTTPS URL"
+              type="url"
+            />
+          </label>
+
+          <div id="editSubmissionMessage" class="hidden sm:col-span-2"></div>
+
+          <div class="modal-action sm:col-span-2">
+            <button class="btn btn-ghost" type="button" data-action="close-edit-modal">
+              Cancel
+            </button>
+            <button id="saveSubmissionButton" class="btn btn-success" type="submit">
+              Save Changes
+            </button>
+          </div>
+        </form>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+      </form>
+    </dialog>
+
+    <dialog id="deleteSubmissionModal" class="modal">
+      <div class="modal-box border border-error/30 bg-base-100">
+        <h2 class="text-2xl font-bold tracking-normal">Delete Submission</h2>
+        <p id="deleteSubmissionContext" class="mt-3 text-base-content/70"></p>
+        <div id="deleteSubmissionMessage" class="hidden"></div>
+        <div class="modal-action">
+          <button class="btn btn-ghost" type="button" data-action="close-delete-modal">
+            Cancel
+          </button>
+          <button id="confirmDeleteButton" class="btn btn-error" type="button">
+            Delete Record
+          </button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+      </form>
+    </dialog>
+
+    <script id="nominationExportData" type="application/json" set:html={exportJson}></script>
+
+    <script>
+      const downloadButton = document.getElementById("downloadCsvButton");
+      const exportDataElement = document.getElementById("nominationExportData");
+      const submissionsTableBody = document.getElementById("submissionsTableBody");
+      const sortableHeaders = document.querySelectorAll("th[data-sort-key]");
+      const editSubmissionModal = document.getElementById("editSubmissionModal");
+      const deleteSubmissionModal = document.getElementById("deleteSubmissionModal");
+      const editSubmissionForm = document.getElementById("editSubmissionForm");
+      const editSubmissionId = document.getElementById("editSubmissionId");
+      const editSubmissionContext = document.getElementById("editSubmissionContext");
+      const editAppliedSubject = document.getElementById("editAppliedSubject");
+      const editPassingYear = document.getElementById("editPassingYear");
+      const editPercentage = document.getElementById("editPercentage");
+      const editDegreeImageUrl = document.getElementById("editDegreeImageUrl");
+      const editSubmissionMessage = document.getElementById("editSubmissionMessage");
+      const saveSubmissionButton = document.getElementById("saveSubmissionButton");
+      const deleteSubmissionContext = document.getElementById("deleteSubmissionContext");
+      const deleteSubmissionMessage = document.getElementById("deleteSubmissionMessage");
+      const confirmDeleteButton = document.getElementById("confirmDeleteButton");
+      const sortState = {
+        key: "",
+        direction: "asc",
+      };
+      let pendingDeleteId = "";
+
+      const csvHeaders = [
+        ["id", "ID"],
+        ["cnic", "CNIC"],
+        ["teacher_name", "Teacher Name"],
+        ["mobile_no", "Mobile No"],
+        ["designation", "Designation"],
+        ["district", "District"],
+        ["tehsil", "Tehsil"],
+        ["school", "School"],
+        ["emis", "EMIS"],
+        ["personal_no", "Personal No"],
+        ["applied_subject", "Applied Subject"],
+        ["custom_passing_year", "Custom Passing Year"],
+        ["custom_percentage", "Custom Percentage"],
+        ["degree_image_url", "Degree Image URL"],
+        ["degree_level", "Degree Level"],
+        ["degree_subject", "Degree Subject"],
+        ["timestamp", "Submitted At"],
+      ];
+
+      function csvEscape(value) {
+        const text = String(value ?? "");
+        const escaped = text.replace(/"/g, '""');
+        return /[",\n\r]/.test(escaped) ? `"${escaped}"` : escaped;
+      }
+
+      function downloadCsv() {
+        const rows = JSON.parse(exportDataElement.textContent || "[]");
+        const csvLines = [
+          csvHeaders.map(([, label]) => csvEscape(label)).join(","),
+          ...rows.map((row) =>
+            csvHeaders.map(([key]) => csvEscape(row[key])).join(","),
+          ),
+        ];
+
+        const blob = new Blob([csvLines.join("\r\n")], {
+          type: "text/csv;charset=utf-8",
+        });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+
+        anchor.href = url;
+        anchor.download = "PECTAA_Marking_Nominations_2026.csv";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      function normalizeSortValue(value, type) {
+        if (type === "number") {
+          const parsed = Number(String(value ?? "").replace(/[^\d.-]/g, ""));
+          return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+        }
+
+        if (type === "date") {
+          const raw = String(value ?? "").trim();
+          if (!raw) return 0;
+          const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+          const parsed = Date.parse(normalized);
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        return String(value ?? "").trim().toLowerCase();
+      }
+
+      function updateSortIndicators(activeHeader, direction) {
+        sortableHeaders.forEach((header) => {
+          const indicator = header.querySelector("[data-sort-indicator]");
+          if (!indicator) return;
+
+          indicator.textContent = header === activeHeader ? (direction === "asc" ? "↑" : "↓") : "↕";
+          indicator.classList.toggle("text-primary", header === activeHeader);
+          indicator.classList.toggle("text-base-content/40", header !== activeHeader);
+        });
+      }
+
+      function renumberRows() {
+        submissionsTableBody
+          .querySelectorAll("tr[data-sort-row]")
+          .forEach((row, index) => {
+            const indexCell = row.querySelector("[data-row-index]");
+            if (indexCell) {
+              indexCell.textContent = String(index + 1);
+            }
+          });
+      }
+
+      function sortTableByHeader(header) {
+        const key = header.dataset.sortKey;
+        const type = header.dataset.sortType || "string";
+
+        if (!key || !submissionsTableBody) return;
+
+        const direction =
+          sortState.key === key && sortState.direction === "asc" ? "desc" : "asc";
+        const rows = Array.from(submissionsTableBody.querySelectorAll("tr[data-sort-row]"));
+
+        rows.sort((leftRow, rightRow) => {
+          const leftCell = leftRow.querySelector(`[data-sort-key="${key}"]`);
+          const rightCell = rightRow.querySelector(`[data-sort-key="${key}"]`);
+          const leftValue = normalizeSortValue(
+            leftCell?.dataset.sortValue ?? leftCell?.textContent,
+            type,
+          );
+          const rightValue = normalizeSortValue(
+            rightCell?.dataset.sortValue ?? rightCell?.textContent,
+            type,
+          );
+
+          if (typeof leftValue === "number" && typeof rightValue === "number") {
+            return direction === "asc" ? leftValue - rightValue : rightValue - leftValue;
+          }
+
+          const comparison = String(leftValue).localeCompare(String(rightValue), undefined, {
+            numeric: true,
+            sensitivity: "base",
+          });
+
+          return direction === "asc" ? comparison : -comparison;
+        });
+
+        rows.forEach((row) => submissionsTableBody.appendChild(row));
+        sortState.key = key;
+        sortState.direction = direction;
+        updateSortIndicators(header, direction);
+        renumberRows();
+      }
+
+      function setButtonLoading(button, isLoading) {
+        button.disabled = isLoading;
+        button.classList.toggle("loading", isLoading);
+      }
+
+      function setModalMessage(element, type, message) {
+        const alertClass = type === "success" ? "alert-success" : "alert-error";
+        element.className = `alert ${alertClass}`;
+        element.textContent = message;
+      }
+
+      function clearModalMessage(element) {
+        element.className = "hidden";
+        element.textContent = "";
+      }
+
+      async function readApiError(response, fallback) {
+        try {
+          const body = await response.json();
+          return body.error || body.message || fallback;
+        } catch {
+          return fallback;
+        }
+      }
+
+      function openEditModal(button) {
+        clearModalMessage(editSubmissionMessage);
+        editSubmissionId.value = button.dataset.id || "";
+        editAppliedSubject.value = button.dataset.appliedSubject || "";
+        editPassingYear.value = button.dataset.customPassingYear || "";
+        editPercentage.value = button.dataset.customPercentage || "";
+        editDegreeImageUrl.value = button.dataset.degreeImageUrl || "";
+        editSubmissionContext.textContent = `${button.dataset.teacherName || "Unknown teacher"} / CNIC ${button.dataset.cnic || "Not available"}`;
+        editSubmissionModal.showModal();
+      }
+
+      function openDeleteModal(button) {
+        clearModalMessage(deleteSubmissionMessage);
+        pendingDeleteId = button.dataset.id || "";
+        deleteSubmissionContext.textContent = `This will permanently delete the nomination record for ${button.dataset.teacherName || "Unknown teacher"} / CNIC ${button.dataset.cnic || "Not available"}.`;
+        deleteSubmissionModal.showModal();
+      }
+
+      async function saveSubmission(event) {
+        event.preventDefault();
+        clearModalMessage(editSubmissionMessage);
+        setButtonLoading(saveSubmissionButton, true);
+
+        try {
+          const response = await fetch("/api/admin/submissions", {
+            method: "PATCH",
+            headers: {
+              "content-type": "application/json",
+              accept: "application/json",
+            },
+            body: JSON.stringify({
+              id: editSubmissionId.value,
+              applied_subject: editAppliedSubject.value,
+              custom_passing_year: editPassingYear.value,
+              custom_percentage: editPercentage.value,
+              degree_image_url: editDegreeImageUrl.value,
+            }),
+          });
+
+          if (!response.ok) {
+            const errorMessage = await readApiError(response, "Unable to update submission.");
+            setModalMessage(editSubmissionMessage, "error", errorMessage);
+            return;
+          }
+
+          setModalMessage(editSubmissionMessage, "success", "Submission updated. Refreshing dashboard...");
+          window.setTimeout(() => window.location.reload(), 600);
+        } catch {
+          setModalMessage(editSubmissionMessage, "error", "Network error. Please try again.");
+        } finally {
+          setButtonLoading(saveSubmissionButton, false);
+        }
+      }
+
+      async function deleteSubmission() {
+        clearModalMessage(deleteSubmissionMessage);
+
+        if (!pendingDeleteId) {
+          setModalMessage(deleteSubmissionMessage, "error", "No submission selected.");
+          return;
+        }
+
+        setButtonLoading(confirmDeleteButton, true);
+
+        try {
+          const response = await fetch("/api/admin/submissions", {
+            method: "DELETE",
+            headers: {
+              "content-type": "application/json",
+              accept: "application/json",
+            },
+            body: JSON.stringify({ id: pendingDeleteId }),
+          });
+
+          if (!response.ok) {
+            const errorMessage = await readApiError(response, "Unable to delete submission.");
+            setModalMessage(deleteSubmissionMessage, "error", errorMessage);
+            return;
+          }
+
+          setModalMessage(deleteSubmissionMessage, "success", "Submission deleted. Refreshing dashboard...");
+          window.setTimeout(() => window.location.reload(), 600);
+        } catch {
+          setModalMessage(deleteSubmissionMessage, "error", "Network error. Please try again.");
+        } finally {
+          setButtonLoading(confirmDeleteButton, false);
+        }
+      }
+
+      downloadButton.addEventListener("click", downloadCsv);
+      sortableHeaders.forEach((header) => {
+        header.addEventListener("click", () => sortTableByHeader(header));
+      });
+      document.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-action]");
+        if (!button) return;
+
+        if (button.dataset.action === "edit-submission") {
+          openEditModal(button);
+        } else if (button.dataset.action === "delete-submission") {
+          openDeleteModal(button);
+        } else if (button.dataset.action === "close-edit-modal") {
+          editSubmissionModal.close();
+        } else if (button.dataset.action === "close-delete-modal") {
+          deleteSubmissionModal.close();
+        }
+      });
+      editSubmissionForm.addEventListener("submit", saveSubmission);
+      confirmDeleteButton.addEventListener("click", deleteSubmission);
+    </script>
+  </main>
+</Layout>

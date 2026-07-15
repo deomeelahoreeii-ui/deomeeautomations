@@ -1,0 +1,18 @@
+---
+interface Props {
+  active: "audiences" | "recipient-scopes" | "report-types" | "profiles" | "templates";
+}
+
+const { active } = Astro.props;
+const links = [
+  ["audiences", "Audiences", "/whatsapp/audiences"],
+  ["recipient-scopes", "Recipient roles & scopes", "/whatsapp/recipient-scopes"],
+  ["report-types", "Report types", "/whatsapp/report-types"],
+  ["profiles", "Dispatch profiles", "/whatsapp/dispatch"],
+  ["templates", "Templates", "/whatsapp/templates"],
+];
+---
+
+<nav class="directory-tabs" aria-label="WhatsApp routing configuration">
+  {links.map(([id, label, href]) => <a class:list={{ active: active === id }} href={href}>{label}</a>)}
+</nav>

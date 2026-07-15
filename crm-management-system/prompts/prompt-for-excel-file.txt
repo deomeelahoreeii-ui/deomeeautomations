@@ -1,0 +1,12 @@
+Input
+
+i have new complaints in excel/csv file
+There is complaint remarks column, Complaint Remarks column is actually the complaint text or complaint details, its column "P", in the file.
+As each row in a file is a complete record, process/read each row carefully one by one, and add that reply and move on maybe.
+use all the existing instructions, knowledge, examples and modifications that we did till now to answer the complaints in reply column,
+I don't care about how much time you take, no rush, take your time,
+
+OutPUT
+
+after process all the complaints give me file, which in which column "A" is complaint number, column "B" is complaint reply.
+output file should have only two columns to one complaint number and other reply to ease your load of file creation with all the text again.

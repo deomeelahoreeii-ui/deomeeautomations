@@ -1,0 +1,14 @@
+**/**
+!*.gs
+!*.html
+!appsscript.json
+
+node_modules/**
+bun.lock
+package.json
+README.md
+*.xlsx
+.clasp.json
+.claspignore
+.env
+.env.*

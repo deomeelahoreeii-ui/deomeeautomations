@@ -1,0 +1,17 @@
+---
+import SurveyHero from "../components/survey/SurveyHero.astro";
+import SurveyWizard from "../components/survey/SurveyWizard.astro";
+import Layout from "../layouts/Layout.astro";
+import "../styles/global.css";
+
+export const prerender = false;
+---
+
+<Layout>
+  <main class="min-h-screen bg-[#f3f6fb] text-slate-950">
+    <section class="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
+      <SurveyHero />
+      <SurveyWizard />
+    </section>
+  </main>
+</Layout>

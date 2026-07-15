@@ -1,0 +1,26 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local credentials and scraper output
+.env
+.complaints_manager.json
+
+*.duckdb
+*.duckdb.wal
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+artifacts/
+crm-reply-context-packs/
+raw_html/
+notification_downloads/
+phase1-crm/unprocessed-crm/filtered/**/*.pdf
+phase1-crm/unprocessed-crm/filtered/crm-duplicate-filter-report.csv

@@ -1,0 +1,559 @@
+---
+import Layout from "../layouts/Layout.astro";
+import "../styles/global.css";
+---
+
+<Layout>
+  <main class="min-h-screen bg-base-300 px-4 py-8 text-base-content sm:px-6 lg:px-8" data-theme="night">
+    <section class="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-4xl flex-col justify-center">
+      <div id="interactivePanel" class="card border border-base-content/10 bg-base-100 shadow-2xl">
+        <div class="card-body gap-6 p-5 sm:p-8">
+          <header class="space-y-4">
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="badge badge-primary badge-lg">PECTAA</div>
+              <div class="badge badge-outline">Marking Nomination 2026</div>
+            </div>
+            <div class="space-y-2">
+              <h1 class="text-3xl font-bold tracking-normal sm:text-4xl">PECTAA Marking Nomination 2026</h1>
+              <p class="max-w-2xl text-base-content/70">
+                Search your teacher directory record and submit your nomination for the active marking duty pool.
+              </p>
+            </div>
+            <div class="alert alert-info">
+              <span>
+                Automatic eligibility is checked for Math, Islamiat, Computer Science, and Social Studies master degree holders.
+              </span>
+            </div>
+          </header>
+
+          <form id="searchForm" class="join w-full flex-col gap-3 sm:flex-row sm:gap-0">
+            <input
+              id="cnicInput"
+              class="input input-bordered join-item w-full text-base"
+              inputmode="numeric"
+              autocomplete="off"
+              name="cnic"
+              placeholder="Enter 13-digit CNIC"
+              type="text"
+            />
+            <button id="searchButton" class="btn btn-primary join-item shrink-0" type="submit">
+              Search Record
+            </button>
+          </form>
+
+          <div id="messageRegion" class="hidden"></div>
+
+          <section id="verificationSection" class="hidden">
+            <div class="divider">Verification</div>
+
+            <div class="grid gap-4 lg:grid-cols-[1fr_18rem]">
+              <div class="card border border-base-content/10 bg-base-200">
+                <div class="card-body gap-4 p-4 sm:p-6">
+                  <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p class="text-sm font-semibold uppercase text-base-content/60">Teacher Name</p>
+                      <h2 id="teacherName" class="text-2xl font-bold"></h2>
+                    </div>
+                    <div id="teacherDesignation" class="badge badge-secondary badge-lg"></div>
+                  </div>
+
+                  <div class="grid gap-3 sm:grid-cols-2">
+                    <div class="rounded-box border border-base-content/10 bg-base-100 p-4">
+                      <p class="text-sm font-semibold text-base-content/60">Place of Posting</p>
+                      <p id="teacherSchool" class="mt-1 font-medium"></p>
+                    </div>
+                    <div class="rounded-box border border-base-content/10 bg-base-100 p-4">
+                      <p class="text-sm font-semibold text-base-content/60">District</p>
+                      <p id="teacherDistrict" class="mt-1 font-medium"></p>
+                    </div>
+                    <div class="rounded-box border border-base-content/10 bg-base-100 p-4">
+                      <p class="text-sm font-semibold text-base-content/60">Contact Number</p>
+                      <p id="teacherMobile" class="mt-1 font-medium"></p>
+                    </div>
+                    <div class="rounded-box border border-base-content/10 bg-base-100 p-4">
+                      <p class="text-sm font-semibold text-base-content/60">Master Degree</p>
+                      <p id="teacherDegree" class="mt-1 font-medium"></p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <aside class="card border border-base-content/10 bg-base-200">
+                <div class="card-body gap-3 p-4">
+                  <p class="text-sm font-semibold uppercase text-base-content/60">Marking Path</p>
+                  <div id="matchBadge" class="badge badge-lg"></div>
+                  <p id="matchSummary" class="text-sm text-base-content/70"></p>
+                </div>
+              </aside>
+            </div>
+
+            <form id="nominationForm" class="mt-5 space-y-5">
+              <section id="fallbackPanel" class="hidden space-y-4">
+                <div class="alert alert-warning">
+                  <span>
+                    Your directory degree information does not directly match the target categories. Complete the fields below and upload your degree evidence for verification.
+                  </span>
+                </div>
+
+                <div class="grid gap-4 rounded-box border border-warning/30 bg-base-200 p-4 sm:grid-cols-2">
+                  <label class="form-control">
+                    <span class="label">
+                      <span class="label-text">Target Subject</span>
+                    </span>
+                    <select id="targetSubject" class="select select-bordered" name="applied_subject">
+                      <option value="">Select subject</option>
+                      <option value="Math">Math</option>
+                      <option value="Islamiat">Islamiat</option>
+                      <option value="Computer Science">Computer Science</option>
+                      <option value="Social Studies">Social Studies</option>
+                    </select>
+                  </label>
+
+                  <label class="form-control">
+                    <span class="label">
+                      <span class="label-text">Graduation Passing Year</span>
+                    </span>
+                    <input
+                      id="passingYear"
+                      class="input input-bordered"
+                      inputmode="numeric"
+                      maxlength="4"
+                      placeholder="e.g. 2018"
+                      type="text"
+                    />
+                  </label>
+
+                  <label class="form-control">
+                    <span class="label">
+                      <span class="label-text">Total/Obtained Percentage</span>
+                    </span>
+                    <input
+                      id="percentageInput"
+                      class="input input-bordered"
+                      inputmode="decimal"
+                      placeholder="e.g. 72.50"
+                      type="text"
+                    />
+                  </label>
+
+                  <label class="form-control">
+                    <span class="label">
+                      <span class="label-text">Degree Certificate / Transcript</span>
+                    </span>
+                    <input
+                      id="degreeFileInput"
+                      class="file-input file-input-bordered file-input-primary"
+                      accept="image/png,image/jpeg,image/webp"
+                      type="file"
+                    />
+                  </label>
+                </div>
+              </section>
+
+              <label class="form-control rounded-box border border-base-content/10 bg-base-200 p-4">
+                <span class="label cursor-pointer justify-start gap-3 p-0">
+                  <input id="consentCheckbox" class="checkbox checkbox-success" type="checkbox" required />
+                  <span class="label-text text-base">
+                    I willingly submit my nomination for marking duties at PECTAA Headquarter.
+                  </span>
+                </span>
+              </label>
+
+              <button id="submitButton" class="btn btn-success w-full" type="submit">
+                Confirm &amp; Submit
+              </button>
+            </form>
+          </section>
+        </div>
+      </div>
+
+      <section id="successSection" class="hidden">
+        <div class="card border border-success/40 bg-base-100 shadow-2xl">
+          <div class="card-body items-center gap-5 p-6 text-center sm:p-10">
+            <div class="alert alert-success max-w-xl justify-center">
+              <span class="text-lg font-semibold">Nomination submitted successfully.</span>
+            </div>
+            <div>
+              <h2 class="text-3xl font-bold tracking-normal">Your nomination has been received</h2>
+              <p id="successDetail" class="mt-3 max-w-xl text-base-content/70"></p>
+            </div>
+            <button id="newSearchButton" class="btn btn-outline btn-primary">
+              Search Another Record
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section id="alreadySubmittedSection" class="hidden">
+        <div class="card border border-info/40 bg-base-100 shadow-2xl">
+          <div class="card-body items-center gap-5 p-6 text-center sm:p-10">
+            <div class="alert alert-info max-w-xl justify-center">
+              <span class="text-lg font-semibold">Nomination already received.</span>
+            </div>
+            <div>
+              <h2 class="text-3xl font-bold tracking-normal">Your record is already submitted</h2>
+              <p id="alreadySubmittedDetail" class="mt-3 max-w-xl text-base-content/70"></p>
+            </div>
+            <button id="alreadySubmittedSearchButton" class="btn btn-outline btn-primary">
+              Search Another Record
+            </button>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <div
+      id="submissionOverlay"
+      class="fixed inset-0 z-[9999] hidden items-center justify-center bg-neutral/80 px-4 backdrop-blur-md"
+      aria-live="assertive"
+      aria-modal="true"
+      role="alertdialog"
+    >
+      <div class="card w-full max-w-md border border-primary/30 bg-base-100 shadow-2xl">
+        <div class="card-body items-center gap-5 p-8 text-center">
+          <span class="loading loading-spinner loading-lg text-primary"></span>
+          <div class="space-y-2">
+            <h2 class="text-2xl font-bold tracking-normal">Submitting nomination</h2>
+            <p class="animate-pulse text-base-content/70">
+              Please do not close this window while your file is uploaded and your record is saved.
+            </p>
+          </div>
+          <progress class="progress progress-primary w-full"></progress>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const searchForm = document.getElementById("searchForm");
+    const nominationForm = document.getElementById("nominationForm");
+    const cnicInput = document.getElementById("cnicInput");
+    const searchButton = document.getElementById("searchButton");
+    const submitButton = document.getElementById("submitButton");
+    const consentCheckbox = document.getElementById("consentCheckbox");
+    const messageRegion = document.getElementById("messageRegion");
+    const verificationSection = document.getElementById("verificationSection");
+    const fallbackPanel = document.getElementById("fallbackPanel");
+    const interactivePanel = document.getElementById("interactivePanel");
+    const successSection = document.getElementById("successSection");
+    const successDetail = document.getElementById("successDetail");
+    const alreadySubmittedSection = document.getElementById("alreadySubmittedSection");
+    const alreadySubmittedDetail = document.getElementById("alreadySubmittedDetail");
+    const newSearchButton = document.getElementById("newSearchButton");
+    const alreadySubmittedSearchButton = document.getElementById("alreadySubmittedSearchButton");
+    const submissionOverlay = document.getElementById("submissionOverlay");
+    const targetSubject = document.getElementById("targetSubject");
+    const passingYear = document.getElementById("passingYear");
+    const percentageInput = document.getElementById("percentageInput");
+    const degreeFileInput = document.getElementById("degreeFileInput");
+
+    const teacherName = document.getElementById("teacherName");
+    const teacherDesignation = document.getElementById("teacherDesignation");
+    const teacherSchool = document.getElementById("teacherSchool");
+    const teacherDistrict = document.getElementById("teacherDistrict");
+    const teacherMobile = document.getElementById("teacherMobile");
+    const teacherDegree = document.getElementById("teacherDegree");
+    const matchBadge = document.getElementById("matchBadge");
+    const matchSummary = document.getElementById("matchSummary");
+
+    let selectedCnic = "";
+    let selectedTeacher = null;
+
+    function sanitizeCnic(value) {
+      return String(value ?? "").replace(/[\s-]/g, "").trim();
+    }
+
+    function setLoading(button, isLoading) {
+      button.disabled = isLoading;
+      button.classList.toggle("loading", isLoading);
+    }
+
+    function showSubmissionOverlay() {
+      submissionOverlay.classList.remove("hidden");
+      submissionOverlay.classList.add("flex");
+      document.documentElement.classList.add("overflow-hidden");
+      document.body.classList.add("overflow-hidden");
+    }
+
+    function hideSubmissionOverlay() {
+      submissionOverlay.classList.add("hidden");
+      submissionOverlay.classList.remove("flex");
+      document.documentElement.classList.remove("overflow-hidden");
+      document.body.classList.remove("overflow-hidden");
+    }
+
+    function setMessage(type, text) {
+      const alertClass = type === "warning" ? "alert-warning" : "alert-error";
+      messageRegion.className = `alert ${alertClass}`;
+      messageRegion.textContent = text;
+    }
+
+    function clearMessage() {
+      messageRegion.className = "hidden";
+      messageRegion.textContent = "";
+    }
+
+    function displayValue(value) {
+      const cleanValue = String(value ?? "").trim();
+      return cleanValue.length > 0 ? cleanValue : "Not available";
+    }
+
+    function buildDegreeText(teacher) {
+      const degreeLevel = displayValue(teacher.degree_level);
+      const degreeSubject = displayValue(teacher.degree_subject);
+
+      if (degreeLevel === "Not available" && degreeSubject === "Not available") {
+        return "Not available";
+      }
+
+      return `${degreeLevel} in ${degreeSubject}`;
+    }
+
+    function setFallbackRequired(isRequired) {
+      targetSubject.required = isRequired;
+      passingYear.required = isRequired;
+      percentageInput.required = isRequired;
+      degreeFileInput.required = isRequired;
+    }
+
+    function renderTeacher(teacher) {
+      selectedTeacher = teacher;
+      teacherName.textContent = displayValue(teacher.teacher_name);
+      teacherDesignation.textContent = displayValue(teacher.designation);
+      teacherSchool.textContent = displayValue(teacher.school);
+      teacherDistrict.textContent = displayValue(teacher.district);
+      teacherMobile.textContent = displayValue(teacher.mobile_no);
+      teacherDegree.textContent = buildDegreeText(teacher);
+      consentCheckbox.checked = false;
+
+      if (teacher.is_auto_match) {
+        fallbackPanel.classList.add("hidden");
+        setFallbackRequired(false);
+        targetSubject.value = teacher.matched_subject || "";
+        matchBadge.className = "badge badge-success badge-lg";
+        matchBadge.textContent = teacher.matched_subject;
+        matchSummary.textContent = "Your degree record matches an eligible target category. You can submit after consent.";
+      } else {
+        fallbackPanel.classList.remove("hidden");
+        setFallbackRequired(true);
+        targetSubject.value = "";
+        matchBadge.className = "badge badge-warning badge-lg";
+        matchBadge.textContent = "Manual Verification";
+        matchSummary.textContent = "Additional degree information is required before nomination submission.";
+      }
+
+      verificationSection.classList.remove("hidden");
+    }
+
+    function formatSubmissionDate(value) {
+      if (!value) {
+        return "the previously recorded submission date";
+      }
+
+      const normalized = String(value).includes("T") ? String(value) : String(value).replace(" ", "T");
+      const date = new Date(normalized);
+
+      if (Number.isNaN(date.getTime())) {
+        return String(value);
+      }
+
+      return new Intl.DateTimeFormat("en-PK", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(date);
+    }
+
+    function renderAlreadySubmitted(teacher) {
+      selectedTeacher = null;
+      selectedCnic = "";
+      verificationSection.classList.add("hidden");
+      interactivePanel.classList.add("hidden");
+      successSection.classList.add("hidden");
+      alreadySubmittedDetail.textContent = `Your nomination was already received on ${formatSubmissionDate(
+        teacher.existing_submission_timestamp,
+      )}. No further action is required.`;
+      alreadySubmittedSection.classList.remove("hidden");
+    }
+
+    async function readApiError(response, fallback) {
+      try {
+        const body = await response.json();
+        return body.error || body.message || fallback;
+      } catch {
+        return fallback;
+      }
+    }
+
+    function readFileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.addEventListener("load", () => resolve(String(reader.result)));
+        reader.addEventListener("error", () => reject(new Error("Unable to read selected file.")));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function validateFallbackInputs() {
+      const year = passingYear.value.trim();
+      const percentage = percentageInput.value.replace("%", "").trim();
+      const parsedYear = Number.parseInt(year, 10);
+      const parsedPercentage = Number.parseFloat(percentage);
+      const currentYear = new Date().getFullYear();
+
+      if (!targetSubject.value) {
+        return "Please select a target subject.";
+      }
+
+      if (!/^\d{4}$/.test(year) || parsedYear < 1950 || parsedYear > currentYear) {
+        return "Please enter a valid graduation passing year.";
+      }
+
+      if (!Number.isFinite(parsedPercentage) || parsedPercentage < 0 || parsedPercentage > 100) {
+        return "Please enter a valid percentage between 0 and 100.";
+      }
+
+      if (!degreeFileInput.files || degreeFileInput.files.length === 0) {
+        return "Please upload your degree certificate or transcript image.";
+      }
+
+      const file = degreeFileInput.files[0];
+      if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+        return "Only PNG, JPG, JPEG, or WEBP image files are accepted.";
+      }
+
+      if (file.size > 5 * 1024 * 1024) {
+        return "The uploaded image must be 5 MB or smaller.";
+      }
+
+      return "";
+    }
+
+    searchForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      clearMessage();
+      verificationSection.classList.add("hidden");
+      selectedTeacher = null;
+
+      const cnic = sanitizeCnic(cnicInput.value);
+      cnicInput.value = cnic;
+
+      if (!/^\d{13}$/.test(cnic)) {
+        setMessage("warning", "Please enter a valid 13-digit CNIC.");
+        return;
+      }
+
+      setLoading(searchButton, true);
+
+      try {
+        const response = await fetch(`/api/teacher?cnic=${encodeURIComponent(cnic)}`, {
+          headers: {
+            accept: "application/json",
+          },
+        });
+
+        if (!response.ok) {
+          const errorMessage = await readApiError(response, "Unable to find this teacher record.");
+          setMessage(response.status === 404 ? "warning" : "error", errorMessage);
+          return;
+        }
+
+        const teacher = await response.json();
+        selectedCnic = cnic;
+        if (teacher.has_existing_nomination) {
+          renderAlreadySubmitted(teacher);
+          return;
+        }
+        renderTeacher(teacher);
+      } catch {
+        setMessage("error", "Network error. Please try again.");
+      } finally {
+        setLoading(searchButton, false);
+      }
+    });
+
+    nominationForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      showSubmissionOverlay();
+      clearMessage();
+
+      try {
+        if (!selectedCnic || !selectedTeacher) {
+          setMessage("warning", "Search and verify your teacher record before submitting.");
+          return;
+        }
+
+        if (!consentCheckbox.checked) {
+          setMessage("warning", "Please confirm your consent before submitting.");
+          return;
+        }
+
+        const payload = {
+          cnic: selectedCnic,
+          applied_subject: selectedTeacher.is_auto_match ? selectedTeacher.matched_subject : targetSubject.value,
+        };
+
+        if (!selectedTeacher.is_auto_match) {
+          const validationError = validateFallbackInputs();
+          if (validationError) {
+            setMessage("warning", validationError);
+            return;
+          }
+
+          const file = degreeFileInput.files[0];
+          payload.custom_passing_year = passingYear.value.trim();
+          payload.custom_percentage = percentageInput.value.replace("%", "").trim();
+          payload.degree_file_name = file.name;
+          payload.degree_image_base64 = await readFileAsBase64(file);
+        }
+
+        setLoading(submitButton, true);
+
+        const response = await fetch("/api/teacher", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          const errorMessage = await readApiError(response, "Unable to submit nomination.");
+          setMessage(response.status === 409 ? "warning" : "error", errorMessage);
+          return;
+        }
+
+        const result = await response.json();
+        successDetail.textContent = `Applied subject: ${displayValue(result.applied_subject)}.`;
+        interactivePanel.classList.add("hidden");
+        alreadySubmittedSection.classList.add("hidden");
+        successSection.classList.remove("hidden");
+      } catch {
+        setMessage("error", "Network error. Please try again.");
+      } finally {
+        setLoading(submitButton, false);
+        hideSubmissionOverlay();
+      }
+    });
+
+    function resetSearchState() {
+      selectedCnic = "";
+      selectedTeacher = null;
+      cnicInput.value = "";
+      targetSubject.value = "";
+      passingYear.value = "";
+      percentageInput.value = "";
+      degreeFileInput.value = "";
+      consentCheckbox.checked = false;
+      clearMessage();
+      verificationSection.classList.add("hidden");
+      successSection.classList.add("hidden");
+      alreadySubmittedSection.classList.add("hidden");
+      interactivePanel.classList.remove("hidden");
+      cnicInput.focus();
+    }
+
+    newSearchButton.addEventListener("click", resetSearchState);
+    alreadySubmittedSearchButton.addEventListener("click", resetSearchState);
+  </script>
+</Layout>

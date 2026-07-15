@@ -1,0 +1,58 @@
+---
+import DataTable from "../../components/DataTable.astro";
+import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
+---
+
+<MasterDataLayout title="Jurisdictions" description="Review current MEE officer coverage. Inactive assignments remain in history." page="jurisdictions">
+  <div class="notice">Only active MEE assignments appear in current coverage. Archived assignments are preserved for audit history.</div>
+  <div class="toolbar" style="margin-top:12px">
+    <div class="join">
+      <button class="btn btn-sm join-item btn-primary" type="button" data-jurisdiction-role="aeo">AEO markazes</button>
+      <button class="btn btn-sm join-item" type="button" data-jurisdiction-role="ddeo">DDEO tehsils</button>
+    </div>
+    <span class="toolbar-status" id="jurisdiction-total">Loading…</span>
+  </div>
+  <article class="master-card">
+    <DataTable id="jurisdiction-table" pageSize={10} emptyText="No active assignments found." />
+  </article>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { badge, stack } from "../../scripts/table-cells";
+
+    await customElements.whenDefined("astro-data-table");
+    const table = document.getElementById("jurisdiction-table") as any;
+    const total = document.getElementById("jurisdiction-total")!;
+    let role: "aeo" | "ddeo" = "aeo";
+
+    const optionsResult = await actions.masterData.options();
+    if (optionsResult.error) throw optionsResult.error;
+    const meeWing = (optionsResult.data as any).wings.find((wing: any) => wing.code === "DEO MEE" || wing.name === "DEO MEE");
+    const result = await actions.masterData.jurisdictions({ active: true, wingRef: meeWing?.id || "" });
+    if (result.error) throw result.error;
+    const jurisdictions = result.data as any;
+
+    async function showRole() {
+      const rows = jurisdictions[role] || [];
+      total.textContent = `${rows.length} active ${role.toUpperCase()} assignment${rows.length === 1 ? "" : "s"}`;
+      document.querySelectorAll<HTMLButtonElement>("[data-jurisdiction-role]").forEach((button) =>
+        button.classList.toggle("btn-primary", button.dataset.jurisdictionRole === role),
+      );
+      const columns: any[] = [
+        { accessorKey: "officer_name", header: "Officer", cell: ({ row }: any) => stack(row.original.officer_name || "Missing officer", row.original.mobile || "") },
+        { accessorKey: "tehsil_name", header: "Tehsil" },
+      ];
+      if (role === "aeo") columns.push({ accessorKey: "markaz_name", header: "Markaz" });
+      columns.push({ id: "status", header: "Status", enableSorting: false, cell: () => badge("Active") });
+      await table.configure({ columns, data: rows });
+    }
+
+    document.querySelectorAll<HTMLButtonElement>("[data-jurisdiction-role]").forEach((button) =>
+      button.addEventListener("click", () => {
+        role = button.dataset.jurisdictionRole as "aeo" | "ddeo";
+        void showRole();
+      }),
+    );
+    await showRole();
+  </script>
+</MasterDataLayout>

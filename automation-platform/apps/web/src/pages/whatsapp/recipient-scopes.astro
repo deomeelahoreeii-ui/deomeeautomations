@@ -1,0 +1,50 @@
+---
+import DataTable from "../../components/DataTable.astro";
+import WhatsAppRoutingNav from "../../components/WhatsAppRoutingNav.astro";
+import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
+---
+
+<WhatsAppLayout title="Recipient Roles & Scopes" description="Configure individual roles and group hierarchy scopes independently for every platform module." page="routing">
+  <button class="btn btn-sm btn-primary" id="add-scope" slot="actions">＋ Add role or scope</button>
+  <WhatsAppRoutingNav active="recipient-scopes" />
+  <div class="notice">Individual examples: AEO, DDEO, DEO and school head. Group examples: district, wing, tehsil and markaz. Add more without changing code.</div>
+  <div class="toolbar directory-toolbar">
+    <select class="select select-bordered select-sm" id="scope-application"><option value="">All modules</option></select>
+    <select class="select select-bordered select-sm" id="scope-channel-filter"><option value="">Both channels</option><option value="individual">Individuals</option><option value="group">Groups</option></select>
+    <span class="toolbar-status" id="scope-total">Loading…</span>
+  </div>
+  <article class="master-card"><DataTable id="recipient-scopes-table" pageSize={10} emptyText="No recipient roles or scopes are configured." /></article>
+
+  <dialog class="modal" id="scope-dialog"><div class="modal-box master-modal">
+    <div class="modal-title"><h2 id="scope-title">Add role or scope</h2><button type="button" id="close-scope">×</button></div>
+    <form class="master-form" id="scope-form">
+      <input type="hidden" id="scope-id" />
+      <label><span>Platform module *</span><select class="select select-bordered select-sm" id="scope-module" required></select></label>
+      <label><span>Recipient channel *</span><select class="select select-bordered select-sm" id="scope-channel" required><option value="individual">Individual</option><option value="group">Group</option></select></label>
+      <label><span>Name *</span><input class="input input-bordered input-sm" id="scope-name" required /></label>
+      <label><span>Stable key *</span><input class="input input-bordered input-sm" id="scope-key" pattern="[a-z0-9_]+" required /></label>
+      <label><span>Hierarchy level</span><input class="input input-bordered input-sm" id="scope-level" type="number" min="0" max="99" value="0" /><small>Lower numbers are broader/higher roles.</small></label>
+      <label><span>Parent role / scope</span><select class="select select-bordered select-sm" id="scope-parent"><option value="">No parent</option></select></label>
+      <label><span>Status</span><select class="select select-bordered select-sm" id="scope-enabled"><option value="true">Enabled</option><option value="false">Archived</option></select></label>
+      <label class="full"><span>Description</span><textarea class="textarea textarea-bordered textarea-sm" id="scope-description" rows="4"></textarea></label>
+      <div class="form-actions"><button class="btn btn-sm" type="button" id="cancel-scope">Cancel</button><button class="btn btn-sm btn-primary" type="submit">Save role / scope</button></div>
+    </form>
+  </div><form method="dialog" class="modal-backdrop"><button>close</button></form></dialog>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { actionButtons, badge, stack } from "../../scripts/table-cells";
+    import { confirmAction, showError, showSuccess } from "../../scripts/alerts";
+    await customElements.whenDefined("astro-data-table");
+    const table=document.getElementById("recipient-scopes-table") as any; const dialog=document.getElementById("scope-dialog") as HTMLDialogElement; const el=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T; let options:any={applications:[]}; let records:any[]=[];
+    const stableKey=(value:string)=>value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"").slice(0,100);
+    function populateModules(){const html=options.applications.filter((item:any)=>item.enabled).map((item:any)=>`<option value="${item.id}">${item.name}</option>`).join("");el<HTMLSelectElement>("scope-module").innerHTML=html;el<HTMLSelectElement>("scope-application").innerHTML=`<option value="">All modules</option>${html}`;}
+    function populateParents(selected=""){const app=el<HTMLSelectElement>("scope-module").value;const channel=el<HTMLSelectElement>("scope-channel").value;const current=el<HTMLInputElement>("scope-id").value;const level=Number(el<HTMLInputElement>("scope-level").value||0);const candidates=records.filter((item:any)=>item.application_id===app&&item.channel===channel&&item.id!==current&&item.enabled&&item.hierarchy_level<level);el<HTMLSelectElement>("scope-parent").innerHTML=`<option value="">No parent</option>${candidates.map((item:any)=>`<option value="${item.id}">${item.name} · level ${item.hierarchy_level}</option>`).join("")}`;el<HTMLSelectElement>("scope-parent").value=selected;}
+    async function load(){const result=await actions.whatsapp.recipientScopes({applicationId:el<HTMLSelectElement>("scope-application").value,channel:(el<HTMLSelectElement>("scope-channel-filter").value||undefined) as any});if(result.error)throw result.error;records=result.data as any[];el("scope-total").textContent=`${records.length} roles / scopes`;return records;}
+    async function refresh(){await table.setData(await load());}
+    function openForm(item?:any){el<HTMLFormElement>("scope-form").reset();el("scope-title").textContent=item?"Edit role or scope":"Add role or scope";el<HTMLInputElement>("scope-id").value=item?.id||"";el<HTMLSelectElement>("scope-module").value=item?.application_id||options.applications[0]?.id||"";el<HTMLSelectElement>("scope-channel").value=item?.channel||"individual";el<HTMLSelectElement>("scope-module").disabled=Boolean(item);el<HTMLSelectElement>("scope-channel").disabled=Boolean(item);el<HTMLInputElement>("scope-name").value=item?.name||"";el<HTMLInputElement>("scope-key").value=item?.key||"";el<HTMLInputElement>("scope-key").readOnly=Boolean(item);el<HTMLInputElement>("scope-level").value=String(item?.hierarchy_level??0);el<HTMLTextAreaElement>("scope-description").value=item?.description||"";el<HTMLSelectElement>("scope-enabled").value=String(item?.enabled??true);populateParents(item?.parent_id||"");dialog.showModal();}
+    try{const configured=await actions.whatsapp.configurationOptions();if(configured.error)throw configured.error;options=configured.data;populateModules();await table.configure({data:await load(),columns:[{accessorKey:"name",header:"Role / scope",cell:({row}:any)=>stack(row.original.name,row.original.key)},{accessorKey:"channel",header:"Channel",cell:({row}:any)=>badge(row.original.channel,row.original.channel==="individual"?"":"inactive")},{accessorKey:"application_name",header:"Module"},{accessorKey:"hierarchy_level",header:"Hierarchy",cell:({row}:any)=>stack(`Level ${row.original.hierarchy_level}`,row.original.parent_name||"Top level")},{accessorKey:"description",header:"Description",cell:({row}:any)=>String(row.original.description||"—").slice(0,80)},{accessorKey:"enabled",header:"Status",cell:({row}:any)=>badge(row.original.enabled?"Enabled":"Archived",row.original.enabled?"":"inactive")},{id:"actions",header:"",cell:({row}:any)=>actionButtons([{label:"Edit",onClick:()=>openForm(row.original)},{label:"Delete permanently",tone:"danger",onClick:async()=>{if(!await confirmAction("Permanently delete this role or scope?","Child scopes, templates, profiles and previews will also be deleted.","Delete permanently"))return;const result=await actions.whatsapp.hardDeleteRecipientScope({id:row.original.id});if(result.error)await showError(result.error);else{await showSuccess("Scope deleted","Dependent configuration was removed.");await refresh();}}}])}]});}catch(error){await showError(error);}
+    el("scope-application").addEventListener("change",()=>void refresh());el("scope-channel-filter").addEventListener("change",()=>void refresh());el("scope-module").addEventListener("change",()=>populateParents());el("scope-channel").addEventListener("change",()=>populateParents());el("scope-level").addEventListener("input",()=>populateParents());el("scope-name").addEventListener("input",()=>{if(!el<HTMLInputElement>("scope-id").value)el<HTMLInputElement>("scope-key").value=stableKey(el<HTMLInputElement>("scope-name").value);});el("add-scope").addEventListener("click",()=>openForm());el("close-scope").addEventListener("click",()=>dialog.close());el("cancel-scope").addEventListener("click",()=>dialog.close());
+    el("scope-form").addEventListener("submit",async(event)=>{event.preventDefault();try{const id=el<HTMLInputElement>("scope-id").value;const parent=el<HTMLSelectElement>("scope-parent").value;const result=await actions.whatsapp.saveRecipientScope({id:id||undefined,application_id:el<HTMLSelectElement>("scope-module").value,parent_id:parent||undefined,channel:el<HTMLSelectElement>("scope-channel").value as any,key:el<HTMLInputElement>("scope-key").value,name:el<HTMLInputElement>("scope-name").value,hierarchy_level:Number(el<HTMLInputElement>("scope-level").value),description:el<HTMLTextAreaElement>("scope-description").value,enabled:el<HTMLSelectElement>("scope-enabled").value==="true"});if(result.error)throw result.error;dialog.close();await showSuccess("Recipient configuration saved","Templates and dispatch profiles can now use this role or scope.");const configured=await actions.whatsapp.configurationOptions();if(!configured.error)options=configured.data;await refresh();}catch(error){await showError(error);}});
+  </script>
+</WhatsAppLayout>

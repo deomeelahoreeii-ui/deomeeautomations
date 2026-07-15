@@ -1,0 +1,37 @@
+{
+  "paperless": {
+    "status": "Under Investigation",
+    "document_role": "Main Complaint",
+    "source": null,
+    "require_tehsil": false
+  },
+  "officers_csv": "officers-data.csv",
+  "downloads_dir": "notification_downloads",
+  "hierarchy": {
+    "deo_mee": "summary",
+    "ddeo": "full",
+    "aeo": "full"
+  },
+  "message": {
+    "mode": "per_complaint",
+    "attachment_text_mode": "separate"
+  },
+  "templates": {
+    "officer_full": "🔎 *Under Investigation Complaint*\n👤 *To:* {recipient_name} ({role})\n🆔 *Complaint:* `{complaint_number}`\n📌 *Status:* {status}\n📍 *Tehsil:* {tehsil}\n🙍 *Complainant:* {complainant_name}\n📞 *Mobile:* {complainant_mobile}\n🏛️ *Department:* {department}\n🏷️ *Category:* {category}\n🏫 *Reported Entity:* {reported_entity_name}\n📫 *Address:* {reported_entity_address}",
+    "group_summary_title": "Under Investigation Complaints Summary"
+  },
+  "group_summary": {
+    "enabled": true,
+    "groups_csv": "whatsapp_groups.csv",
+    "title": "Under Investigation Complaints Summary"
+  },
+  "resend_policy": {
+    "min_minutes_between_same_recipient": 0
+  },
+  "delivery": {
+    "nats_url": "nats://localhost:4222",
+    "stream": "pending_stream",
+    "subject": "whatsapp.pending",
+    "delay_ms": 1500
+  }
+}

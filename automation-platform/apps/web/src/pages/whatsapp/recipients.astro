@@ -1,0 +1,34 @@
+---
+import DataTable from "../../components/DataTable.astro";
+import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
+---
+
+<WhatsAppLayout title="Recipients" description="Read-only delivery contacts sourced from PostgreSQL Master Data." page="recipients">
+  <div class="toolbar">
+    <input class="input input-bordered input-sm search-input" id="recipient-search" placeholder="Search name, mobile, role or wing…" />
+    <select class="select select-bordered select-sm" id="recipient-type"><option value="all">All recipients</option><option value="officer">Officers</option><option value="school_head">School heads</option></select>
+    <span class="toolbar-status" id="recipient-total">Loading…</span>
+  </div>
+  <article class="master-card"><DataTable id="recipients-table" pageSize={10} emptyText="No delivery contacts match these filters." /></article>
+  <script>
+    import { actions } from "astro:actions";
+    import { stack } from "../../scripts/table-cells";
+    import { showError } from "../../scripts/alerts";
+    await customElements.whenDefined("astro-data-table");
+    const table = document.getElementById("recipients-table") as any;
+    let timer: number | undefined;
+    async function loadPage(pageIndex: number, pageSize: number) {
+      const result = await actions.whatsapp.recipients({ search: (document.getElementById("recipient-search") as HTMLInputElement).value, recipientType: (document.getElementById("recipient-type") as HTMLSelectElement).value as any, page: pageIndex + 1, pageSize });
+      if (result.error) throw result.error;
+      const data = result.data as any; document.getElementById("recipient-total")!.textContent = `${data.total} recipients`; return { rows: data.items, total: data.total };
+    }
+    try { await table.configure({ manualPagination: true, loadPage, columns: [
+      { accessorKey: "name", header: "Recipient", enableSorting: false, cell: ({row}: any) => stack(row.original.name, row.original.school || row.original.role) },
+      { accessorKey: "mobile", header: "Mobile", enableSorting: false },
+      { accessorKey: "role", header: "Role", enableSorting: false },
+      { accessorKey: "wing", header: "Wing", enableSorting: false },
+    ]}); } catch (error) { await showError(error); }
+    document.getElementById("recipient-type")!.addEventListener("change", () => void table.refresh(true));
+    document.getElementById("recipient-search")!.addEventListener("input", () => { window.clearTimeout(timer); timer = window.setTimeout(() => void table.refresh(true), 250); });
+  </script>
+</WhatsAppLayout>

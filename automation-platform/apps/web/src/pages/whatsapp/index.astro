@@ -1,0 +1,66 @@
+---
+import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
+---
+
+<WhatsAppLayout
+  title="WhatsApp Dashboard"
+  description="Connection health, delivery safety, queue state, and recent outcomes."
+  page="dashboard"
+>
+  <button class="btn btn-sm btn-primary" id="refresh-overview" slot="actions">↻ Refresh</button>
+
+  <section class="wa-health-banner" id="gateway-health">
+    <div class="wa-health-title"><span class="wa-pulse"></span><div><h2>Checking gateway…</h2><p>Waiting for the worker health response.</p></div></div>
+    <span class="status-chip warning">Checking</span>
+  </section>
+
+  <section class="master-stats" id="whatsapp-stats">
+    {['Recipients', 'Groups', 'Queued', 'Delivered 24h', 'Failed 24h', 'Live delivery'].map((label) => (
+      <article class="master-stat"><span>{label}</span><strong>—</strong><small>Loading…</small></article>
+    ))}
+  </section>
+
+  <section class="wa-grid-three">
+    <a class="wa-panel" href="/whatsapp/connection"><h3>Connection</h3><p>Inspect the linked session, QR state, NATS consumer and send a controlled test.</p></a>
+    <a class="wa-panel" href="/whatsapp/audiences"><h3>Audiences</h3><p>Build module-specific sets of detected groups and individual contacts.</p></a>
+    <a class="wa-panel" href="/whatsapp/dispatch"><h3>Dispatch profiles</h3><p>Connect report types, audiences, sessions and safety policies explicitly.</p></a>
+  </section>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { showError } from "../../scripts/alerts";
+
+    const stats = [
+      ["Recipients", "recipients", "Available contacts"],
+      ["Groups", "groups", "Enabled routes"],
+      ["Queued", "queued", "Awaiting outcome"],
+      ["Delivered 24h", "delivered_24h", "Confirmed or pending final ack"],
+      ["Failed 24h", "failed_24h", "Needs review"],
+    ];
+
+    async function loadOverview() {
+      try {
+        const result = await actions.whatsapp.overview();
+        if (result.error) throw result.error;
+        const data = result.data as any;
+        const health = document.getElementById("gateway-health")!;
+        health.classList.toggle("offline", !data.health.ready);
+        health.innerHTML = `<div class="wa-health-title"><span class="wa-pulse"></span><div><h2>${data.health.ready ? "Gateway ready" : "Gateway unavailable"}</h2><p>${data.account.name} · ${data.health.status || "unknown"} · ${data.health.known_identities || 0} known identities</p></div></div><span class="status-chip ${data.health.ready ? "" : "error"}">${data.health.ready ? "Ready" : "Offline"}</span>`;
+        const container = document.getElementById("whatsapp-stats")!;
+        container.replaceChildren();
+        for (const [label, key, note] of stats) {
+          const card = document.createElement("article");
+          card.className = `master-stat ${key === "failed_24h" && data.counts[key] ? "error" : ""}`;
+          card.innerHTML = `<span>${label}</span><strong>${data.counts[key]}</strong><small>${note}</small>`;
+          container.append(card);
+        }
+        const live = document.createElement("article");
+        live.className = `master-stat ${data.settings.live_delivery_enabled ? "" : "warning"}`;
+        live.innerHTML = `<span>Live delivery</span><strong>${data.settings.live_delivery_enabled ? "On" : "Off"}</strong><small>Safety switch</small>`;
+        container.append(live);
+      } catch (error) { await showError(error); }
+    }
+    document.getElementById("refresh-overview")!.addEventListener("click", () => void loadOverview());
+    void loadOverview();
+  </script>
+</WhatsAppLayout>

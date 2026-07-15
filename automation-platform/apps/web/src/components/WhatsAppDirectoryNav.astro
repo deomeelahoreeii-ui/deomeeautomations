@@ -1,0 +1,12 @@
+---
+interface Props {
+  active: "groups" | "contacts";
+}
+
+const { active } = Astro.props;
+---
+
+<nav class="directory-tabs" aria-label="WhatsApp directory pages">
+  <a class:list={{ active: active === "groups" }} href="/whatsapp/directory/groups">Detected groups</a>
+  <a class:list={{ active: active === "contacts" }} href="/whatsapp/directory/contacts">Contacts & identities</a>
+</nav>

@@ -1,0 +1,1528 @@
+---
+import Layout from "../layouts/Layout.astro";
+import "../styles/global.css";
+import { UserButton } from "@clerk/astro/components";
+import { aeoOptions } from "../config/aeos";
+import { surveyFields } from "../config/survey";
+import { zonalHeadOptions } from "../config/zonal-heads";
+import { isAuthEnabled, requireApprovedAdmin } from "../lib/admin-auth";
+import {
+  adminPageSizeOptions,
+  buildAdminPageUrl,
+  buildSubmissionsWhere,
+  parseSubmissionFilters,
+  parseSubmissionPagination,
+} from "../lib/admin-submission-query";
+import { getDb } from "../lib/d1";
+
+export const prerender = false;
+
+type SummaryMetric = {
+  total: number;
+  total_students: number | null;
+  total_teachers: number | null;
+  schools: number;
+  academies: number;
+  coaching_centers: number;
+  tuition_centers: number;
+  registered: number;
+  unregistered: number;
+  expired: number;
+  weak_buildings: number;
+  dilapidated_buildings: number;
+  facility_gap_records: number;
+};
+
+type TehsilMetric = {
+  tehsil: string | null;
+  total: number;
+  students: number | null;
+  teachers: number | null;
+  registered: number;
+  unregistered: number;
+  expired: number;
+  facility_gap_records: number;
+};
+
+type GroupMetric = {
+  label: string | null;
+  total: number;
+};
+
+type FacilitySummaryRow = {
+  separate_washrooms_missing: number | null;
+  separate_washrooms_available: number | null;
+  drinking_water_missing: number | null;
+  drinking_water_available: number | null;
+  fire_safety_missing: number | null;
+  fire_safety_available: number | null;
+  cctv_missing: number | null;
+  cctv_available: number | null;
+  ramp_missing: number | null;
+  ramp_available: number | null;
+  school_council_missing: number | null;
+  school_council_available: number | null;
+  psca_app_missing: number | null;
+  psca_app_available: number | null;
+  green_registration_missing: number | null;
+  green_registration_available: number | null;
+};
+
+type SurveyRecord = {
+  id: number;
+  institution_name: string | null;
+  institute_type: string | null;
+  complete_address: string | null;
+  location_link_pin: string | null;
+  hidden_location_coordinates: string | null;
+  tehsil: string | null;
+  union_council_name: string | null;
+  union_council_number: string | null;
+  pp_no: string | null;
+  na_no: string | null;
+  owner_name: string | null;
+  owner_contact_no: string | null;
+  principal_name: string | null;
+  principal_contact_no: string | null;
+  registration_status: string | null;
+  registration_license_no: string | null;
+  validity_date: string | null;
+  building_status: string | null;
+  building_ownership: string | null;
+  no_of_classrooms: number | null;
+  no_of_students: number | null;
+  no_of_teachers: number | null;
+  classes_offered: string | null;
+  quran_teacher_name: string | null;
+  quran_teacher_mobile_no: string | null;
+  monthly_fee_range: string | null;
+  disadvantaged_students_10_percent: number | null;
+  separate_washrooms_available: string | null;
+  drinking_water_facility: string | null;
+  fire_safety_available: string | null;
+  cctv_installed: string | null;
+  ramp_available: string | null;
+  school_council_available: string | null;
+  psca_app_installed: string | null;
+  punjab_green_school_registration: string | null;
+  school_email_address: string | null;
+  wing: string | null;
+  se_submitted_by: string | null;
+  se_aeo_wing: string | null;
+  aeo_name: string | null;
+  zonal_head_institute_name: string | null;
+  zonal_head_name: string | null;
+  zonal_head_contact_no: string | null;
+  date_of_visit_report: string | null;
+  outside_main_gate_image_url: string | null;
+  inside_institute_image_url: string | null;
+  submitted_at: string | null;
+};
+
+const facilityFields = [
+  ["separate_washrooms_available", "Washrooms"],
+  ["drinking_water_facility", "Drinking Water"],
+  ["fire_safety_available", "Fire Safety"],
+  ["cctv_installed", "CCTV"],
+  ["ramp_available", "Ramp"],
+  ["school_council_available", "School Council"],
+  ["psca_app_installed", "PSCA App"],
+  ["punjab_green_school_registration", "Green Registration"],
+] as const;
+
+const adminAuth = await requireApprovedAdmin(Astro);
+if (!adminAuth.authorized) {
+  return adminAuth.response;
+}
+
+const adminEmail = adminAuth.email;
+const authEnabled = isAuthEnabled();
+
+function displayValue(value: unknown): string {
+  const cleaned = String(value ?? "").trim();
+  return cleaned.length > 0 ? cleaned : "Not available";
+}
+
+function firstPresentValue(...values: unknown[]): string | null {
+  for (const value of values) {
+    const cleaned = String(value ?? "").trim();
+    if (cleaned) return cleaned;
+  }
+
+  return null;
+}
+
+function displayCombinedValue(...values: unknown[]): string {
+  const cleaned = values
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean);
+
+  return cleaned.length > 0 ? cleaned.join(" / ") : "Not available";
+}
+
+function formatNumber(value: unknown): string {
+  const number = Number(value ?? 0);
+  return new Intl.NumberFormat("en-PK").format(Number.isFinite(number) ? number : 0);
+}
+
+function formatPercent(value: number): string {
+  return `${Number.isFinite(value) ? value.toFixed(1) : "0.0"}%`;
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return "Not available";
+
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const date = new Date(normalized);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-PK", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function getMapHref(record: SurveyRecord): string {
+  const link = String(record.location_link_pin ?? "").trim();
+  if (link.startsWith("http")) return link;
+
+  const coordinates = String(record.hidden_location_coordinates ?? "").trim();
+  if (coordinates) return `https://www.google.com/maps?q=${encodeURIComponent(coordinates)}`;
+
+  return "";
+}
+
+function hasFacilityGap(record: SurveyRecord): boolean {
+  return facilityFields.some(([field]) => record[field] === "No");
+}
+
+function getRegistrationBadgeClass(value: string | null): string {
+  if (value === "Registered") return "bg-emerald-100 text-emerald-800";
+  if (value === "Expired") return "bg-amber-100 text-amber-800";
+  if (value === "Unregistered") return "bg-rose-100 text-rose-800";
+  return "bg-slate-100 text-slate-700";
+}
+
+const db = getDb(Astro);
+
+const summaryRow = await db
+  .prepare(
+    `
+      SELECT
+        COUNT(*) AS total,
+        COALESCE(SUM(no_of_students), 0) AS total_students,
+        COALESCE(SUM(no_of_teachers), 0) AS total_teachers,
+        SUM(CASE WHEN institute_type = 'School' THEN 1 ELSE 0 END) AS schools,
+        SUM(CASE WHEN institute_type = 'Academy' THEN 1 ELSE 0 END) AS academies,
+        SUM(CASE WHEN institute_type = 'Coaching Center' THEN 1 ELSE 0 END) AS coaching_centers,
+        SUM(CASE WHEN institute_type = 'Tuition Center' THEN 1 ELSE 0 END) AS tuition_centers,
+        SUM(CASE WHEN registration_status = 'Registered' THEN 1 ELSE 0 END) AS registered,
+        SUM(CASE WHEN registration_status = 'Unregistered' THEN 1 ELSE 0 END) AS unregistered,
+        SUM(CASE WHEN registration_status = 'Expired' THEN 1 ELSE 0 END) AS expired,
+        SUM(CASE WHEN building_status = 'Weak' THEN 1 ELSE 0 END) AS weak_buildings,
+        SUM(CASE WHEN building_status = 'Dilapidated' THEN 1 ELSE 0 END) AS dilapidated_buildings,
+        SUM(CASE
+          WHEN separate_washrooms_available = 'No'
+            OR drinking_water_facility = 'No'
+            OR fire_safety_available = 'No'
+            OR cctv_installed = 'No'
+            OR ramp_available = 'No'
+            OR school_council_available = 'No'
+            OR psca_app_installed = 'No'
+            OR punjab_green_school_registration = 'No'
+          THEN 1 ELSE 0 END
+        ) AS facility_gap_records
+      FROM private_institutes_survey_2026
+    `,
+  )
+  .first<SummaryMetric>();
+
+const tehsilResult = await db
+  .prepare(
+    `
+      SELECT
+        tehsil,
+        COUNT(*) AS total,
+        COALESCE(SUM(no_of_students), 0) AS students,
+        COALESCE(SUM(no_of_teachers), 0) AS teachers,
+        SUM(CASE WHEN registration_status = 'Registered' THEN 1 ELSE 0 END) AS registered,
+        SUM(CASE WHEN registration_status = 'Unregistered' THEN 1 ELSE 0 END) AS unregistered,
+        SUM(CASE WHEN registration_status = 'Expired' THEN 1 ELSE 0 END) AS expired,
+        SUM(CASE
+          WHEN separate_washrooms_available = 'No'
+            OR drinking_water_facility = 'No'
+            OR fire_safety_available = 'No'
+            OR cctv_installed = 'No'
+            OR ramp_available = 'No'
+            OR school_council_available = 'No'
+            OR psca_app_installed = 'No'
+            OR punjab_green_school_registration = 'No'
+          THEN 1 ELSE 0 END
+        ) AS facility_gap_records
+      FROM private_institutes_survey_2026
+      GROUP BY tehsil
+      ORDER BY total DESC, tehsil
+    `,
+  )
+  .all<TehsilMetric>();
+
+const requestUrl = new URL(Astro.request.url);
+const filters = parseSubmissionFilters(requestUrl.searchParams);
+const requestedPagination = parseSubmissionPagination(requestUrl.searchParams);
+const filterQuery = buildSubmissionsWhere(filters);
+
+const filteredCountStatement = db.prepare(`
+  SELECT COUNT(*) AS total
+  FROM private_institutes_survey_2026
+  ${filterQuery.whereClause}
+`);
+const filteredCountRow = filterQuery.params.length > 0
+  ? await filteredCountStatement.bind(...filterQuery.params).first<{ total: number }>()
+  : await filteredCountStatement.first<{ total: number }>();
+const filteredSubmissionCount = filteredCountRow?.total ?? 0;
+const totalPages = Math.max(1, Math.ceil(filteredSubmissionCount / requestedPagination.pageSize));
+const currentPage = Math.min(requestedPagination.page, totalPages);
+const currentPageSize = requestedPagination.pageSize;
+const currentOffset = (currentPage - 1) * currentPageSize;
+
+const submissionsStatement = db.prepare(`
+  SELECT *
+  FROM private_institutes_survey_2026
+  ${filterQuery.whereClause}
+  ORDER BY submitted_at DESC, id DESC
+  LIMIT ? OFFSET ?
+`);
+const submissionsResult = await submissionsStatement
+  .bind(...filterQuery.params, currentPageSize, currentOffset)
+  .all<SurveyRecord>();
+
+const tehsilOptionsResult = await db
+  .prepare(
+    `
+      SELECT tehsil AS label, COUNT(*) AS total
+      FROM private_institutes_survey_2026
+      GROUP BY tehsil
+      ORDER BY label
+    `,
+  )
+  .all<GroupMetric>();
+const instituteTypeOptionsResult = await db
+  .prepare(
+    `
+      SELECT institute_type AS label, COUNT(*) AS total
+      FROM private_institutes_survey_2026
+      GROUP BY institute_type
+      ORDER BY label
+    `,
+  )
+  .all<GroupMetric>();
+const wingMetricsResult = await db
+  .prepare(
+    `
+      SELECT wing AS label, COUNT(*) AS total
+      FROM private_institutes_survey_2026
+      GROUP BY wing
+      ORDER BY total DESC, label
+    `,
+  )
+  .all<GroupMetric>();
+const facilitySummary = await db
+  .prepare(
+    `
+      SELECT
+        SUM(CASE WHEN separate_washrooms_available = 'No' THEN 1 ELSE 0 END) AS separate_washrooms_missing,
+        SUM(CASE WHEN separate_washrooms_available = 'Yes' THEN 1 ELSE 0 END) AS separate_washrooms_available,
+        SUM(CASE WHEN drinking_water_facility = 'No' THEN 1 ELSE 0 END) AS drinking_water_missing,
+        SUM(CASE WHEN drinking_water_facility = 'Yes' THEN 1 ELSE 0 END) AS drinking_water_available,
+        SUM(CASE WHEN fire_safety_available = 'No' THEN 1 ELSE 0 END) AS fire_safety_missing,
+        SUM(CASE WHEN fire_safety_available = 'Yes' THEN 1 ELSE 0 END) AS fire_safety_available,
+        SUM(CASE WHEN cctv_installed = 'No' THEN 1 ELSE 0 END) AS cctv_missing,
+        SUM(CASE WHEN cctv_installed = 'Yes' THEN 1 ELSE 0 END) AS cctv_available,
+        SUM(CASE WHEN ramp_available = 'No' THEN 1 ELSE 0 END) AS ramp_missing,
+        SUM(CASE WHEN ramp_available = 'Yes' THEN 1 ELSE 0 END) AS ramp_available,
+        SUM(CASE WHEN school_council_available = 'No' THEN 1 ELSE 0 END) AS school_council_missing,
+        SUM(CASE WHEN school_council_available = 'Yes' THEN 1 ELSE 0 END) AS school_council_available,
+        SUM(CASE WHEN psca_app_installed = 'No' THEN 1 ELSE 0 END) AS psca_app_missing,
+        SUM(CASE WHEN psca_app_installed = 'Yes' THEN 1 ELSE 0 END) AS psca_app_available,
+        SUM(CASE WHEN punjab_green_school_registration = 'No' THEN 1 ELSE 0 END) AS green_registration_missing,
+        SUM(CASE WHEN punjab_green_school_registration = 'Yes' THEN 1 ELSE 0 END) AS green_registration_available
+      FROM private_institutes_survey_2026
+    `,
+  )
+  .first<FacilitySummaryRow>();
+
+const summary = summaryRow ?? {
+  total: 0,
+  total_students: 0,
+  total_teachers: 0,
+  schools: 0,
+  academies: 0,
+  coaching_centers: 0,
+  tuition_centers: 0,
+  registered: 0,
+  unregistered: 0,
+  expired: 0,
+  weak_buildings: 0,
+  dilapidated_buildings: 0,
+  facility_gap_records: 0,
+};
+const totalSubmissions = summary.total ?? 0;
+const tehsilMetrics = tehsilResult.results ?? [];
+const submissions = submissionsResult.results ?? [];
+const tehsilOptions = (tehsilOptionsResult.results ?? []).map((row) => displayValue(row.label)).sort();
+const wingOptions = (wingMetricsResult.results ?? []).map((row) => displayValue(row.label)).sort();
+const instituteTypeOptions = (instituteTypeOptionsResult.results ?? []).map((row) => displayValue(row.label)).sort();
+const wingMetrics = (wingMetricsResult.results ?? []).map((metric) => ({
+  wing: displayValue(metric.label),
+  total: metric.total,
+}));
+const attentionRecords = (summary.unregistered ?? 0) + (summary.expired ?? 0);
+const buildingRiskRecords = (summary.weak_buildings ?? 0) + (summary.dilapidated_buildings ?? 0);
+const registeredPercent = totalSubmissions > 0 ? ((summary.registered ?? 0) / totalSubmissions) * 100 : 0;
+const attentionPercent = totalSubmissions > 0 ? (attentionRecords / totalSubmissions) * 100 : 0;
+const facilityGapPercent = totalSubmissions > 0 ? ((summary.facility_gap_records ?? 0) / totalSubmissions) * 100 : 0;
+const buildingRiskPercent = totalSubmissions > 0 ? (buildingRiskRecords / totalSubmissions) * 100 : 0;
+const facilityMetricKeys = {
+  separate_washrooms_available: ["separate_washrooms_missing", "separate_washrooms_available"],
+  drinking_water_facility: ["drinking_water_missing", "drinking_water_available"],
+  fire_safety_available: ["fire_safety_missing", "fire_safety_available"],
+  cctv_installed: ["cctv_missing", "cctv_available"],
+  ramp_available: ["ramp_missing", "ramp_available"],
+  school_council_available: ["school_council_missing", "school_council_available"],
+  psca_app_installed: ["psca_app_missing", "psca_app_available"],
+  punjab_green_school_registration: ["green_registration_missing", "green_registration_available"],
+} as const;
+const facilityMetrics = facilityFields.map(([field, label]) => {
+  const [missingKey, availableKey] = facilityMetricKeys[field];
+  const missing = Number(facilitySummary?.[missingKey] ?? 0);
+  const available = Number(facilitySummary?.[availableKey] ?? 0);
+  return {
+    field,
+    label,
+    missing,
+    available,
+    percent: totalSubmissions > 0 ? (missing / totalSubmissions) * 100 : 0,
+  };
+}).sort((left, right) => right.missing - left.missing);
+
+const firstVisibleRecord = filteredSubmissionCount === 0 ? 0 : currentOffset + 1;
+const lastVisibleRecord = Math.min(currentOffset + submissions.length, filteredSubmissionCount);
+const hasActiveRecordFilters = Boolean(
+  filters.search ||
+  filters.tehsil ||
+  filters.instituteType ||
+  filters.wing ||
+  filters.registration ||
+  filters.facility
+);
+const previousPageUrl = buildAdminPageUrl("/admin", filters, currentPageSize, Math.max(1, currentPage - 1));
+const nextPageUrl = buildAdminPageUrl("/admin", filters, currentPageSize, Math.min(totalPages, currentPage + 1));
+const exportParams = new URLSearchParams(requestUrl.searchParams);
+exportParams.delete("page");
+exportParams.delete("pageSize");
+exportParams.set("format", "csv");
+const csvDownloadUrl = `/api/admin/submissions?${exportParams.toString()}`;
+const editFieldsJson = JSON.stringify(
+  surveyFields
+    .map((field) => ({
+      name: field.name,
+      label: field.label,
+      kind: field.kind,
+      required: field.required ?? false,
+      options: field.options ?? [],
+      autocomplete: field.autocomplete,
+      inputMode: field.inputMode,
+      min: field.min,
+      colSpan: field.colSpan,
+    })),
+).replace(/</g, "\\u003c");
+const aeoOptionsJson = JSON.stringify(aeoOptions).replace(/</g, "\\u003c");
+const zonalHeadOptionsJson = JSON.stringify(zonalHeadOptions).replace(/</g, "\\u003c");
+---
+
+<Layout>
+  <main class="min-h-screen bg-[#f3f6fb] px-4 py-5 text-slate-950 sm:px-6 lg:px-8">
+    <section class="mx-auto w-full max-w-7xl space-y-5">
+      <header class="overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-sm">
+        <div class="grid gap-0 xl:grid-cols-[1fr_auto]">
+          <div class="px-5 py-6 sm:px-7">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-sky-100 px-3 py-1 text-xs font-black uppercase tracking-wide text-sky-800">Admin</span>
+              <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-800">Private Institutes Survey</span>
+              {!authEnabled && (
+                <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-black uppercase tracking-wide text-amber-800">Auth disabled</span>
+              )}
+            </div>
+            <h1 class="mt-4 text-3xl font-black tracking-normal text-slate-950 sm:text-4xl">
+              Survey Command Dashboard
+            </h1>
+            <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600 sm:text-base">
+              Monitor tehsil-wise collection, registration gaps, facilities, and submitted institute records.
+            </p>
+          </div>
+
+          <div class="flex flex-col justify-between gap-4 border-t border-slate-200 bg-slate-950 px-5 py-5 text-white sm:flex-row sm:items-center xl:flex-col xl:items-end xl:border-l xl:border-t-0 xl:px-6">
+            <div class="text-left sm:text-right">
+              <div class="text-xs font-bold uppercase tracking-wide text-slate-400">{authEnabled ? "Signed in" : "Dashboard mode"}</div>
+              <div class="mt-1 text-sm font-bold">{authEnabled ? adminEmail : "Temporary open dashboard"}</div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <a class="btn min-h-11 rounded-xl border-white/10 bg-white/10 text-white hover:bg-white/20" href="/" target="_blank">
+                Open Form
+              </a>
+              <button id="downloadCsvButton" class="btn min-h-11 rounded-xl border-0 bg-sky-500 text-white hover:bg-sky-600" data-download-url={csvDownloadUrl}>
+                Download CSV
+              </button>
+              {authEnabled && <UserButton />}
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div class="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="text-sm font-bold text-slate-500">Total Records</div>
+          <div class="mt-3 text-4xl font-black text-slate-950">{formatNumber(totalSubmissions)}</div>
+          <div class="mt-2 text-xs font-semibold text-slate-500">Submitted institutes</div>
+        </div>
+
+        <div class="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="text-sm font-bold text-slate-500">Students Covered</div>
+          <div class="mt-3 text-4xl font-black text-sky-700">{formatNumber(summary.total_students)}</div>
+          <div class="mt-2 text-xs font-semibold text-slate-500">Reported enrollment</div>
+        </div>
+
+        <div class="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="text-sm font-bold text-slate-500">Teachers Covered</div>
+          <div class="mt-3 text-4xl font-black text-indigo-700">{formatNumber(summary.total_teachers)}</div>
+          <div class="mt-2 text-xs font-semibold text-slate-500">Reported staff</div>
+        </div>
+
+        <div class="rounded-[1.25rem] border border-amber-200 bg-amber-50 p-5 shadow-sm">
+          <div class="text-sm font-bold text-amber-700">Registration Attention</div>
+          <div class="mt-3 text-4xl font-black text-amber-900">{formatNumber(attentionRecords)}</div>
+          <div class="mt-2 text-xs font-semibold text-amber-700">{formatPercent(attentionPercent)} unregistered/expired</div>
+        </div>
+
+        <div class="rounded-[1.25rem] border border-rose-200 bg-rose-50 p-5 shadow-sm">
+          <div class="text-sm font-bold text-rose-700">Facility Gap Records</div>
+          <div class="mt-3 text-4xl font-black text-rose-900">{formatNumber(summary.facility_gap_records)}</div>
+          <div class="mt-2 text-xs font-semibold text-rose-700">{formatPercent(facilityGapPercent)} have at least one gap</div>
+        </div>
+      </section>
+
+      <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div class="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="text-sm font-bold text-slate-500">Schools</div>
+          <div class="mt-3 text-3xl font-black text-slate-950">{formatNumber(summary.schools)}</div>
+        </div>
+        <div class="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="text-sm font-bold text-slate-500">Academies</div>
+          <div class="mt-3 text-3xl font-black text-slate-950">{formatNumber(summary.academies)}</div>
+        </div>
+        <div class="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="text-sm font-bold text-slate-500">Coaching Centers</div>
+          <div class="mt-3 text-3xl font-black text-slate-950">{formatNumber(summary.coaching_centers)}</div>
+        </div>
+        <div class="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="text-sm font-bold text-slate-500">Tuition Centers</div>
+          <div class="mt-3 text-3xl font-black text-slate-950">{formatNumber(summary.tuition_centers)}</div>
+        </div>
+      </section>
+
+      <section class="grid gap-5 xl:grid-cols-[1.4fr_0.9fr]">
+        <section class="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p class="text-xs font-black uppercase tracking-wide text-sky-700">Tehsil Wise</p>
+              <h2 class="mt-1 text-2xl font-black tracking-normal">Submission Distribution</h2>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-500">
+              <span>{tehsilMetrics.length} tehsil group{tehsilMetrics.length === 1 ? "" : "s"}</span>
+              <a class="rounded-xl bg-slate-950 px-3 py-2 text-xs font-black text-white hover:bg-slate-800" href="/admin/aeo-distribution">
+                AEO-wise view
+              </a>
+            </div>
+          </div>
+
+          <div class="mt-5 overflow-x-auto">
+            <table class="w-full min-w-[760px] text-left text-sm">
+              <thead>
+                <tr class="border-b border-slate-200 text-xs font-black uppercase tracking-wide text-slate-500">
+                  <th class="py-3 pr-3">Tehsil</th>
+                  <th class="px-3 py-3">Submitted</th>
+                  <th class="px-3 py-3">Students</th>
+                  <th class="px-3 py-3">Teachers</th>
+                  <th class="px-3 py-3">Registered</th>
+                  <th class="px-3 py-3">Issues</th>
+                  <th class="py-3 pl-3">Share</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tehsilMetrics.length === 0 ? (
+                  <tr>
+                    <td class="py-6 text-slate-500" colspan="7">No submitted records yet.</td>
+                  </tr>
+                ) : (
+                  tehsilMetrics.map((metric) => {
+                    const share = totalSubmissions > 0 ? (metric.total / totalSubmissions) * 100 : 0;
+                    const tehsilIssues = (metric.unregistered ?? 0) + (metric.expired ?? 0) + (metric.facility_gap_records ?? 0);
+                    return (
+                      <tr class="border-b border-slate-100 last:border-0">
+                        <td class="py-4 pr-3 font-black text-slate-900">{displayValue(metric.tehsil)}</td>
+                        <td class="px-3 py-4 font-bold">{formatNumber(metric.total)}</td>
+                        <td class="px-3 py-4 text-slate-600">{formatNumber(metric.students)}</td>
+                        <td class="px-3 py-4 text-slate-600">{formatNumber(metric.teachers)}</td>
+                        <td class="px-3 py-4">
+                          <span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-black text-emerald-800">
+                            {formatNumber(metric.registered)}
+                          </span>
+                        </td>
+                        <td class="px-3 py-4">
+                          <span class:list={[
+                            "rounded-full px-2.5 py-1 text-xs font-black",
+                            tehsilIssues > 0 ? "bg-rose-100 text-rose-800" : "bg-slate-100 text-slate-600",
+                          ]}>
+                            {formatNumber(tehsilIssues)}
+                          </span>
+                        </td>
+                        <td class="py-4 pl-3">
+                          <div class="flex min-w-44 items-center gap-3">
+                            <div class="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                              <div class="h-full rounded-full bg-sky-500" style={`width: ${Math.max(2, share)}%`}></div>
+                            </div>
+                            <span class="w-14 text-right text-xs font-black text-slate-600">{formatPercent(share)}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="grid gap-5">
+          <div class="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
+            <p class="text-xs font-black uppercase tracking-wide text-sky-700">Wing Wise</p>
+            <h2 class="mt-1 text-xl font-black tracking-normal">Submission Ownership</h2>
+            <div class="mt-5 space-y-3">
+              {wingMetrics.length === 0 ? (
+                <div class="text-sm font-semibold text-slate-500">No wing submissions yet.</div>
+              ) : (
+                wingMetrics.map((metric) => {
+                  const percent = totalSubmissions > 0 ? (metric.total / totalSubmissions) * 100 : 0;
+                  return (
+                    <div>
+                      <div class="mb-1 flex justify-between text-sm font-bold">
+                        <span>{metric.wing}</span>
+                        <span>{formatNumber(metric.total)} / {formatPercent(percent)}</span>
+                      </div>
+                      <div class="h-2 overflow-hidden rounded-full bg-slate-100">
+                        <div class="h-full rounded-full bg-indigo-500" style={`width: ${percent}%`}></div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <div class="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
+            <p class="text-xs font-black uppercase tracking-wide text-sky-700">Registration Mix</p>
+            <h2 class="mt-1 text-xl font-black tracking-normal">Compliance Snapshot</h2>
+            <div class="mt-5 space-y-4">
+              <div>
+                <div class="mb-1 flex justify-between text-sm font-bold">
+                  <span>Registered</span>
+                  <span>{formatPercent(registeredPercent)}</span>
+                </div>
+                <div class="h-3 overflow-hidden rounded-full bg-slate-100">
+                  <div class="h-full rounded-full bg-emerald-500" style={`width: ${registeredPercent}%`}></div>
+                </div>
+              </div>
+              <div>
+                <div class="mb-1 flex justify-between text-sm font-bold">
+                  <span>Unregistered / Expired</span>
+                  <span>{formatPercent(attentionPercent)}</span>
+                </div>
+                <div class="h-3 overflow-hidden rounded-full bg-slate-100">
+                  <div class="h-full rounded-full bg-amber-500" style={`width: ${attentionPercent}%`}></div>
+                </div>
+              </div>
+              <div>
+                <div class="mb-1 flex justify-between text-sm font-bold">
+                  <span>Weak / Dilapidated Buildings</span>
+                  <span>{formatPercent(buildingRiskPercent)}</span>
+                </div>
+                <div class="h-3 overflow-hidden rounded-full bg-slate-100">
+                  <div class="h-full rounded-full bg-rose-500" style={`width: ${buildingRiskPercent}%`}></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-[1.25rem] border border-slate-200 bg-white p-5 shadow-sm">
+            <p class="text-xs font-black uppercase tracking-wide text-rose-700">Facility Gaps</p>
+            <h2 class="mt-1 text-xl font-black tracking-normal">Most Missing Facilities</h2>
+            <div class="mt-5 space-y-3">
+              {facilityMetrics.map((metric) => (
+                <div>
+                  <div class="mb-1 flex justify-between gap-3 text-sm font-bold">
+                    <span>{metric.label}</span>
+                    <span class="text-slate-500">{formatNumber(metric.missing)} missing</span>
+                  </div>
+                  <div class="h-2 overflow-hidden rounded-full bg-slate-100">
+                    <div class="h-full rounded-full bg-rose-500" style={`width: ${metric.percent}%`}></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="rounded-[1.25rem] border border-slate-200 bg-white shadow-sm">
+        <div class="border-b border-slate-200 p-5">
+          <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div>
+              <p class="text-xs font-black uppercase tracking-wide text-sky-700">Records</p>
+              <h2 class="mt-1 text-2xl font-black tracking-normal">Submitted Institutes</h2>
+              <p class="mt-1 text-sm font-semibold text-slate-500">
+                Showing {formatNumber(firstVisibleRecord)}-{formatNumber(lastVisibleRecord)} of {formatNumber(filteredSubmissionCount)} filtered record{filteredSubmissionCount === 1 ? "" : "s"}
+                {hasActiveRecordFilters && <span> from {formatNumber(totalSubmissions)} total</span>}
+              </p>
+            </div>
+            <form id="recordsFilterForm" class="grid gap-3 md:grid-cols-3 xl:w-[72rem] xl:grid-cols-7" action="/admin" method="get">
+              <input name="page" type="hidden" value="1" />
+              <label class="grid gap-1">
+                <span class="text-xs font-black uppercase tracking-wide text-slate-500">Search</span>
+                <input id="recordSearchInput" class="admin-filter-input md:col-span-1" name="search" placeholder="Institute, owner, AEO..." type="search" value={filters.search} />
+              </label>
+              <label class="grid gap-1">
+                <span class="text-xs font-black uppercase tracking-wide text-slate-500">Tehsil</span>
+                <select id="tehsilFilter" class="admin-filter-input" name="tehsil">
+                  <option value="">All tehsils</option>
+                  {tehsilOptions.map((tehsil) => <option value={tehsil} selected={filters.tehsil === tehsil}>{tehsil}</option>)}
+                </select>
+              </label>
+              <label class="grid gap-1">
+                <span class="text-xs font-black uppercase tracking-wide text-slate-500">Type</span>
+                <select id="instituteTypeFilter" class="admin-filter-input" name="type">
+                  <option value="">All types</option>
+                  {instituteTypeOptions.map((type) => <option value={type} selected={filters.instituteType === type}>{type}</option>)}
+                </select>
+              </label>
+              <label class="grid gap-1">
+                <span class="text-xs font-black uppercase tracking-wide text-slate-500">Wing</span>
+                <select id="wingFilter" class="admin-filter-input" name="wing">
+                  <option value="">All wings</option>
+                  {wingOptions.map((wing) => <option value={wing} selected={filters.wing === wing}>{wing}</option>)}
+                </select>
+              </label>
+              <label class="grid gap-1">
+                <span class="text-xs font-black uppercase tracking-wide text-slate-500">Registration</span>
+                <select id="registrationFilter" class="admin-filter-input" name="registration">
+                  <option value="">All status</option>
+                  <option value="Registered" selected={filters.registration === "Registered"}>Registered</option>
+                  <option value="Unregistered" selected={filters.registration === "Unregistered"}>Unregistered</option>
+                  <option value="Expired" selected={filters.registration === "Expired"}>Expired</option>
+                </select>
+              </label>
+              <label class="grid gap-1">
+                <span class="text-xs font-black uppercase tracking-wide text-slate-500">Facilities</span>
+                <select id="facilityFilter" class="admin-filter-input" name="facility">
+                  <option value="">All records</option>
+                  <option value="gap" selected={filters.facility === "gap"}>Has gap</option>
+                  <option value="clear" selected={filters.facility === "clear"}>No gap</option>
+                </select>
+              </label>
+              <label class="grid gap-1">
+                <span class="text-xs font-black uppercase tracking-wide text-slate-500">Show</span>
+                <select id="pageSizeFilter" class="admin-filter-input" name="pageSize">
+                  {adminPageSizeOptions.map((size) => (
+                    <option value={size} selected={currentPageSize === size}>{size} rows</option>
+                  ))}
+                </select>
+              </label>
+              <div class="flex items-end gap-2 md:col-span-3 xl:col-span-7">
+                <button class="btn min-h-11 rounded-xl border-0 bg-slate-950 px-5 text-white hover:bg-slate-800" type="submit">
+                  Apply
+                </button>
+                <a class="btn min-h-11 rounded-xl border-slate-300 bg-white px-5 text-slate-700 hover:bg-slate-100" href="/admin">
+                  Reset
+                </a>
+                <button class="btn min-h-11 rounded-xl border-0 bg-emerald-600 px-5 text-white hover:bg-emerald-700" type="submit" name="format" value="csv" formaction="/api/admin/submissions">
+                  Download filtered CSV
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[1280px] text-left text-sm">
+            <thead>
+              <tr class="border-b border-slate-200 bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-500">
+                <th class="px-5 py-3">#</th>
+                <th class="px-3 py-3">Institute</th>
+                <th class="px-3 py-3">Type</th>
+                <th class="cursor-pointer select-none px-3 py-3" data-sort-key="tehsil" data-sort-type="string">Tehsil</th>
+                <th class="px-3 py-3">Management</th>
+                <th class="px-3 py-3">Status</th>
+                <th class="px-3 py-3">Coverage</th>
+                <th class="px-3 py-3">Facilities</th>
+                <th class="px-3 py-3">Wing / AEO / Zonal</th>
+                <th class="px-3 py-3">Images</th>
+                <th class="cursor-pointer select-none px-3 py-3" data-sort-key="submitted" data-sort-type="date">Submitted</th>
+                <th class="px-5 py-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="submissionsTableBody">
+              {submissions.length === 0 ? (
+                <tr>
+                  <td class="px-5 py-8 text-slate-500" colspan="12">No survey records have been submitted yet.</td>
+                </tr>
+              ) : (
+                submissions.map((record, index) => {
+                  const facilityGap = hasFacilityGap(record);
+                  const isSeWing = record.wing === "SE";
+                  const isSeByZonalHead = isSeWing && record.se_submitted_by === "Zonal Head";
+                  const isSeByAeo = isSeWing && record.se_submitted_by === "AEO";
+                  const searchValue = [
+                    record.institution_name,
+                    record.complete_address,
+                    record.tehsil,
+                    record.union_council_name,
+                    record.union_council_number,
+                    record.institute_type,
+                    record.wing,
+                    record.se_submitted_by,
+                    record.se_aeo_wing,
+                    record.owner_name,
+                    record.principal_name,
+                    record.aeo_name,
+                    record.zonal_head_institute_name,
+                    record.zonal_head_name,
+                    record.zonal_head_contact_no,
+                    record.outside_main_gate_image_url,
+                    record.inside_institute_image_url,
+                    record.registration_status,
+                  ].map(displayValue).join(" ").toLowerCase();
+
+                  return (
+                    <tr
+                      class="border-b border-slate-100 align-top last:border-0"
+                      data-sort-row
+                      data-search={searchValue}
+                      data-tehsil={displayValue(record.tehsil)}
+                      data-institute-type={displayValue(record.institute_type)}
+                      data-wing={displayValue(record.wing)}
+                      data-registration={displayValue(record.registration_status)}
+                      data-facility-gap={facilityGap ? "gap" : "clear"}
+                    >
+                      <th class="px-5 py-4 text-slate-500" data-row-index>{currentOffset + index + 1}</th>
+                      <td class="min-w-80 px-3 py-4">
+                        <div class="font-black leading-snug text-slate-950">{displayValue(record.institution_name)}</div>
+                        <div class="mt-1 text-xs leading-5 text-slate-500">{displayValue(record.complete_address)}</div>
+                        <div class="mt-2 flex flex-wrap gap-1.5 text-xs font-bold">
+                          <span class="rounded-full bg-slate-100 px-2 py-1 text-slate-600">
+                            UC: {displayCombinedValue(record.union_council_name, record.union_council_number)}
+                          </span>
+                          <span class="rounded-full bg-slate-100 px-2 py-1 text-slate-600">PP {displayValue(record.pp_no)}</span>
+                          <span class="rounded-full bg-slate-100 px-2 py-1 text-slate-600">NA {displayValue(record.na_no)}</span>
+                        </div>
+                      </td>
+                      <td class="px-3 py-4">
+                        <span class="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-black text-sky-800">
+                          {displayValue(record.institute_type)}
+                        </span>
+                      </td>
+                      <td class="px-3 py-4 font-bold" data-sort-key="tehsil" data-sort-value={record.tehsil ?? ""}>
+                        {displayValue(record.tehsil)}
+                      </td>
+                      <td class="min-w-64 px-3 py-4 leading-6">
+                        <div><span class="font-bold">Owner:</span> {displayValue(record.owner_name)}</div>
+                        <div class="text-xs text-slate-500">{displayValue(record.owner_contact_no)}</div>
+                        <div class="mt-2"><span class="font-bold">Principal:</span> {displayValue(record.principal_name)}</div>
+                        <div class="text-xs text-slate-500">{displayValue(record.principal_contact_no)}</div>
+                      </td>
+                      <td class="min-w-52 px-3 py-4">
+                        <span class:list={["rounded-full px-2.5 py-1 text-xs font-black", getRegistrationBadgeClass(record.registration_status)]}>
+                          {displayValue(record.registration_status)}
+                        </span>
+                        <div class="mt-2 text-xs leading-5 text-slate-500">License: {displayValue(record.registration_license_no)}</div>
+                        <div class="text-xs leading-5 text-slate-500">Building: {displayValue(record.building_status)} / {displayValue(record.building_ownership)}</div>
+                      </td>
+                      <td class="px-3 py-4 leading-6">
+                        <div>Students: <span class="font-black">{formatNumber(record.no_of_students)}</span></div>
+                        <div>Teachers: <span class="font-black">{formatNumber(record.no_of_teachers)}</span></div>
+                        <div class="text-xs text-slate-500">Rooms: {formatNumber(record.no_of_classrooms)}</div>
+                      </td>
+                      <td class="min-w-60 px-3 py-4 text-xs leading-5">
+                        <span class:list={[
+                          "rounded-full px-2.5 py-1 text-xs font-black",
+                          facilityGap ? "bg-rose-100 text-rose-800" : "bg-emerald-100 text-emerald-800",
+                        ]}>
+                          {facilityGap ? "Gap found" : "No gap marked"}
+                        </span>
+                        <div class="mt-2 text-slate-500">
+                          Water {displayValue(record.drinking_water_facility)} / Fire {displayValue(record.fire_safety_available)} / CCTV {displayValue(record.cctv_installed)}
+                        </div>
+                        <div class="text-slate-500">Ramp {displayValue(record.ramp_available)} / PSCA {displayValue(record.psca_app_installed)}</div>
+                      </td>
+                      <td class="min-w-56 px-3 py-4 leading-6">
+                        <div class="font-black">{displayValue(record.wing)}</div>
+                        {isSeWing && (
+                          <div class="text-xs font-bold text-indigo-700">Submitted by: {displayValue(record.se_submitted_by)}</div>
+                        )}
+                        {isSeByAeo && (
+                          <div class="text-xs text-slate-500">AEO Wing: {displayValue(record.se_aeo_wing)}</div>
+                        )}
+                        {(!isSeWing || isSeByAeo) && (
+                          <div class="text-xs text-slate-500">AEO: {displayValue(record.aeo_name)}</div>
+                        )}
+                        {isSeByZonalHead && (
+                          <>
+                            <div class="mt-2 text-xs font-bold text-slate-700">{displayValue(record.zonal_head_institute_name)}</div>
+                            <div class="text-xs text-slate-500">
+                              {displayCombinedValue(record.zonal_head_name, record.zonal_head_contact_no)}
+                            </div>
+                          </>
+                        )}
+                        {getMapHref(record) ? (
+                          <a
+                            class="mt-2 inline-flex rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-black text-white hover:bg-slate-800"
+                            href={getMapHref(record)}
+                            rel="noopener noreferrer"
+                            target="_blank"
+                          >
+                            Open Map
+                          </a>
+                        ) : (
+                          <div class="mt-2 text-xs font-bold text-amber-700">No location link</div>
+                        )}
+                        {record.hidden_location_coordinates && (
+                          <div class="mt-1 font-mono text-[11px] text-slate-500">{record.hidden_location_coordinates}</div>
+                        )}
+                      </td>
+                      <td class="min-w-40 px-3 py-4">
+                        <div class="flex flex-col gap-2">
+                          <a
+                            class="inline-flex rounded-lg bg-sky-100 px-3 py-1.5 text-xs font-black text-sky-800 hover:bg-sky-200"
+                            href={record.outside_main_gate_image_url ?? "#"}
+                            rel="noopener noreferrer"
+                            target="_blank"
+                          >
+                            Main Gate
+                          </a>
+                          <a
+                            class="inline-flex rounded-lg bg-indigo-100 px-3 py-1.5 text-xs font-black text-indigo-800 hover:bg-indigo-200"
+                            href={record.inside_institute_image_url ?? "#"}
+                            rel="noopener noreferrer"
+                            target="_blank"
+                          >
+                            Inside
+                          </a>
+                        </div>
+                      </td>
+                      <td
+                        class="min-w-44 px-3 py-4 text-slate-600"
+                        data-sort-key="submitted"
+                        data-sort-value={record.submitted_at ?? ""}
+                      >
+                        {formatDate(record.submitted_at)}
+                      </td>
+                      <td class="px-5 py-4">
+                        <div class="flex min-w-32 flex-col gap-2">
+                          <button
+                            class="rounded-lg bg-sky-600 px-3 py-2 text-xs font-black text-white hover:bg-sky-700"
+                            data-action="edit-submission"
+                            data-record={JSON.stringify(record)}
+                            type="button"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            class="rounded-lg bg-rose-600 px-3 py-2 text-xs font-black text-white hover:bg-rose-700"
+                            data-action="delete-submission"
+                            data-id={record.id}
+                            data-name={displayValue(record.institution_name)}
+                            type="button"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div class="text-sm font-bold text-slate-500">
+            Page {formatNumber(currentPage)} of {formatNumber(totalPages)}
+            <span class="font-semibold"> / {formatNumber(currentPageSize)} rows per page</span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <a
+              class:list={[
+                "rounded-xl border px-4 py-2 text-sm font-black",
+                currentPage <= 1 ? "pointer-events-none border-slate-200 bg-slate-100 text-slate-400" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
+              ]}
+              href={previousPageUrl}
+            >
+              Previous
+            </a>
+            <span class="rounded-xl bg-slate-950 px-4 py-2 text-sm font-black text-white">
+              {formatNumber(firstVisibleRecord)}-{formatNumber(lastVisibleRecord)}
+            </span>
+            <a
+              class:list={[
+                "rounded-xl border px-4 py-2 text-sm font-black",
+                currentPage >= totalPages ? "pointer-events-none border-slate-200 bg-slate-100 text-slate-400" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
+              ]}
+              href={nextPageUrl}
+            >
+              Next
+            </a>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <dialog id="editSubmissionModal" class="modal">
+      <div class="modal-box max-w-5xl border border-sky-200 bg-white">
+        <form method="dialog">
+          <button class="btn btn-circle btn-ghost btn-sm absolute right-3 top-3" type="submit">
+            x
+          </button>
+        </form>
+        <h2 class="text-2xl font-black tracking-normal text-slate-950">Edit Survey Record</h2>
+        <p id="editSubmissionContext" class="mt-2 text-sm font-semibold text-slate-500"></p>
+
+        <form id="editSubmissionForm" class="mt-5">
+          <input id="editSubmissionId" type="hidden" />
+          <div id="editFieldsContainer" class="grid max-h-[65vh] gap-4 overflow-y-auto pr-1 md:grid-cols-2"></div>
+          <div id="editSubmissionMessage" class="mt-4 hidden"></div>
+          <div class="modal-action">
+            <button class="btn btn-ghost" type="button" data-action="close-edit-modal">Cancel</button>
+            <button id="saveSubmissionButton" class="btn border-0 bg-emerald-600 text-white hover:bg-emerald-700" type="submit">
+              Save Changes
+            </button>
+          </div>
+        </form>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+      </form>
+    </dialog>
+
+    <dialog id="deleteSubmissionModal" class="modal">
+      <div class="modal-box border border-rose-200 bg-white">
+        <h2 class="text-2xl font-black tracking-normal text-slate-950">Delete Survey Record</h2>
+        <p id="deleteSubmissionContext" class="mt-3 text-slate-600"></p>
+        <div id="deleteSubmissionMessage" class="hidden"></div>
+        <div class="modal-action">
+          <button class="btn btn-ghost" type="button" data-action="close-delete-modal">Cancel</button>
+          <button id="confirmDeleteButton" class="btn btn-error" type="button">Delete Record</button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+      </form>
+    </dialog>
+
+    <script id="surveyEditFields" type="application/json" set:html={editFieldsJson}></script>
+    <script id="adminAeoOptionsData" type="application/json" set:html={aeoOptionsJson}></script>
+    <script id="adminZonalHeadOptionsData" type="application/json" set:html={zonalHeadOptionsJson}></script>
+
+    <script>
+      const downloadButton = document.getElementById("downloadCsvButton");
+      const editFieldsElement = document.getElementById("surveyEditFields");
+      const adminAeoOptionsElement = document.getElementById("adminAeoOptionsData");
+      const adminZonalHeadOptionsElement = document.getElementById("adminZonalHeadOptionsData");
+      const editFields = JSON.parse(editFieldsElement?.textContent || "[]");
+      const adminAeoOptions = JSON.parse(adminAeoOptionsElement?.textContent || "[]");
+      const adminZonalHeadOptions = JSON.parse(adminZonalHeadOptionsElement?.textContent || "[]");
+      const editSubmissionModal = document.getElementById("editSubmissionModal");
+      const editSubmissionForm = document.getElementById("editSubmissionForm");
+      const editSubmissionId = document.getElementById("editSubmissionId");
+      const editSubmissionContext = document.getElementById("editSubmissionContext");
+      const editFieldsContainer = document.getElementById("editFieldsContainer");
+      const editSubmissionMessage = document.getElementById("editSubmissionMessage");
+      const saveSubmissionButton = document.getElementById("saveSubmissionButton");
+      const deleteSubmissionModal = document.getElementById("deleteSubmissionModal");
+      const deleteSubmissionContext = document.getElementById("deleteSubmissionContext");
+      const deleteSubmissionMessage = document.getElementById("deleteSubmissionMessage");
+      const confirmDeleteButton = document.getElementById("confirmDeleteButton");
+      const recordsFilterForm = document.getElementById("recordsFilterForm");
+      const searchInput = document.getElementById("recordSearchInput");
+      const tehsilFilter = document.getElementById("tehsilFilter");
+      const instituteTypeFilter = document.getElementById("instituteTypeFilter");
+      const wingFilter = document.getElementById("wingFilter");
+      const registrationFilter = document.getElementById("registrationFilter");
+      const facilityFilter = document.getElementById("facilityFilter");
+      const pageSizeFilter = document.getElementById("pageSizeFilter");
+      const editFieldNames = {
+        wing: "wing",
+        seSubmittedBy: "se_submitted_by",
+        seAeoWing: "se_aeo_wing",
+        aeoName: "aeo_name",
+        zonalHeadInstitute: "zonal_head_institute_name",
+        zonalHeadName: "zonal_head_name",
+        zonalHeadContact: "zonal_head_contact_no",
+      };
+      const conditionalEditFieldNames = new Set([
+        editFieldNames.seSubmittedBy,
+        editFieldNames.seAeoWing,
+        editFieldNames.aeoName,
+        editFieldNames.zonalHeadInstitute,
+        editFieldNames.zonalHeadName,
+        editFieldNames.zonalHeadContact,
+      ]);
+      let editControlMap = new Map();
+      let pendingDeleteId = "";
+      let filterSubmitTimer;
+
+      async function downloadCsv() {
+        const downloadUrl = downloadButton.dataset.downloadUrl;
+        if (!downloadUrl) return;
+
+        setButtonLoading(downloadButton, true);
+
+        const response = await fetch(downloadUrl, {
+          headers: {
+            accept: "text/csv",
+          },
+        });
+
+        if (!response.ok) {
+          window.alert("Unable to download CSV. Please try again.");
+          setButtonLoading(downloadButton, false);
+          return;
+        }
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+
+        anchor.href = url;
+        anchor.download = "PRIVATE_INSTITUTES_SURVEY_JULY_2026.csv";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+        setButtonLoading(downloadButton, false);
+      }
+
+      function setButtonLoading(button, isLoading) {
+        button.disabled = isLoading;
+        button.classList.toggle("loading", isLoading);
+      }
+
+      function submitFiltersSoon(delay = 0) {
+        window.clearTimeout(filterSubmitTimer);
+        filterSubmitTimer = window.setTimeout(() => {
+          recordsFilterForm?.requestSubmit();
+        }, delay);
+      }
+
+      function setModalMessage(element, type, message) {
+        const alertClass = type === "success" ? "alert-success" : "alert-error";
+        element.className = `alert ${alertClass}`;
+        element.textContent = message;
+      }
+
+      function clearModalMessage(element) {
+        element.className = "hidden";
+        element.textContent = "";
+      }
+
+      function createOption(value, label = value) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        return option;
+      }
+
+      function getEditControl(name) {
+        return editControlMap.get(name)?.control || null;
+      }
+
+      function getEditWrapper(name) {
+        return editControlMap.get(name)?.wrapper || null;
+      }
+
+      function setEditControlState(name, isEnabled, isRequired) {
+        const control = getEditControl(name);
+        if (!control) return;
+
+        control.disabled = !isEnabled;
+        control.required = isEnabled && isRequired;
+      }
+
+      function setEditFieldVisible(name, isVisible, isRequired = false) {
+        const wrapper = getEditWrapper(name);
+        const control = getEditControl(name);
+
+        if (wrapper) {
+          wrapper.hidden = !isVisible;
+          wrapper.classList.toggle("hidden", !isVisible);
+        }
+
+        if (control) {
+          control.disabled = !isVisible;
+          control.required = isVisible && isRequired;
+        }
+      }
+
+      function resetEditSelect(name, placeholderText = "Select") {
+        const select = getEditControl(name);
+        if (!select) return;
+
+        select.innerHTML = "";
+        select.appendChild(createOption("", placeholderText));
+        select.value = "";
+      }
+
+      function createEditControl(field, value) {
+        if (field.kind === "hidden") {
+          const hiddenInput = document.createElement("input");
+          hiddenInput.type = "hidden";
+          hiddenInput.name = field.name;
+          hiddenInput.value = String(value ?? "");
+          editControlMap.set(field.name, { wrapper: null, control: hiddenInput, field });
+          return hiddenInput;
+        }
+
+        const wrapper = document.createElement("label");
+        const shouldSpanFull = field.kind === "textarea" ||
+          field.kind === "location" ||
+          field.kind === "image" ||
+          field.colSpan === "full" ||
+          field.colSpan === "wide";
+        wrapper.className = shouldSpanFull ? "grid gap-1 md:col-span-2" : "grid gap-1";
+        wrapper.dataset.editFieldName = field.name;
+
+        const label = document.createElement("span");
+        label.className = "text-xs font-black uppercase tracking-wide text-slate-500";
+        label.textContent = `${field.label}${field.required ? " *" : ""}`;
+        wrapper.appendChild(label);
+
+        let control;
+
+        if (field.kind === "select" || field.kind === "yesNo" || field.kind === "aeo") {
+          control = document.createElement("select");
+          const emptyOption = document.createElement("option");
+          emptyOption.value = "";
+          emptyOption.textContent = field.kind === "aeo" ? "Select wing first" : "Select";
+          control.appendChild(emptyOption);
+
+          (field.kind === "aeo" ? [] : field.options || []).forEach((optionValue) => {
+            const option = document.createElement("option");
+            option.value = optionValue;
+            option.textContent = optionValue;
+            control.appendChild(option);
+          });
+        } else if (field.kind === "textarea") {
+          control = document.createElement("textarea");
+          control.rows = 3;
+        } else {
+          control = document.createElement("input");
+          control.type = field.kind === "number" ||
+            field.kind === "date" ||
+            field.kind === "datetime-local" ||
+            field.kind === "email"
+              ? field.kind
+              : field.kind === "image"
+                ? "url"
+                : "text";
+        }
+
+        control.className = "admin-filter-input";
+        control.name = field.name;
+        control.required = Boolean(field.required);
+        if (field.autocomplete) control.autocomplete = field.autocomplete;
+        if (field.inputMode) control.inputMode = field.inputMode;
+        if (field.min !== undefined) control.min = field.min;
+        control.value = String(value ?? "");
+        wrapper.appendChild(control);
+        editControlMap.set(field.name, { wrapper, control, field });
+
+        return wrapper;
+      }
+
+      function populateEditAeoOptions(sourceWing, currentValue = "", preserveCurrent = false) {
+        const aeoSelect = getEditControl(editFieldNames.aeoName);
+        if (!aeoSelect) return;
+
+        const matchingAeos = adminAeoOptions.filter((aeo) => aeo.wing === sourceWing);
+        const savedValue = String(currentValue || "").trim();
+
+        aeoSelect.innerHTML = "";
+        aeoSelect.appendChild(createOption("", "Select AEO"));
+
+        matchingAeos.forEach((aeo) => {
+          aeoSelect.appendChild(createOption(aeo.name, `${aeo.name} - ${aeo.tehsil} / ${aeo.markaz}`));
+        });
+
+        if (savedValue && matchingAeos.some((aeo) => aeo.name === savedValue)) {
+          aeoSelect.value = savedValue;
+          return;
+        }
+
+        if (savedValue && preserveCurrent && !["SE Zonal Head", "Not applicable"].includes(savedValue)) {
+          aeoSelect.appendChild(createOption(savedValue, `${savedValue} (current saved value)`));
+          aeoSelect.value = savedValue;
+          return;
+        }
+
+        aeoSelect.value = "";
+      }
+
+      function setEditZonalHeadFieldsVisible(isVisible) {
+        setEditFieldVisible(editFieldNames.zonalHeadInstitute, isVisible, true);
+        setEditFieldVisible(editFieldNames.zonalHeadName, isVisible, false);
+        setEditFieldVisible(editFieldNames.zonalHeadContact, isVisible, false);
+      }
+
+      function updateEditZonalHeadDetails() {
+        const instituteSelect = getEditControl(editFieldNames.zonalHeadInstitute);
+        const headNameInput = getEditControl(editFieldNames.zonalHeadName);
+        const headContactInput = getEditControl(editFieldNames.zonalHeadContact);
+        if (!instituteSelect || !headNameInput || !headContactInput) return;
+
+        const matchedHead = adminZonalHeadOptions.find((option) => option.institute === instituteSelect.value);
+        headNameInput.value = matchedHead?.headName || "";
+        headContactInput.value = matchedHead?.headPhone || "";
+      }
+
+      function updateEditConditionalFlow({ preserveExisting = false } = {}) {
+        const wingSelect = getEditControl(editFieldNames.wing);
+        const seSubmittedBySelect = getEditControl(editFieldNames.seSubmittedBy);
+        const seAeoWingSelect = getEditControl(editFieldNames.seAeoWing);
+        const aeoSelect = getEditControl(editFieldNames.aeoName);
+        const selectedWing = wingSelect?.value || "";
+        const seSubmittedBy = seSubmittedBySelect?.value || "";
+        const seAeoWing = seAeoWingSelect?.value || "";
+        const currentAeoValue = aeoSelect?.value || "";
+
+        conditionalEditFieldNames.forEach((fieldName) => {
+          setEditFieldVisible(fieldName, false, false);
+        });
+
+        if (!selectedWing) {
+          resetEditSelect(editFieldNames.aeoName, "Select wing first");
+          return;
+        }
+
+        if (selectedWing === "MEE" || selectedWing === "WEE") {
+          setEditFieldVisible(editFieldNames.aeoName, true, true);
+          populateEditAeoOptions(selectedWing, currentAeoValue, preserveExisting);
+          return;
+        }
+
+        if (selectedWing !== "SE") {
+          resetEditSelect(editFieldNames.aeoName, "Select wing first");
+          return;
+        }
+
+        setEditFieldVisible(editFieldNames.seSubmittedBy, true, true);
+
+        if (seSubmittedBy === "Zonal Head") {
+          setEditZonalHeadFieldsVisible(true);
+          resetEditSelect(editFieldNames.aeoName, "SE record by zonal head");
+          return;
+        }
+
+        if (seSubmittedBy !== "AEO") {
+          resetEditSelect(editFieldNames.aeoName, "Select SE submitted by first");
+          setEditFieldVisible(editFieldNames.seAeoWing, false, false);
+          return;
+        }
+
+        setEditFieldVisible(editFieldNames.seAeoWing, true, true);
+
+        if (seAeoWing === "MEE" || seAeoWing === "WEE") {
+          setEditFieldVisible(editFieldNames.aeoName, true, true);
+          populateEditAeoOptions(seAeoWing, currentAeoValue, preserveExisting);
+          return;
+        }
+
+        resetEditSelect(editFieldNames.aeoName, "Select AEO wing first");
+      }
+
+      function wireEditConditionalEvents() {
+        getEditControl(editFieldNames.wing)?.addEventListener("change", () => {
+          const seSubmittedBySelect = getEditControl(editFieldNames.seSubmittedBy);
+          const seAeoWingSelect = getEditControl(editFieldNames.seAeoWing);
+          if (seSubmittedBySelect) seSubmittedBySelect.value = "";
+          if (seAeoWingSelect) seAeoWingSelect.value = "";
+          updateEditConditionalFlow();
+        });
+
+        getEditControl(editFieldNames.seSubmittedBy)?.addEventListener("change", () => {
+          const seAeoWingSelect = getEditControl(editFieldNames.seAeoWing);
+          if (seAeoWingSelect) seAeoWingSelect.value = "";
+          updateEditConditionalFlow();
+        });
+
+        getEditControl(editFieldNames.seAeoWing)?.addEventListener("change", () => updateEditConditionalFlow());
+        getEditControl(editFieldNames.zonalHeadInstitute)?.addEventListener("change", updateEditZonalHeadDetails);
+      }
+
+      function openEditModal(button) {
+        clearModalMessage(editSubmissionMessage);
+        const record = JSON.parse(button.dataset.record || "{}");
+        editSubmissionId.value = record.id || "";
+        editSubmissionContext.textContent = `${record.institution_name || "Unknown institute"} / ${record.tehsil || "No tehsil"}`;
+        editFieldsContainer.innerHTML = "";
+        editControlMap = new Map();
+
+        editFields.forEach((field) => {
+          editFieldsContainer.appendChild(createEditControl(field, record[field.name]));
+        });
+
+        wireEditConditionalEvents();
+        updateEditConditionalFlow({ preserveExisting: true });
+        editSubmissionModal.showModal();
+      }
+
+      async function readApiError(response, fallback) {
+        try {
+          const body = await response.json();
+          return body.error || body.message || fallback;
+        } catch {
+          return fallback;
+        }
+      }
+
+      function openDeleteModal(button) {
+        clearModalMessage(deleteSubmissionMessage);
+        pendingDeleteId = button.dataset.id || "";
+        deleteSubmissionContext.textContent = `This will permanently delete the survey record for ${button.dataset.name || "this institute"}.`;
+        deleteSubmissionModal.showModal();
+      }
+
+      async function saveSubmission(event) {
+        event.preventDefault();
+        clearModalMessage(editSubmissionMessage);
+        updateEditConditionalFlow({ preserveExisting: true });
+        setButtonLoading(saveSubmissionButton, true);
+
+        const formData = new FormData(editSubmissionForm);
+        const payload = Object.fromEntries(formData.entries());
+        payload.id = editSubmissionId.value;
+
+        try {
+          const response = await fetch("/api/admin/submissions", {
+            method: "PATCH",
+            headers: {
+              "content-type": "application/json",
+              accept: "application/json",
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            const errorMessage = await readApiError(response, "Unable to update survey record.");
+            setModalMessage(editSubmissionMessage, "error", errorMessage);
+            return;
+          }
+
+          setModalMessage(editSubmissionMessage, "success", "Survey record updated. Refreshing dashboard...");
+          window.setTimeout(() => window.location.reload(), 600);
+        } catch {
+          setModalMessage(editSubmissionMessage, "error", "Network error. Please try again.");
+        } finally {
+          setButtonLoading(saveSubmissionButton, false);
+        }
+      }
+
+      async function deleteSubmission() {
+        clearModalMessage(deleteSubmissionMessage);
+
+        if (!pendingDeleteId) {
+          setModalMessage(deleteSubmissionMessage, "error", "No survey record selected.");
+          return;
+        }
+
+        setButtonLoading(confirmDeleteButton, true);
+
+        try {
+          const response = await fetch("/api/admin/submissions", {
+            method: "DELETE",
+            headers: {
+              "content-type": "application/json",
+              accept: "application/json",
+            },
+            body: JSON.stringify({ id: pendingDeleteId }),
+          });
+
+          if (!response.ok) {
+            const errorMessage = await readApiError(response, "Unable to delete survey record.");
+            setModalMessage(deleteSubmissionMessage, "error", errorMessage);
+            return;
+          }
+
+          setModalMessage(deleteSubmissionMessage, "success", "Survey record deleted. Refreshing dashboard...");
+          window.setTimeout(() => window.location.reload(), 600);
+        } catch {
+          setModalMessage(deleteSubmissionMessage, "error", "Network error. Please try again.");
+        } finally {
+          setButtonLoading(confirmDeleteButton, false);
+        }
+      }
+
+      downloadButton.addEventListener("click", downloadCsv);
+      searchInput?.addEventListener("input", () => submitFiltersSoon(450));
+      [tehsilFilter, instituteTypeFilter, wingFilter, registrationFilter, facilityFilter, pageSizeFilter].forEach((control) => {
+        control?.addEventListener("change", () => submitFiltersSoon());
+      });
+      document.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-action]");
+        if (!button) return;
+
+        if (button.dataset.action === "edit-submission") {
+          openEditModal(button);
+        } else if (button.dataset.action === "delete-submission") {
+          openDeleteModal(button);
+        } else if (button.dataset.action === "close-edit-modal") {
+          editSubmissionModal.close();
+        } else if (button.dataset.action === "close-delete-modal") {
+          deleteSubmissionModal.close();
+        }
+      });
+      editSubmissionForm.addEventListener("submit", saveSubmission);
+      confirmDeleteButton.addEventListener("click", deleteSubmission);
+    </script>
+
+    <style>
+      .admin-filter-input {
+        min-height: 2.75rem;
+        width: 100%;
+        border-radius: 0.85rem;
+        border: 1px solid rgb(203 213 225);
+        background: rgb(248 250 252);
+        padding: 0.65rem 0.85rem;
+        color: rgb(15 23 42);
+        font-weight: 700;
+        outline: none;
+      }
+
+      .admin-filter-input:focus {
+        border-color: rgb(2 132 199);
+        background: white;
+        box-shadow: 0 0 0 4px rgb(14 165 233 / 0.16);
+      }
+    </style>
+  </main>
+</Layout>

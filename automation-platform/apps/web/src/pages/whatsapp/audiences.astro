@@ -1,0 +1,83 @@
+---
+import DataTable from "../../components/DataTable.astro";
+import WhatsAppRoutingNav from "../../components/WhatsAppRoutingNav.astro";
+import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
+---
+
+<WhatsAppLayout title="WhatsApp Audiences" description="Reusable, module-scoped sets of detected groups and individual contacts." page="routing">
+  <button class="btn btn-sm btn-primary" id="add-audience" slot="actions">＋ Add audience</button>
+  <WhatsAppRoutingNav active="audiences" />
+  <div class="notice">Audiences define who may receive reports. They do not select the report, connection or delivery policy.</div>
+  <div class="toolbar directory-toolbar">
+    <input class="input input-bordered input-sm search-input" id="audience-search" placeholder="Search audience name or key…" />
+    <select class="select select-bordered select-sm" id="audience-application"><option value="">All modules</option></select>
+    <span class="toolbar-status" id="audience-total">Loading…</span>
+  </div>
+  <article class="master-card"><DataTable id="audiences-table" pageSize={10} emptyText="No audiences are configured." /></article>
+
+  <dialog class="modal" id="audience-dialog"><div class="modal-box master-modal">
+    <div class="modal-title"><h2 id="audience-title">Add audience</h2><button type="button" id="close-audience">×</button></div>
+    <form class="master-form" id="audience-form">
+      <input type="hidden" id="audience-id" />
+      <label><span>Platform module *</span><select class="select select-bordered select-sm" id="audience-module" required></select></label>
+      <label><span>Status</span><select class="select select-bordered select-sm" id="audience-enabled"><option value="true">Enabled</option><option value="false">Draft / archived</option></select></label>
+      <label class="full"><span>Name *</span><input class="input input-bordered input-sm" id="audience-name" required /></label>
+      <details class="advanced-field full"><summary>Advanced identifier</summary><label><span>Stable key</span><input class="input input-bordered input-sm" id="audience-key" pattern="[a-z0-9_]+" placeholder="Generated from the name" required /><small>Generated automatically and locked after creation.</small></label></details>
+      <label class="full"><span>Description</span><textarea class="textarea textarea-bordered textarea-sm" id="audience-description" rows="4"></textarea></label>
+      <div class="form-actions"><button class="btn btn-sm" type="button" id="cancel-audience">Cancel</button><button class="btn btn-sm btn-primary" type="submit">Save audience</button></div>
+    </form>
+  </div><form method="dialog" class="modal-backdrop"><button>close</button></form></dialog>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { actionButtons, badge, stack } from "../../scripts/table-cells";
+    import { confirmAction, showError, showSuccess } from "../../scripts/alerts";
+    await customElements.whenDefined("astro-data-table");
+    const table = document.getElementById("audiences-table") as any;
+    const dialog = document.getElementById("audience-dialog") as HTMLDialogElement;
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    let options: any; let timer: number | undefined;
+    const stableKey = (value: string) => value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"").slice(0,100);
+
+    function populateModules() {
+      const html = options.applications.filter((item: any) => item.enabled).map((item: any) => `<option value="${item.id}">${item.name}</option>`).join("");
+      el<HTMLSelectElement>("audience-module").innerHTML = html;
+      el<HTMLSelectElement>("audience-application").innerHTML = `<option value="">All modules</option>${html}`;
+    }
+    function openForm(item?: any) {
+      el<HTMLFormElement>("audience-form").reset();
+      el("audience-title").textContent = item ? "Edit audience" : "Add audience";
+      el<HTMLInputElement>("audience-id").value = item?.id || "";
+      el<HTMLSelectElement>("audience-module").value = item?.application_id || options.applications[0]?.id || "";
+      el<HTMLSelectElement>("audience-module").disabled = Boolean(item);
+      el<HTMLInputElement>("audience-name").value = item?.name || "";
+      el<HTMLInputElement>("audience-key").value = item?.key || "";
+      el<HTMLInputElement>("audience-key").readOnly = Boolean(item);
+      el<HTMLTextAreaElement>("audience-description").value = item?.description || "";
+      el<HTMLSelectElement>("audience-enabled").value = String(item?.enabled ?? true);
+      dialog.showModal();
+    }
+    async function loadPage(pageIndex: number, pageSize: number) {
+      const result = await actions.whatsapp.audiences({applicationId: el<HTMLSelectElement>("audience-application").value, search: el<HTMLInputElement>("audience-search").value, page: pageIndex + 1, pageSize});
+      if (result.error) throw result.error;
+      const data = result.data as any; el("audience-total").textContent = `${data.total} audiences`; return {rows: data.items, total: data.total};
+    }
+    try {
+      const result = await actions.whatsapp.configurationOptions(); if (result.error) throw result.error; options = result.data; populateModules();
+      await table.configure({manualPagination: true, loadPage, columns: [
+        {accessorKey:"name",header:"Audience",enableSorting:false,cell:({row}:any)=>stack(row.original.name,row.original.key)},
+        {accessorKey:"application_name",header:"Module",enableSorting:false},
+        {accessorKey:"member_count",header:"Targets",enableSorting:false,cell:({row}:any)=>stack(`${row.original.member_count} total`,`${row.original.group_count} groups · ${row.original.contact_count} individuals`)},
+        {accessorKey:"profile_count",header:"Profiles",enableSorting:false},
+        {accessorKey:"enabled",header:"Status",enableSorting:false,cell:({row}:any)=>badge(row.original.enabled?"Enabled":"Draft",row.original.enabled?"":"inactive")},
+        {id:"actions",header:"",enableSorting:false,cell:({row}:any)=>actionButtons([{label:"Manage targets",onClick:()=>{window.location.href=`/whatsapp/audiences/${row.original.id}`;}},{label:"Edit",onClick:()=>openForm(row.original)},{label:"Delete permanently",tone:"danger",onClick:async()=>{if(!await confirmAction("Permanently delete this audience?","Its targets, dispatch profiles and frozen previews will also be deleted.","Delete permanently"))return;const result=await actions.whatsapp.hardDeleteAudience({id:row.original.id});if(result.error)await showError(result.error);else{await showSuccess("Audience deleted","Dependent routing records were removed.");await table.refresh(true);}}}])},
+      ]});
+    } catch (error) { await showError(error); }
+    el("add-audience").addEventListener("click",()=>openForm());
+    el("close-audience").addEventListener("click",()=>dialog.close()); el("cancel-audience").addEventListener("click",()=>dialog.close());
+    el("audience-application").addEventListener("change",()=>void table.refresh(true));
+    el<HTMLInputElement>("audience-name").addEventListener("input",()=>{if(!el<HTMLInputElement>("audience-id").value)el<HTMLInputElement>("audience-key").value=stableKey(el<HTMLInputElement>("audience-name").value);});
+    el("audience-search").addEventListener("input",()=>{window.clearTimeout(timer);timer=window.setTimeout(()=>void table.refresh(true),250);});
+    el("audience-form").addEventListener("submit",async(event)=>{event.preventDefault();try{const id=el<HTMLInputElement>("audience-id").value;const result=await actions.whatsapp.saveAudience({id:id||undefined,application_id:el<HTMLSelectElement>("audience-module").value,key:el<HTMLInputElement>("audience-key").value,name:el<HTMLInputElement>("audience-name").value,description:el<HTMLTextAreaElement>("audience-description").value,enabled:el<HTMLSelectElement>("audience-enabled").value==="true"});if(result.error)throw result.error;dialog.close();await showSuccess("Audience saved","Add detected groups or individual contacts from its detail page.");await table.refresh(true);}catch(error){await showError(error);}});
+  </script>
+</WhatsAppLayout>

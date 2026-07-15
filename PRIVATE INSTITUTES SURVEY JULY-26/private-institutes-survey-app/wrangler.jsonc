@@ -1,0 +1,49 @@
+{
+	"compatibility_date": "2026-06-05",
+	"compatibility_flags": [
+		"global_fetch_strictly_public",
+		"nodejs_compat"
+	],
+	"name": "private-institutes-survey-app",
+	"main": "@astrojs/cloudflare/entrypoints/server",
+	"vars": {
+		"AUTH_ENABLED": "false",
+		"PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_dHJ1c3Rpbmcta3JpbGwtOTYuY2xlcmsuYWNjb3VudHMuZGV2JA",
+		"CLERK_PUBLISHABLE_KEY": "pk_test_dHJ1c3Rpbmcta3JpbGwtOTYuY2xlcmsuYWNjb3VudHMuZGV2JA",
+		"PUBLIC_CLERK_SIGN_IN_URL": "/admin/login",
+		"PUBLIC_CLERK_SIGN_UP_URL": "/admin/login",
+		"PUBLIC_CLERK_PROXY_URL": "https://private-institutes-survey-app.deo-mee-lahore-eii.workers.dev/__clerk",
+		"ADMIN_EMAILS": "deo.mee.lahore.eii@gmail.com,pomubbsher@gmail.com"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "private_institutes_survey_production_db",
+			"database_id": "4e45c15e-5d72-42a0-80ff-7e9449a1e612"
+		}
+	],
+	"env": {
+		"production": {
+			"vars": {
+				"AUTH_ENABLED": "false",
+				"PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_dHJ1c3Rpbmcta3JpbGwtOTYuY2xlcmsuYWNjb3VudHMuZGV2JA",
+				"CLERK_PUBLISHABLE_KEY": "pk_test_dHJ1c3Rpbmcta3JpbGwtOTYuY2xlcmsuYWNjb3VudHMuZGV2JA",
+				"PUBLIC_CLERK_SIGN_IN_URL": "/admin/login",
+				"PUBLIC_CLERK_SIGN_UP_URL": "/admin/login",
+				"PUBLIC_CLERK_PROXY_URL": "https://private-institutes-survey-app.deo-mee-lahore-eii.workers.dev/__clerk",
+				"ADMIN_EMAILS": "deo.mee.lahore.eii@gmail.com,pomubbsher@gmail.com"
+			},
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "private_institutes_survey_production_db",
+					"database_id": "4e45c15e-5d72-42a0-80ff-7e9449a1e612",
+					"remote": true
+				}
+			]
+		}
+	},
+	"observability": {
+		"enabled": true
+	}
+}

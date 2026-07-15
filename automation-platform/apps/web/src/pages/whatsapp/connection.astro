@@ -1,0 +1,84 @@
+---
+import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
+---
+
+<WhatsAppLayout
+  title="Connection"
+  description="Linked-device health, queue readiness, QR status, and controlled test delivery."
+  page="connection"
+>
+  <button class="btn btn-sm btn-primary" id="refresh-connection" slot="actions">↻ Check connection</button>
+
+  <section class="wa-connection-grid">
+    <article class="wa-panel">
+      <h2>Primary gateway</h2>
+      <p>Runtime health is requested through NATS. Authentication credentials remain owned by the gateway process.</p>
+      <div class="wa-detail-list" id="connection-details"><div class="wa-detail-row"><span>Status</span><strong>Checking…</strong></div></div>
+      <div class="wa-panel-actions" id="qr-actions"></div>
+    </article>
+
+    <article class="wa-panel">
+      <h2>Send connection test</h2>
+      <p>A single live message. It requires the global live-delivery safety switch and explicit confirmation.</p>
+      <form id="test-message-form">
+        <label><span>Recipient name</span><input class="input input-bordered input-sm" id="test-name" value="Test recipient" required /></label>
+        <label><span>WhatsApp number</span><input class="input input-bordered input-sm" id="test-target" placeholder="03xxxxxxxxx" required /></label>
+        <label><span>Message</span><textarea class="textarea textarea-bordered textarea-sm" id="test-message" rows="5" required>WhatsApp gateway test from Deomee Automation Platform.</textarea></label>
+        <div class="wa-safety" id="test-safety">Loading safety settings…</div>
+        <div class="wa-panel-actions"><button class="btn btn-sm btn-primary" type="submit">Send test message</button></div>
+      </form>
+    </article>
+  </section>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { closeAlert, confirmAction, showError, showLoading, showSuccess } from "../../scripts/alerts";
+    let connection: any;
+
+    async function loadConnection() {
+      try {
+        const result = await actions.whatsapp.connection();
+        if (result.error) throw result.error;
+        connection = result.data;
+        const health = connection.health;
+        document.getElementById("connection-details")!.innerHTML = [
+          ["Gateway status", health.status || "unknown"],
+          ["WhatsApp session", health.whatsapp_connected ? "Connected" : "Disconnected"],
+          ["NATS consumer", health.nats_consumer_ready ? "Ready" : "Unavailable"],
+          ["Worker", health.worker_key || connection.account.worker_key],
+          ["Known identities", health.known_identities || 0],
+          ["Target policy", health.target_policy || "—"],
+          ["Last checked", health.checked_at ? new Date(health.checked_at).toLocaleString() : "Now"],
+        ].map(([label, value]) => `<div class="wa-detail-row"><span>${label}</span><strong>${value}</strong></div>`).join("");
+        document.getElementById("test-safety")!.textContent = connection.settings.live_delivery_enabled
+          ? "Live delivery is enabled. Every test still requires confirmation."
+          : "Live delivery is disabled. Enable it from WhatsApp Settings before sending.";
+        document.getElementById("qr-actions")!.innerHTML = connection.account.qr_available
+          ? `<a class="btn btn-sm" href="http://127.0.0.1:8020/api/v1/whatsapp/connection/qr" target="_blank">Open login QR</a>`
+          : `<span class="status-chip ${health.ready ? "" : "warning"}">${health.ready ? "No QR required" : "No QR available"}</span>`;
+      } catch (error) { await showError(error); }
+    }
+
+    document.getElementById("test-message-form")!.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const target = (document.getElementById("test-target") as HTMLInputElement).value;
+      const name = (document.getElementById("test-name") as HTMLInputElement).value;
+      const message = (document.getElementById("test-message") as HTMLTextAreaElement).value;
+      if (!await confirmAction("Send live WhatsApp test?", `This will send one message to ${name} (${target}).`, "Send message")) return;
+      try {
+        showLoading("Sending test", "Waiting for the WhatsApp acknowledgement…");
+        const result = await actions.whatsapp.sendTestMessage({ target, recipient_name: name, message });
+        if (result.error) throw result.error;
+        closeAlert();
+        const delivery = result.data as any;
+        if (delivery.status === "delivered" || delivery.status === "sent_pending_confirmation") {
+          await showSuccess("Test completed", `Delivery status: ${delivery.status.replaceAll("_", " ")}.`);
+        } else {
+          throw new Error(delivery.error || `Delivery status: ${delivery.status}`);
+        }
+      } catch (error) { closeAlert(); await showError(error); }
+    });
+    document.getElementById("refresh-connection")!.addEventListener("click", () => void loadConnection());
+    void loadConnection();
+  </script>
+</WhatsAppLayout>

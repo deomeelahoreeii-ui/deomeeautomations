@@ -1,0 +1,21 @@
+---
+import type { SurveyField } from "../../config/survey";
+
+type Props = {
+  field: SurveyField;
+};
+
+const { field } = Astro.props;
+---
+
+<fieldset class="facility-field">
+  <legend>{field.label} {field.required && <span>*</span>}</legend>
+  <div class="facility-options">
+    {(field.options ?? ["Yes", "No"]).map((option) => (
+      <label>
+        <input name={field.name} required={field.required} type="radio" value={option} />
+        <span>{option}</span>
+      </label>
+    ))}
+  </div>
+</fieldset>

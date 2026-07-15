@@ -1,0 +1,126 @@
+---
+import DataTable from "../../../components/DataTable.astro";
+import WhatsAppDirectoryNav from "../../../components/WhatsAppDirectoryNav.astro";
+import WhatsAppLayout from "../../../layouts/WhatsAppLayout.astro";
+---
+
+<WhatsAppLayout title="WhatsApp Contacts & Identities" description="Searchable phone JID, LID and privacy-token health mappings." page="directory">
+  <button class="btn btn-sm btn-primary" id="sync-directory" slot="actions">↻ Sync directory</button>
+  <WhatsAppDirectoryNav active="contacts" />
+  <div class="notice">Tokens and authentication secrets are never displayed. Only safe health states and controlled refresh actions are available.</div>
+  <div class="toolbar directory-toolbar">
+    <input class="input input-bordered input-sm search-input" id="contact-search" placeholder="Search name, phone JID or LID…" />
+    <select class="select select-bordered select-sm" id="token-status">
+      <option value="">All token states</option>
+      <option value="usable">Usable</option>
+      <option value="expired">Expired</option>
+      <option value="missing">Missing</option>
+      <option value="not_applicable">No LID</option>
+      <option value="unknown">Unknown</option>
+    </select>
+    <span class="toolbar-status" id="contact-total">Loading…</span>
+  </div>
+  <article class="master-card"><DataTable id="directory-contacts-table" pageSize={10} emptyText="No synchronized WhatsApp identities match these filters." /></article>
+
+  <dialog class="modal" id="contact-link-dialog"><div class="modal-box master-modal wide-modal">
+    <div class="modal-title"><div><p class="eyebrow">Verified identity</p><h2 id="contact-link-title">Link master data</h2><small id="contact-link-identity"></small></div><button type="button" id="close-contact-link">×</button></div>
+    <div class="contact-link-layout">
+      <section><h3>Current links</h3><p>Verified links let the planner enforce wing isolation for individual deliveries.</p><div id="current-contact-links" class="current-contact-links"></div></section>
+      <section><h3>Add verified link</h3><div class="wa-form-grid"><label><span>Recipient type</span><select class="select select-bordered select-sm" id="link-entity-type"><option value="officer">Officer</option><option value="school_head">School head</option></select></label><label><span>Search master data</span><input class="input input-bordered input-sm" id="link-target-search" placeholder="Name, mobile, EMIS or school…" /></label></div><div id="contact-link-candidates" class="contact-link-candidates"></div></section>
+    </div>
+  </div><form method="dialog" class="modal-backdrop"><button>close</button></form></dialog>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { actionButtons, badge, stack } from "../../../scripts/table-cells";
+    import { closeAlert, confirmAction, showError, showLoading, showSuccess } from "../../../scripts/alerts";
+    await customElements.whenDefined("astro-data-table");
+    const table = document.getElementById("directory-contacts-table") as any;
+    let timer: number | undefined;
+    let linkTimer: number | undefined;
+    let selectedContact: any = null;
+    const linkDialog = document.getElementById("contact-link-dialog") as HTMLDialogElement;
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const tokenTone = (status: string) => status === "usable" ? "" : status === "expired" || status === "missing" ? "warning" : "inactive";
+
+    async function loadCurrentLinks() {
+      const result = await actions.whatsapp.contactLinks({id: selectedContact.id});
+      if (result.error) throw result.error;
+      const records = (result.data as any).items;
+      const target = el("current-contact-links"); target.replaceChildren();
+      if (!records.length) target.innerHTML = '<p class="empty-state">Not linked to master data yet.</p>';
+      for (const item of records) {
+        const row = document.createElement("div"); row.className = "contact-link-row";
+        const copy = document.createElement("div"); copy.innerHTML = `<strong></strong><small></small><span></span>`; copy.querySelector("strong")!.textContent = item.entity_name; copy.querySelector("small")!.textContent = item.entity_detail; copy.querySelector("span")!.textContent = `${item.wing_name} · ${item.entity_type.replace("_", " ")}`;
+        const remove = document.createElement("button"); remove.type = "button"; remove.className = "btn btn-xs"; remove.textContent = "Remove"; remove.addEventListener("click", async () => { if (!await confirmAction("Remove this verified link?", "Future individual previews will block this recipient until another verified link exists.", "Remove link")) return; const removed = await actions.whatsapp.removeContactLink({contactId: selectedContact.id, linkId: item.id}); if (removed.error) await showError(removed.error); else { await loadCurrentLinks(); await table.refresh(false); } });
+        row.append(copy, remove); target.append(row);
+      }
+    }
+    async function loadLinkTargets() {
+      const result = await actions.whatsapp.contactLinkTargets({contactId: selectedContact.id, entityType: el<HTMLSelectElement>("link-entity-type").value as "officer"|"school_head", search: el<HTMLInputElement>("link-target-search").value});
+      if (result.error) throw result.error;
+      const target = el("contact-link-candidates"); target.replaceChildren(); const records = (result.data as any).items;
+      if (!records.length) target.innerHTML = el<HTMLInputElement>("link-target-search").value.trim() ? '<p class="empty-state">No matching master-data recipients.</p>' : '<p class="empty-state">No exact phone match. Search by name, mobile, EMIS or school.</p>';
+      for (const item of records) {
+        const button = document.createElement("button"); button.type = "button"; button.className = "contact-link-candidate";
+        const copy = document.createElement("span"); const title = document.createElement("strong"); title.textContent = item.name; const detail = document.createElement("small"); detail.textContent = `${item.detail} · ${item.mobile || "No mobile"}`; copy.append(title, detail);
+        const marker = document.createElement("em"); marker.textContent = item.suggested ? "Phone match" : item.wing_name; button.append(copy, marker);
+        button.addEventListener("click", async () => { try { const warning = item.suggested ? "The phone numbers match. Confirm this identity before it is used for routing." : "The phone numbers do not match. Verify this identity carefully; an incorrect link can route reports to the wrong person."; if (!await confirmAction(`Link WhatsApp contact to ${item.name}?`, warning, "Verify link")) return; const saved = await actions.whatsapp.saveContactLink({contactId: selectedContact.id, entity_type: item.entity_type, entity_id: item.id}); if (saved.error) throw saved.error; await showSuccess("Contact linked", `${item.name} is now verified for wing-safe individual routing.`); await loadCurrentLinks(); await table.refresh(false); } catch (error) { await showError(error); } }); target.append(button);
+      }
+    }
+    async function openContactLinks(item: any) { selectedContact = item; el("contact-link-title").textContent = item.display_name || "Unnamed contact"; el("contact-link-identity").textContent = item.phone_jid || item.primary_lid_jid || "No WhatsApp identifier"; el<HTMLInputElement>("link-target-search").value = ""; linkDialog.showModal(); try { await Promise.all([loadCurrentLinks(), loadLinkTargets()]); } catch (error) { await showError(error); } }
+
+    async function loadPage(pageIndex: number, pageSize: number) {
+      const result = await actions.whatsapp.directoryContacts({
+        search: (document.getElementById("contact-search") as HTMLInputElement).value,
+        tokenStatus: (document.getElementById("token-status") as HTMLSelectElement).value,
+        page: pageIndex + 1,
+        pageSize,
+      });
+      if (result.error) throw result.error;
+      const data = result.data as any;
+      document.getElementById("contact-total")!.textContent = `${data.total} contacts`;
+      return { rows: data.items, total: data.total };
+    }
+
+    try { await table.configure({ manualPagination: true, loadPage, columns: [
+      { accessorKey: "display_name", header: "Contact", enableSorting: false, cell: ({row}: any) => stack(row.original.display_name || "Unnamed contact", row.original.phone_jid || "No phone JID") },
+      { accessorKey: "primary_lid_jid", header: "Primary LID", enableSorting: false, cell: ({row}: any) => stack(row.original.primary_lid_jid || "—", `${row.original.alias_count} LID alias${row.original.alias_count === 1 ? "" : "es"}`) },
+      { accessorKey: "group_count", header: "Known groups", enableSorting: false },
+      { accessorKey: "confidence", header: "Mapping", enableSorting: false, cell: ({row}: any) => stack(`${Math.round(Number(row.original.confidence || 0) * 100)}% confidence`, row.original.source) },
+      { accessorKey: "link_count", header: "Master data", enableSorting: false, cell: ({row}: any) => badge(row.original.link_count ? `${row.original.link_count} verified` : "Unlinked", row.original.link_count ? "" : "warning") },
+      { accessorKey: "token_status", header: "Privacy token", enableSorting: false, cell: ({row}: any) => badge(String(row.original.token_status || "unknown").replaceAll("_", " "), tokenTone(row.original.token_status)) },
+      { id: "actions", header: "", enableSorting: false, cell: ({row}: any) => actionButtons([{ label: "Link master data", onClick: () => void openContactLinks(row.original) }, ...(row.original.primary_lid_jid ? [{ label: "Refresh token", onClick: async () => {
+        if (!await confirmAction("Refresh this privacy token?", "The gateway will securely request a fresh token. No message will be sent.", "Refresh token")) return;
+        try {
+          showLoading("Refreshing privacy token", "Waiting for the connected WhatsApp gateway…");
+          const result = await actions.whatsapp.refreshContactToken({id: row.original.id});
+          if (result.error) throw result.error;
+          closeAlert();
+          await showSuccess("Token refreshed", `Current status: ${(result.data as any).token_status}.`);
+          await table.refresh(false);
+        } catch (error) { closeAlert(); await showError(error); }
+      } }] : [])]) },
+    ]}); } catch (error) { await showError(error); }
+
+    document.getElementById("token-status")!.addEventListener("change", () => void table.refresh(true));
+    document.getElementById("contact-search")!.addEventListener("input", () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void table.refresh(true), 250);
+    });
+    document.getElementById("sync-directory")!.addEventListener("click", async () => {
+      try {
+        showLoading("Synchronizing directory", "Reading the latest safe identity and token status data…");
+        const result = await actions.whatsapp.syncDirectory();
+        if (result.error) throw result.error;
+        closeAlert();
+        const data = result.data as any;
+        await showSuccess("Directory synchronized", `${data.contacts} contacts and identity mappings are current.`);
+        await table.refresh(true);
+      } catch (error) { closeAlert(); await showError(error); }
+    });
+    el("close-contact-link").addEventListener("click", () => linkDialog.close());
+    el("link-entity-type").addEventListener("change", () => void loadLinkTargets());
+    el("link-target-search").addEventListener("input", () => { window.clearTimeout(linkTimer); linkTimer = window.setTimeout(() => void loadLinkTargets(), 250); });
+  </script>
+</WhatsAppLayout>

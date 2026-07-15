@@ -1,0 +1,138 @@
+services:
+  postgres:
+    image: postgres:latest
+    environment:
+      POSTGRES_DB: automation_platform
+      POSTGRES_USER: automation
+      POSTGRES_PASSWORD: automation
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U automation -d automation_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    image: automation-platform-python:latest
+    build:
+      context: .
+      dockerfile: infra/docker/python.Dockerfile
+    command: uv run uvicorn automation_api.main:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: postgresql+psycopg://automation:automation@postgres:5432/automation_platform
+      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DEOMEE_ROOT: /workspace/deomeeautomations
+      CRM_PROJECT_ROOT: /workspace/deomeeautomations/crm-management-system
+      ARTIFACT_ROOT: /app/data/artifacts
+      LEGACY_UV_BIN: uv
+      API_CORS_ORIGINS: http://localhost:4321
+    ports:
+      - "8020:8000"
+    volumes:
+      - ..:/workspace/deomeeautomations
+      - api-data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()\""
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    image: automation-platform-python:latest
+    build:
+      context: .
+      dockerfile: infra/docker/python.Dockerfile
+    command: uv run celery -A automation_worker.main.celery_app worker --loglevel=INFO
+    environment:
+      DATABASE_URL: postgresql+psycopg://automation:automation@postgres:5432/automation_platform
+      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DEOMEE_ROOT: /workspace/deomeeautomations
+      CRM_PROJECT_ROOT: /workspace/deomeeautomations/crm-management-system
+      ARTIFACT_ROOT: /app/data/artifacts
+      LEGACY_UV_BIN: uv
+    volumes:
+      - ..:/workspace/deomeeautomations
+      - api-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  flower:
+    image: automation-platform-python:latest
+    build:
+      context: .
+      dockerfile: infra/docker/python.Dockerfile
+    command: uv run celery -A automation_worker.main.celery_app flower --port=5555
+    environment:
+      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      PUBLIC_API_BASE_URL: http://localhost:8020
+    ports:
+      - "4321:4321"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+  redis-data:
+  api-data:

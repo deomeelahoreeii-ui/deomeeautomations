@@ -1,0 +1,21 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+auth_info_baileys/
+node_modules/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local credentials and scraper output
+.env
+
+*.duckdb
+*.duckdb.wal
+artifacts/
+raw_html/
+notification_downloads/

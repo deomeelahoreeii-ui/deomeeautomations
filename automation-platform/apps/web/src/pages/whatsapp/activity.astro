@@ -1,0 +1,13 @@
+---
+import DataTable from "../../components/DataTable.astro";
+import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
+---
+
+<WhatsAppLayout title="Live Activity" description="Focused operational events without a congested desktop-style console." page="activity">
+  <button class="btn btn-sm btn-primary" id="refresh-activity" slot="actions">↻ Refresh</button><div class="toolbar"><select class="select select-bordered select-sm" id="activity-level"><option value="">All levels</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option></select><span class="toolbar-status" id="activity-total">Loading…</span></div><article class="master-card"><DataTable id="activity-table" pageSize={10} emptyText="No WhatsApp activity has been recorded." /></article>
+  <script>
+    import { actions } from "astro:actions"; import { badge, stack } from "../../scripts/table-cells"; import { showError } from "../../scripts/alerts"; await customElements.whenDefined("astro-data-table"); const table=document.getElementById("activity-table") as any;
+    async function loadPage(pageIndex:number,pageSize:number){const result=await actions.whatsapp.activity({level:(document.getElementById("activity-level") as HTMLSelectElement).value,page:pageIndex+1,pageSize});if(result.error)throw result.error;const data=result.data as any;document.getElementById("activity-total")!.textContent=`${data.total} events`;return{rows:data.items,total:data.total};}
+    try{await table.configure({manualPagination:true,loadPage,columns:[{accessorKey:"created_at",header:"Time",enableSorting:false,cell:({row}:any)=>new Date(row.original.created_at).toLocaleString()},{accessorKey:"level",header:"Level",enableSorting:false,cell:({row}:any)=>badge(row.original.level,row.original.level==="error"?"error":row.original.level==="warning"?"warning":"")},{accessorKey:"message",header:"Event",enableSorting:false,cell:({row}:any)=>stack(row.original.message,row.original.event_type)}]});}catch(error){await showError(error);}document.getElementById("activity-level")!.addEventListener("change",()=>void table.refresh(true));document.getElementById("refresh-activity")!.addEventListener("click",()=>void table.refresh(false));
+  </script>
+</WhatsAppLayout>

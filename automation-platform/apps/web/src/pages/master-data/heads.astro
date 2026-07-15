@@ -1,0 +1,113 @@
+---
+import DataTable from "../../components/DataTable.astro";
+import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
+---
+
+<MasterDataLayout
+  title="School Heads"
+  description="Review and update school-head names and mobile contacts."
+  page="heads"
+>
+  <div class="toolbar">
+    <input class="input input-bordered input-sm search-input" id="head-search" placeholder="Search school, EMIS, head, or mobile…" />
+    <label class="btn btn-sm"><input type="checkbox" id="missing-only" /> Missing only</label>
+    <span class="toolbar-status" id="head-total">Loading…</span>
+  </div>
+  <article class="master-card">
+    <DataTable id="heads-table" pageSize={10} emptyText="No school heads match this view." />
+  </article>
+
+  <dialog class="modal" id="head-dialog">
+    <div class="modal-box master-modal" style="max-width:520px">
+      <div class="modal-title"><h2>Edit school head</h2><button type="button" id="close-head">×</button></div>
+      <form class="master-form" id="head-form">
+        <input type="hidden" id="head-school-id" />
+        <p class="notice full" id="head-school-label"></p>
+        <label class="full"><span>Head name</span><input class="input input-bordered input-sm" id="edit-head-name" /></label>
+        <label class="full"><span>Mobile</span><input class="input input-bordered input-sm" id="edit-head-contact" placeholder="03xxxxxxxxx" /></label>
+        <div class="form-actions"><span class="form-error" id="head-form-error"></span><button class="btn btn-sm" type="button" id="cancel-head">Cancel</button><button class="btn btn-sm btn-primary" type="submit">Save head</button></div>
+      </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { actionButtons, badge, stack } from "../../scripts/table-cells";
+
+    await customElements.whenDefined("astro-data-table");
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const table = el<any>("heads-table");
+    const dialog = el<HTMLDialogElement>("head-dialog");
+    let selectedSchool: any = null;
+    let searchTimer: number | undefined;
+
+    async function loadHeadPage(pageIndex: number, pageSize: number) {
+      const result = await actions.masterData.heads({
+        search: el<HTMLInputElement>("head-search").value,
+        missingOnly: el<HTMLInputElement>("missing-only").checked,
+        page: pageIndex + 1,
+        pageSize,
+      });
+      if (result.error) throw result.error;
+      const data = result.data as any;
+      el("head-total").textContent = `${data.total} school${data.total === 1 ? "" : "s"}`;
+      return { rows: data.items, total: data.total };
+    }
+
+    async function openEditor(id: string) {
+      const result = await actions.masterData.school({ id });
+      if (result.error) throw result.error;
+      selectedSchool = result.data as any;
+      el<HTMLInputElement>("head-school-id").value = id;
+      el("head-school-label").textContent = `${selectedSchool.emis} · ${selectedSchool.name}`;
+      el<HTMLInputElement>("edit-head-name").value = selectedSchool.head_name || "";
+      el<HTMLInputElement>("edit-head-contact").value = selectedSchool.head_contact || "";
+      el("head-form-error").textContent = "";
+      dialog.showModal();
+    }
+
+    el<HTMLFormElement>("head-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const payload = Object.fromEntries(
+          ["emis","name","district_ref","department_ref","wing_ref","tehsil_ref","markaz_ref","shift","school_type","school_level","deos_wise","notes","active"]
+            .map((key) => [key, selectedSchool[key]]),
+        ) as any;
+        payload.id = selectedSchool.id;
+        payload.head_name = el<HTMLInputElement>("edit-head-name").value;
+        payload.head_contact = el<HTMLInputElement>("edit-head-contact").value;
+        const result = await actions.masterData.saveSchool(payload);
+        if (result.error) throw result.error;
+        dialog.close();
+        await table.refresh(false);
+      } catch (error) {
+        el("head-form-error").textContent = error instanceof Error ? error.message : "Could not save head";
+      }
+    });
+
+    await table.configure({
+      manualPagination: true,
+      loadPage: loadHeadPage,
+      columns: [
+        { accessorKey: "school_name", header: "School", enableSorting: false, cell: ({ row }: any) => stack(row.original.school_name, row.original.emis) },
+        { id: "area", header: "Tehsil / Markaz", enableSorting: false, cell: ({ row }: any) => stack(row.original.tehsil_name, row.original.markaz_name || "Markaz pending") },
+        { accessorKey: "head_name", header: "Head", enableSorting: false, cell: ({ row }: any) => stack(row.original.head_name || "Missing") },
+        { accessorKey: "head_contact", header: "Mobile", enableSorting: false, cell: ({ row }: any) => row.original.head_contact || "—" },
+        { id: "quality", header: "Quality", enableSorting: false, cell: ({ row }: any) => {
+          const missing = !row.original.head_name || !row.original.head_contact;
+          return badge(missing ? "Incomplete" : "Ready", missing ? "warning" : "");
+        } },
+        { id: "actions", header: "", enableSorting: false, cell: ({ row }: any) => actionButtons([{ label: "Edit", onClick: () => void openEditor(row.original.id) }]) },
+      ],
+    });
+
+    el("head-search").addEventListener("input", () => {
+      window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(() => void table.refresh(true), 250);
+    });
+    el("missing-only").addEventListener("change", () => void table.refresh(true));
+    el("close-head").addEventListener("click", () => dialog.close());
+    el("cancel-head").addEventListener("click", () => dialog.close());
+  </script>
+</MasterDataLayout>

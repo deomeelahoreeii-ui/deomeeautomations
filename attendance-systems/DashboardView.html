@@ -1,0 +1,73 @@
+<section id="dashboardView" class="grid hidden">
+      <div class="grid three">
+        <div class="metric"><span class="muted">Total Candidates</span><strong id="mCandidates">0</strong></div>
+        <div class="metric"><span class="muted">Attendance Records</span><strong id="mAttendance">0</strong></div>
+        <div class="metric"><span class="muted">Unique Attendees</span><strong id="mUnique">0</strong></div>
+      </div>
+
+      <div class="panel">
+        <div class="grid three">
+          <div class="field">
+            <label for="dashDate">Date</label>
+            <input id="dashDate" type="date">
+          </div>
+          <div class="field">
+            <label for="dashCenter">Center</label>
+            <select id="dashCenter"></select>
+          </div>
+          <div class="field">
+            <label for="dashBatch">Batch</label>
+            <select id="dashBatch"></select>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="primary" id="refreshDash" type="button">Refresh</button>
+          <button id="clearDash" type="button">Clear Filters</button>
+        </div>
+        <div id="dashNotice" class="notice"></div>
+      </div>
+
+      <div class="grid two">
+        <div class="panel">
+          <h2 style="font-size: 17px; margin: 0 0 10px;">Center Wise</h2>
+          <div class="table-wrap"><table id="centerTable"></table></div>
+        </div>
+        <div class="panel">
+          <h2 style="font-size: 17px; margin: 0 0 10px;">Batch Wise</h2>
+          <div class="table-wrap"><table id="batchTable"></table></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="actions" style="justify-content: space-between; margin-top: 0;">
+          <h2 style="font-size: 17px; margin: 0;">Candidate Attendance Search</h2>
+          <div style="display:flex; gap:8px; min-width: min(100%, 420px);">
+            <input id="attendanceSearch" placeholder="CNIC, name, school, center, batch">
+            <button class="primary" id="attendanceSearchBtn" type="button">Search</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table id="recentTable"></table></div>
+      </div>
+
+      <div class="grid two">
+        <div class="panel">
+          <h2 style="font-size: 17px; margin: 0 0 10px;">Adjustment Batch Wise</h2>
+          <div class="table-wrap"><table id="adjustBatchTable"></table></div>
+        </div>
+        <div class="panel">
+          <h2 style="font-size: 17px; margin: 0 0 10px;">Adjustment Center Wise</h2>
+          <div class="table-wrap"><table id="adjustCenterTable"></table></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="actions" style="justify-content: space-between; margin-top: 0;">
+          <h2 style="font-size: 17px; margin: 0;">Participant Adjustment Report</h2>
+          <div style="display:flex; gap:8px; min-width: min(100%, 420px);">
+            <input id="adjustmentSearch" placeholder="CNIC, name, school, old/new center, batch">
+            <button class="primary" id="adjustmentSearchBtn" type="button">Search</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table id="adjustmentReportTable"></table></div>
+      </div>
+    </section>

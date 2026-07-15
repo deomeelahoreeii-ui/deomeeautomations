@@ -1,0 +1,65 @@
+---
+import type { SurveyField } from "../../config/survey";
+
+type Props = {
+  field: SurveyField;
+};
+
+const { field } = Astro.props;
+const wrapperClass = [
+  "survey-field",
+  field.colSpan === "full" ? "xl:col-span-2" : "",
+  field.colSpan === "wide" ? "sm:col-span-2" : "",
+].filter(Boolean).join(" ");
+const isZonalHeadField = [
+  "zonal_head_institute_name",
+  "zonal_head_name",
+  "zonal_head_contact_no",
+].includes(field.name);
+const isSeSubmittedByField = field.name === "se_submitted_by";
+const isSeAeoWingField = field.name === "se_aeo_wing";
+const isConditionalReportField = isZonalHeadField || isSeSubmittedByField || isSeAeoWingField;
+const commonAttrs = {
+  class: field.kind === "textarea" ? "survey-textarea" : "survey-input",
+  name: field.name,
+  required: isConditionalReportField ? undefined : field.required,
+  disabled: isConditionalReportField ? true : undefined,
+  autocomplete: field.autocomplete,
+  inputmode: field.inputMode,
+  min: field.min,
+};
+---
+
+{field.kind === "hidden" ? (
+  <input name={field.name} type="hidden" />
+) : (
+  <label
+    class={wrapperClass}
+    data-zonal-head-field={isZonalHeadField ? "true" : undefined}
+    data-se-submitted-by-field={isSeSubmittedByField ? "true" : undefined}
+    data-se-aeo-wing-field={isSeAeoWingField ? "true" : undefined}
+    hidden={isConditionalReportField ? true : undefined}
+  >
+    <span class="survey-label">{field.label} {field.required && <span>*</span>}</span>
+    {field.kind === "textarea" ? (
+      <textarea {...commonAttrs}></textarea>
+    ) : field.kind === "select" ? (
+      <select {...commonAttrs}>
+        <option value="">Select</option>
+        {field.options?.map((option) => <option value={option}>{option}</option>)}
+      </select>
+    ) : (
+      <input
+        {...commonAttrs}
+        type={
+          field.kind === "number" ||
+          field.kind === "date" ||
+          field.kind === "datetime-local" ||
+          field.kind === "email"
+            ? field.kind
+            : "text"
+        }
+      />
+    )}
+  </label>
+)}

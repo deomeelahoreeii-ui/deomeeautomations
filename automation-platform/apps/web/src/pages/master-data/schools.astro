@@ -1,0 +1,222 @@
+---
+import DataTable from "../../components/DataTable.astro";
+import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
+---
+
+<MasterDataLayout
+  title="Schools"
+  description="Manage school identity, hierarchy, head details, and active status."
+  page="schools"
+>
+  <button class="btn btn-sm btn-primary" id="add-school" slot="actions">＋ Add school</button>
+
+  <div class="toolbar">
+    <input class="input input-bordered input-sm search-input" id="school-search" placeholder="Search EMIS, school, or head…" />
+    <select class="select select-bordered select-sm" id="school-tehsil"><option value="">All tehsils</option></select>
+    <select class="select select-bordered select-sm" id="school-status">
+      <option value="true">Active schools</option>
+      <option value="false">Archived schools</option>
+    </select>
+    <span class="toolbar-status" id="school-total">Loading…</span>
+  </div>
+
+  <article class="master-card">
+    <DataTable id="schools-table" pageSize={10} emptyText="No schools match these filters." />
+  </article>
+
+  <dialog class="modal" id="school-dialog">
+    <div class="modal-box master-modal">
+      <div class="modal-title"><h2 id="school-dialog-title">Add school</h2><button type="button" id="close-school">×</button></div>
+      <form class="master-form" id="school-form">
+        <input type="hidden" id="school-id" />
+        <label><span>EMIS *</span><input required class="input input-bordered input-sm" id="emis" /></label>
+        <label><span>School name *</span><input required class="input input-bordered input-sm" id="school-name" /></label>
+        <label><span>District *</span><select required class="select select-bordered select-sm" id="district-ref"></select></label>
+        <label><span>Department *</span><select required class="select select-bordered select-sm" id="department-ref"></select></label>
+        <label><span>Wing *</span><select required class="select select-bordered select-sm" id="wing-ref"></select></label>
+        <label><span>Tehsil *</span><select required class="select select-bordered select-sm" id="tehsil-ref"></select></label>
+        <label id="markaz-label"><span>Markaz *</span><select class="select select-bordered select-sm" id="markaz-ref"></select></label>
+        <label><span>Shift</span><select class="select select-bordered select-sm" id="shift"><option>Single</option><option>Morning</option><option>Evening</option><option>Double</option></select></label>
+        <label><span>School type</span><select class="select select-bordered select-sm" id="school-type"><option>Male</option><option>Female</option><option>Mixed</option></select></label>
+        <label><span>School level</span><select class="select select-bordered select-sm" id="school-level"><option>Primary</option><option>Middle</option><option>Elementary</option><option>High</option><option>H.Sec.</option><option>Higher Secondary</option><option>sMosque</option></select></label>
+        <label><span>Head name</span><input class="input input-bordered input-sm" id="head-name" /></label>
+        <label><span>Head mobile</span><input class="input input-bordered input-sm" id="head-contact" placeholder="03xxxxxxxxx" /></label>
+        <label><span>DEOs wise</span><input class="input input-bordered input-sm" id="deos-wise" value="M-EE" /></label>
+        <label class="full"><span>Notes</span><textarea class="textarea textarea-bordered textarea-sm" id="school-notes"></textarea></label>
+        <label class="full"><input class="checkbox checkbox-sm" type="checkbox" id="school-active" checked /> <span style="display:inline;margin-left:6px">Active school</span></label>
+        <div class="form-actions"><span class="form-error" id="school-form-error"></span><button class="btn btn-sm" type="button" id="cancel-school">Cancel</button><button class="btn btn-sm btn-primary" type="submit" id="save-school">Save school</button></div>
+      </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { actionButtons, badge, stack } from "../../scripts/table-cells";
+    import { confirmAction, showError, showSuccess } from "../../scripts/alerts";
+
+    await customElements.whenDefined("astro-data-table");
+    const table = document.getElementById("schools-table") as any;
+    const dialog = document.getElementById("school-dialog") as HTMLDialogElement;
+    const form = document.getElementById("school-form") as HTMLFormElement;
+    let options: any = {};
+    let schools: any[] = [];
+    let searchTimer: number | undefined;
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const escapeHtml = (value: unknown) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]!));
+
+    function fillSelect(id: string, rows: any[], placeholder = "Select…") {
+      const select = el<HTMLSelectElement>(id);
+      const current = select.value;
+      select.innerHTML = `<option value="">${placeholder}</option>` + rows.map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.name)}</option>`).join("");
+      if ([...select.options].some((option) => option.value === current)) select.value = current;
+    }
+
+    function refreshMarkazes(selected = "") {
+      const tehsil = el<HTMLSelectElement>("tehsil-ref").value;
+      const wing = el<HTMLSelectElement>("wing-ref").value;
+      const selectedWing = (options.wings || []).find((row: any) => row.id === wing);
+      const markazes = (options.markazes || []).filter((row: any) => (!tehsil || row.tehsil_ref === tehsil) && (!wing || row.wing_ref === wing));
+      const markazPending = selectedWing?.code === "DEO SE";
+      fillSelect("markaz-ref", markazes, markazPending ? "Pending assignment" : "Select markaz");
+      el<HTMLSelectElement>("markaz-ref").value = selected;
+      el<HTMLSelectElement>("markaz-ref").required = !markazPending;
+      el("markaz-label").querySelector("span")!.textContent = markazPending ? "Markaz (pending)" : "Markaz *";
+    }
+
+    async function loadOptions() {
+      const result = await actions.masterData.options();
+      if (result.error) throw result.error;
+      options = result.data;
+      fillSelect("district-ref", options.districts, "Select district");
+      fillSelect("department-ref", options.departments, "Select department");
+      fillSelect("wing-ref", options.wings, "Select wing");
+      fillSelect("tehsil-ref", options.tehsils, "Select tehsil");
+      fillSelect("markaz-ref", options.markazes, "Select markaz");
+      fillSelect("school-tehsil", options.tehsils, "All tehsils");
+    }
+
+    async function loadSchoolPage(pageIndex: number, pageSize: number) {
+      const result = await actions.masterData.schools({
+        search: el<HTMLInputElement>("school-search").value,
+        tehsilRef: el<HTMLSelectElement>("school-tehsil").value,
+        active: el<HTMLSelectElement>("school-status").value === "true",
+        page: pageIndex + 1,
+        pageSize,
+      });
+      if (result.error) throw result.error;
+      const data = result.data as any;
+      schools = data.items;
+      el("school-total").textContent = `${data.total} school${data.total === 1 ? "" : "s"}`;
+      return { rows: schools, total: data.total };
+    }
+
+    function setValue(id: string, value: unknown) {
+      el<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(id).value = String(value ?? "");
+    }
+
+    function openForm(school?: any) {
+      form.reset();
+      el("school-form-error").textContent = "";
+      el("school-dialog-title").textContent = school ? "Edit school" : "Add school";
+      setValue("school-id", school?.id);
+      setValue("emis", school?.emis);
+      setValue("school-name", school?.name);
+      setValue("district-ref", school?.district_ref || options.districts?.[0]?.id);
+      setValue("department-ref", school?.department_ref || options.departments?.[0]?.id);
+      setValue("wing-ref", school?.wing_ref || options.wings?.[0]?.id);
+      setValue("tehsil-ref", school?.tehsil_ref || options.tehsils?.[0]?.id);
+      refreshMarkazes(school?.markaz_ref || "");
+      setValue("shift", school?.shift || "Single");
+      setValue("school-type", school?.school_type || "Male");
+      setValue("school-level", school?.school_level || "Primary");
+      setValue("head-name", school?.head_name);
+      setValue("head-contact", school?.head_contact);
+      setValue("deos-wise", school?.deos_wise || "M-EE");
+      setValue("school-notes", school?.notes);
+      el<HTMLInputElement>("school-active").checked = school ? Boolean(school.active) : true;
+      dialog.showModal();
+    }
+
+    async function setActive(id: string, active: boolean) {
+      const school = schools.find((row) => row.id === id);
+      if (!active && !await confirmAction("Archive this school?", `${school?.name || "This school"} will be excluded from active routing. History remains available.`, "Archive school")) return;
+      const result = await actions.masterData.setSchoolActive({ id, active });
+      if (result.error) { await showError(result.error); return; }
+      await table.refresh(false);
+    }
+
+    async function hardDeleteSchool(school: any) {
+      if (!await confirmAction(
+        "Permanently delete this school?",
+        "The school head, officer overrides, WhatsApp contact links, and dependent frozen previews will also be deleted. This cannot be undone.",
+        "Delete permanently",
+      )) return;
+      const result = await actions.masterData.hardDeleteSchool({ id: school.id });
+      if (result.error) { await showError(result.error); return; }
+      await showSuccess("School deleted", `${school.emis} · ${school.name} was permanently removed.`);
+      await table.refresh(true);
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const id = el<HTMLInputElement>("school-id").value;
+      const payload = {
+        id: id || undefined,
+        emis: el<HTMLInputElement>("emis").value,
+        name: el<HTMLInputElement>("school-name").value,
+        district_ref: el<HTMLSelectElement>("district-ref").value,
+        department_ref: el<HTMLSelectElement>("department-ref").value,
+        wing_ref: el<HTMLSelectElement>("wing-ref").value,
+        tehsil_ref: el<HTMLSelectElement>("tehsil-ref").value,
+        markaz_ref: el<HTMLSelectElement>("markaz-ref").value,
+        shift: el<HTMLSelectElement>("shift").value,
+        school_type: el<HTMLSelectElement>("school-type").value,
+        school_level: el<HTMLSelectElement>("school-level").value,
+        head_name: el<HTMLInputElement>("head-name").value,
+        head_contact: el<HTMLInputElement>("head-contact").value,
+        deos_wise: el<HTMLInputElement>("deos-wise").value,
+        notes: el<HTMLTextAreaElement>("school-notes").value,
+        active: el<HTMLInputElement>("school-active").checked,
+      };
+      try {
+        el<HTMLButtonElement>("save-school").disabled = true;
+        const result = await actions.masterData.saveSchool(payload);
+        if (result.error) throw result.error;
+        dialog.close();
+        await table.refresh(false);
+      } catch (error) {
+        el("school-form-error").textContent = error instanceof Error ? error.message : "Could not save school";
+      } finally {
+        el<HTMLButtonElement>("save-school").disabled = false;
+      }
+    });
+
+    await loadOptions();
+    await table.configure({
+      manualPagination: true,
+      loadPage: loadSchoolPage,
+      columns: [
+        { accessorKey: "name", header: "EMIS / School", enableSorting: false, cell: ({ row }: any) => stack(row.original.name, row.original.emis) },
+        { id: "area", header: "Tehsil / Markaz", enableSorting: false, cell: ({ row }: any) => stack(row.original.tehsil_name, row.original.markaz_name || "Markaz pending") },
+        { id: "type", header: "Type", enableSorting: false, cell: ({ row }: any) => stack(row.original.school_level, `${row.original.school_type || "—"} · ${row.original.shift || "—"}`) },
+        { id: "head", header: "School head", enableSorting: false, cell: ({ row }: any) => stack(row.original.head_name || "Missing head", row.original.head_contact || "No contact") },
+        { accessorKey: "active", header: "Status", enableSorting: false, cell: ({ row }: any) => badge(row.original.active ? "Active" : "Archived", row.original.active ? "" : "inactive") },
+        { id: "actions", header: "", enableSorting: false, cell: ({ row }: any) => actionButtons([
+          { label: "Edit", onClick: () => openForm(row.original) },
+          { label: row.original.active ? "Archive" : "Restore", tone: row.original.active ? "danger" : "", onClick: () => void setActive(row.original.id, !row.original.active) },
+          { label: "Delete permanently", tone: "danger", onClick: () => void hardDeleteSchool(row.original) },
+        ]) },
+      ],
+    });
+
+    el("add-school").addEventListener("click", () => openForm());
+    el("close-school").addEventListener("click", () => dialog.close());
+    el("cancel-school").addEventListener("click", () => dialog.close());
+    el("tehsil-ref").addEventListener("change", () => refreshMarkazes());
+    el("wing-ref").addEventListener("change", () => refreshMarkazes());
+    el("school-tehsil").addEventListener("change", () => void table.refresh(true));
+    el("school-status").addEventListener("change", () => void table.refresh(true));
+    el("school-search").addEventListener("input", () => { window.clearTimeout(searchTimer); searchTimer = window.setTimeout(() => void table.refresh(true), 250); });
+  </script>
+</MasterDataLayout>

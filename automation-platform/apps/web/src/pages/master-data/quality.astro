@@ -1,0 +1,14 @@
+---
+import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
+---
+
+<MasterDataLayout title="Data Quality" description="Find missing, invalid, or incomplete master-data records." page="quality">
+  <div class="quality-list" id="quality-list"><article class="quality-card"><h3>Running checks…</h3></article></div>
+  <script>
+    const API = import.meta.env.PUBLIC_API_BASE_URL || "http://localhost:8020";
+    const response = await fetch(`${API}/api/v1/master-data/quality`);
+    const checks = await response.json();
+    const list = document.getElementById("quality-list")!;
+    list.innerHTML = checks.map((check: any) => `<a class="quality-card" href="${check.href}" style="text-decoration:none"><h3>${check.title}</h3><p>Open the affected records and correct their details.</p><strong style="color:${check.severity === 'error' ? '#b64444' : '#b17119'}">${check.count}</strong></a>`).join("");
+  </script>
+</MasterDataLayout>

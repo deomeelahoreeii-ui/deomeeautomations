@@ -1,0 +1,19 @@
+{
+  "backup_enabled": false,
+  "dry_run": true,
+  "generated_at": "2026-06-19T01:26:22",
+  "pending_dir": "/home/ahmad/code/deomeeautomations/crm-management-system/crm-compliances/pending",
+  "report_dir": "/home/ahmad/code/deomeeautomations/crm-management-system/crm-compliances/pending/reply-apply-reports/20260619-012621",
+  "stats": {
+    "dry_run_updates": 54,
+    "duplicate_rows": 0,
+    "replies_loaded": 54,
+    "skipped_no_deo_report": 0,
+    "skipped_no_folder": 0,
+    "skipped_no_remarks_cell": 0,
+    "skipped_no_reply": 1,
+    "updated": 0,
+    "workbook_rows": 54
+  },
+  "workbook_path": "/home/ahmad/code/deomeeautomations/crm-management-system/crm-compliances/pending/complaints-number-complaints-details-with-replies.xlsx"
+}

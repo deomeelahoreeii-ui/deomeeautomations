@@ -1,0 +1,71 @@
+<section id="adjustView" class="grid two hidden">
+  <div class="panel">
+    <div class="field">
+      <label for="adjustCnic">Participant CNIC</label>
+      <input id="adjustCnic" inputmode="numeric" autocomplete="off" placeholder="3520100000000">
+    </div>
+    <div class="actions">
+      <button class="primary" id="adjustSearchBtn" type="button">Search Participant</button>
+    </div>
+    <div id="adjustNotice" class="notice"></div>
+  </div>
+
+  <div class="panel candidate" id="adjustCandidatePanel">
+    <div class="actions" style="justify-content: space-between; margin-top: 0;">
+      <h2 style="font-size: 18px; margin: 0;">Current Allocation</h2>
+      <span class="muted" id="adjustCandidateCnic"></span>
+    </div>
+    <div class="kv" id="adjustCandidateDetails"></div>
+  </div>
+
+  <div class="panel full hidden" id="adjustFormPanel">
+    <div class="bulk-summary">
+      <div>
+        <h2 style="font-size: 18px; margin: 0;">Adjust Participant</h2>
+        <div class="muted" id="adjustContext"></div>
+      </div>
+      <span class="pill" id="adjustTargetSummary">No target selected</span>
+    </div>
+    <div class="grid three">
+      <div class="field">
+        <label for="adjustNewCenter">New Center</label>
+        <select id="adjustNewCenter"></select>
+      </div>
+      <div class="field">
+        <label for="adjustNewBatch">New Batch</label>
+        <select id="adjustNewBatch"></select>
+      </div>
+      <div class="field">
+        <label for="adjustNewSlot">New Slot</label>
+        <select id="adjustNewSlot"></select>
+      </div>
+    </div>
+    <div class="field">
+      <label for="adjustReason">Reason</label>
+      <textarea id="adjustReason" placeholder="Reason for adjustment"></textarea>
+    </div>
+    <div class="actions">
+      <button class="success" id="submitAdjustBtn" type="button">Submit Adjustment</button>
+      <button id="resetAdjustBtn" type="button">Reset</button>
+    </div>
+  </div>
+
+  <div class="panel full hidden" id="adjustHistoryPanel">
+    <div class="grid two">
+      <div>
+        <div class="actions" style="justify-content: space-between; margin: 0 0 8px;">
+          <h2 style="font-size: 17px; margin: 0;">Adjustment History</h2>
+          <span class="muted" id="adjustHistoryCount"></span>
+        </div>
+        <div class="table-wrap"><table id="adjustHistoryTable" class="compact-table"></table></div>
+      </div>
+      <div>
+        <div class="actions" style="justify-content: space-between; margin: 0 0 8px;">
+          <h2 style="font-size: 17px; margin: 0;">Recent Attendance</h2>
+          <span class="muted" id="adjustAttendanceCount"></span>
+        </div>
+        <div class="table-wrap"><table id="adjustAttendanceTable" class="compact-table"></table></div>
+      </div>
+    </div>
+  </div>
+</section>
