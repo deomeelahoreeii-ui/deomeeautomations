@@ -56,6 +56,8 @@ echo "Starting Celery worker for AntiDengue and CRM..."
   --queues=antidengue,crm \
   --concurrency=1 \
   --hostname=automation@%h \
+  --without-gossip \
+  --without-mingle \
   --loglevel=INFO &
 pids+=("$!")
 
