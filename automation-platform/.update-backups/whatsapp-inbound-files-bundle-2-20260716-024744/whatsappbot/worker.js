@@ -34,7 +34,6 @@ import { ensureJetStreamWorkerResources } from "./lib/nats-setup.js";
 import { createLogger } from "./lib/logger.js";
 import { InboundMessageStore } from "./lib/inbound-message-store.js";
 import { createInboundCapture } from "./lib/inbound-capture.js";
-import { createInboundMediaResponder } from "./lib/inbound-media.js";
 
 const log = createLogger("worker");
 const sc = StringCodec();
@@ -51,9 +50,6 @@ const inboundMessageStore = config.enableInboundCapture
   : null;
 const inboundCapture = inboundMessageStore
   ? createInboundCapture({ config, store: inboundMessageStore, log })
-  : null;
-const inboundMediaResponder = inboundMessageStore
-  ? createInboundMediaResponder({ config, store: inboundMessageStore, log, sc })
   : null;
 const MAX_WHATSAPP_CAPTION_CHARS = 900;
 const MAX_WHATSAPP_TEXT_CHARS = 3500;
@@ -1705,11 +1701,6 @@ async function startNatsConsumer(sock) {
         void respondWithIdentityDirectory(sock, message);
       },
     });
-    nc.subscribe(`${config.inboundMediaSubject}.${config.workerId}`, {
-      callback: (_error, message) => {
-        void inboundMediaResponder?.respond(sock, message);
-      },
-    });
     const jsm = await nc.jetstreamManager();
 
     const jetStreamResources = await ensureJetStreamWorkerResources(jsm, {
@@ -1747,7 +1738,6 @@ async function startNatsConsumer(sock) {
       groupDirectorySubject: config.groupDirectorySubject,
       groupMembersSubject: config.groupMembersSubject,
       identityDirectorySubject: config.identityDirectorySubject,
-      inboundMediaSubject: `${config.inboundMediaSubject}.${config.workerId}`,
       subject: config.natsSubject,
       stream: queueStreamName,
       consumer: config.consumerName,

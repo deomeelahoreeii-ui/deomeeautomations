@@ -34,3 +34,52 @@ test("stores messages idempotently and queues one outbox event", () => {
   assert.equal(store.getMessage(sample.key.remoteJid, sample.key.id).key.id, "ABC");
   store.close();
 });
+
+import { createInboundMediaResponder } from "../lib/inbound-media.js";
+
+test("downloads inbound media and uploads bytes to the platform", async () => {
+  const uploads = [];
+  const responder = createInboundMediaResponder({
+    config: {
+      workerId: "default",
+      inboundPlatformUrl: "http://127.0.0.1:8020",
+      inboundPlatformToken: "test-secret",
+      inboundMediaMaxBytes: 1024,
+      inboundMediaUploadTimeoutMs: 1000,
+    },
+    store: {
+      getMessage(remoteJid, messageId) {
+        assert.equal(remoteJid, sample.key.remoteJid);
+        assert.equal(messageId, sample.key.id);
+        return sample;
+      },
+    },
+    log: { info() {}, warn() {} },
+    sc: { encode: (value) => Buffer.from(value), decode: (value) => Buffer.from(value).toString() },
+    downloadMedia: async () => Buffer.from("sample-pdf"),
+    fetchImpl: async (url, init) => {
+      uploads.push({ url, init });
+      return new Response(JSON.stringify({
+        uploaded: true,
+        attachment_id: "00000000-0000-0000-0000-000000000001",
+        media_category: "pdf",
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+
+  const result = await responder.downloadAndUpload({}, {
+    action: "download_attachment",
+    workerId: "default",
+    attachmentId: "00000000-0000-0000-0000-000000000001",
+    remoteJid: sample.key.remoteJid,
+    messageId: sample.key.id,
+    declaredMimeType: "application/pdf",
+  });
+
+  assert.equal(result.uploaded, true);
+  assert.equal(uploads.length, 1);
+  assert.match(uploads[0].url, /attachments\/00000000-0000-0000-0000-000000000001\/content$/);
+  assert.equal(Buffer.from(uploads[0].init.body).toString(), "sample-pdf");
+  assert.equal(uploads[0].init.headers["x-whatsapp-worker-token"], "test-secret");
+  assert.equal(uploads[0].init.headers["x-whatsapp-worker-id"], "default");
+});

@@ -299,63 +299,6 @@ export const server = {
       input: z.object({ id: z.string().uuid() }),
       handler: ({ id }) => api(`/api/v1/jobs/${id}`),
     }),
-    jobLogs: defineAction({
-      input: z.object({ id: z.string().uuid() }),
-      handler: ({ id }) => api(`/api/v1/jobs/${id}/logs`),
-    }),
-    jobArtifacts: defineAction({
-      input: z.object({ id: z.string().uuid() }),
-      handler: ({ id }) => api(`/api/v1/jobs/${id}/artifacts`),
-    }),
-    inboundStatus: defineAction({
-      handler: () => api("/api/v1/whatsapp/inbound/status"),
-    }),
-    inboundExportPreview: defineAction({
-      input: z.object({
-        contact_id: z.string().uuid(),
-        date_from: z.string().datetime().nullable().optional(),
-        date_to: z.string().datetime().nullable().optional(),
-        chat_scope: z.enum(["direct", "direct_and_groups"]).default("direct"),
-        media_types: z.array(z.enum(["image", "pdf", "spreadsheet"])).min(1),
-      }),
-      handler: (input) => api("/api/v1/whatsapp/inbound/exports/preview", {
-        method: "POST",
-        body: JSON.stringify(input),
-      }),
-    }),
-    createInboundExport: defineAction({
-      input: z.object({
-        contact_id: z.string().uuid(),
-        date_from: z.string().datetime().nullable().optional(),
-        date_to: z.string().datetime().nullable().optional(),
-        chat_scope: z.enum(["direct", "direct_and_groups"]).default("direct"),
-        media_types: z.array(z.enum(["image", "pdf", "spreadsheet"])).min(1),
-        requested_by: z.string().min(1).max(100).default("web-operator"),
-      }),
-      handler: (input) => api("/api/v1/whatsapp/inbound/exports", {
-        method: "POST",
-        body: JSON.stringify(input),
-      }),
-    }),
-    inboundExports: defineAction({
-      input: z.object({
-        contactId: z.string().uuid().optional(),
-        page: z.number().int().positive().default(1),
-        pageSize: z.number().int().min(1).max(100).default(10),
-      }),
-      handler: (input) => {
-        const params = new URLSearchParams({
-          page: String(input.page),
-          page_size: String(input.pageSize),
-        });
-        if (input.contactId) params.set("contact_id", input.contactId);
-        return api(`/api/v1/whatsapp/inbound/exports?${params}`);
-      },
-    }),
-    inboundExport: defineAction({
-      input: z.object({ id: z.string().uuid() }),
-      handler: ({ id }) => api(`/api/v1/whatsapp/inbound/exports/${id}`),
-    }),
     previews: defineAction({
       input: z.object({
         search: z.string().default(""),

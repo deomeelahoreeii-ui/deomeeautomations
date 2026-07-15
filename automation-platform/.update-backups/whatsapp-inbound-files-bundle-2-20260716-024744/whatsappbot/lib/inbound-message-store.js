@@ -8,13 +8,6 @@ function json(value) {
   return JSON.stringify(value ?? null);
 }
 
-function reviveBuffer(_key, value) {
-  if (value && value.type === "Buffer" && Array.isArray(value.data)) {
-    return Buffer.from(value.data);
-  }
-  return value;
-}
-
 export class InboundMessageStore {
   constructor({ filePath, workerId, log }) {
     this.filePath = filePath;
@@ -162,7 +155,7 @@ export class InboundMessageStore {
 
   getMessage(remoteJid, messageId) {
     const row = this.db.prepare("SELECT raw_payload_json FROM inbound_messages WHERE worker_id=? AND remote_jid=? AND message_id=?").get(this.workerId, remoteJid, messageId);
-    return row ? JSON.parse(row.raw_payload_json, reviveBuffer) : undefined;
+    return row ? JSON.parse(row.raw_payload_json) : undefined;
   }
 
   stats() {

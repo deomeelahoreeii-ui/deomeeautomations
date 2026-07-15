@@ -239,10 +239,6 @@ def test_openapi_contains_filter_job_endpoints() -> None:
     assert "/api/v1/whatsapp/audiences/{audience_id}/hard" in paths
     assert "/api/v1/whatsapp/dispatch-profiles/{profile_id}/hard" in paths
     assert "/api/v1/whatsapp/reporting-routes/setup" in paths
-    assert "/api/v1/whatsapp/inbound/status" in paths
-    assert "/api/v1/whatsapp/inbound/exports/preview" in paths
-    assert "/api/v1/whatsapp/inbound/exports" in paths
-    assert "/api/v1/whatsapp/inbound/attachments/{attachment_id}/content" in paths
 
 
 def test_jobs_endpoint_starts_empty() -> None:

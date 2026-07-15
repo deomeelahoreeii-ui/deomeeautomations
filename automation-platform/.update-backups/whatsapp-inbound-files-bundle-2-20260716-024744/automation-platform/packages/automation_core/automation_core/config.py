@@ -47,9 +47,6 @@ class Settings(BaseSettings):
     whatsapp_group_members_subject: str = "whatsapp.worker.group-members"
     whatsapp_qr_image_path: Path = Path("./data/whatsapp/login-qr.png")
     whatsapp_inbound_ingest_token: str = ""
-    whatsapp_inbound_media_subject: str = "whatsapp.worker.inbound.media"
-    whatsapp_inbound_media_max_bytes: int = 75 * 1024 * 1024
-    whatsapp_inbound_media_timeout_seconds: int = 180
 
     api_cors_origins: str = (
         "http://localhost:4321,http://127.0.0.1:4321,"
@@ -119,14 +116,6 @@ class Settings(BaseSettings):
     @property
     def crm_sheet_pdf_artifact_root(self) -> Path:
         return (self.artifact_root / "crm-sheet-to-pdf").resolve()
-
-    @property
-    def whatsapp_inbound_media_root(self) -> Path:
-        return (self.artifact_root / "whatsapp-inbound-media").resolve()
-
-    @property
-    def whatsapp_inbound_export_root(self) -> Path:
-        return (self.artifact_root / "whatsapp-inbound-exports").resolve()
 
     @property
     def cors_origins(self) -> list[str]:

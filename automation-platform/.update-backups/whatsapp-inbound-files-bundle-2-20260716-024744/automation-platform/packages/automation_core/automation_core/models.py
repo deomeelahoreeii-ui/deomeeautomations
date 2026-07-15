@@ -23,7 +23,6 @@ class JobType(str, Enum):
     antidengue_report = "antidengue.report"
     whatsapp_dispatch_preview = "whatsapp.dispatch_preview"
     whatsapp_dispatch_send = "whatsapp.dispatch_send"
-    whatsapp_inbound_export = "whatsapp.inbound_export"
     crm_sheet_filter = "crm.sheet_filter"
     crm_pdf_filter = "crm.pdf_filter"
     crm_sheet_to_pdf = "crm.sheet_to_pdf"

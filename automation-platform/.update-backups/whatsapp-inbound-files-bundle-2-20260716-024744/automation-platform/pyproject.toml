@@ -52,5 +52,4 @@ pythonpath = [
     "packages/antidengue_automation",
     "packages/crm_filters",
     "packages/master_data",
-    "packages/whatsapp_gateway",
 ]

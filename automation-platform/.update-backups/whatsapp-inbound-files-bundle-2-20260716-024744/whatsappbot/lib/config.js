@@ -94,9 +94,6 @@ export const config = {
   inboundPlatformTimeoutMs: parseInteger("WA_PLATFORM_TIMEOUT_MS", 10000),
   inboundOutboxFlushMs: parseInteger("WA_INBOUND_OUTBOX_FLUSH_MS", 5000),
   inboundOutboxBatchSize: parseInteger("WA_INBOUND_OUTBOX_BATCH_SIZE", 100),
-  inboundMediaSubject: process.env.WA_INBOUND_MEDIA_SUBJECT || "whatsapp.worker.inbound.media",
-  inboundMediaMaxBytes: parseInteger("WA_INBOUND_MEDIA_MAX_BYTES", 75 * 1024 * 1024),
-  inboundMediaUploadTimeoutMs: parseInteger("WA_INBOUND_MEDIA_UPLOAD_TIMEOUT_MS", 180000),
   groupsFile:
     resolveFromRoot(process.env.WA_GROUPS_FILE || "data/discovered-groups.csv"),
   qrImagePath:

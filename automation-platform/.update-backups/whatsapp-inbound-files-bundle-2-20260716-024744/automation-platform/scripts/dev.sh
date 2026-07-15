@@ -5,7 +5,6 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 WEB_DIR="$ROOT/apps/web"
-WHATSAPP_DIR="$(cd -- "$ROOT/../whatsappbot" 2>/dev/null && pwd || true)"
 UV="${UV:-/home/ahmad/.local/bin/uv}"
 NODE_BIN="${NODE_BIN:-/home/ahmad/.nvm/versions/node/v24.15.0/bin}"
 API_PORT="${API_PORT:-8020}"
@@ -74,50 +73,19 @@ wait_for_http() {
   fail "$label did not become ready at $url within ${seconds}s."
 }
 
-wait_for_platform_worker() {
+wait_for_crm_worker() {
   local output=""
   for _ in {1..30}; do
     output="$("$UV" run celery -A automation_worker.main.celery_app inspect registered --timeout=2 2>/dev/null || true)"
     if grep -q "crm_filters.run_sheet_filter_job" <<<"$output" \
       && grep -q "crm_filters.run_pdf_filter_job" <<<"$output" \
-      && grep -q "crm_filters.run_sheet_to_pdf_job" <<<"$output" \
-      && grep -q "whatsapp_gateway.build_inbound_export" <<<"$output"; then
+      && grep -q "crm_filters.run_sheet_to_pdf_job" <<<"$output"; then
       return 0
     fi
     sleep 1
   done
   printf '%s\n' "$output" >&2
-  fail "The Celery worker did not register the CRM and WhatsApp inbound export tasks."
-}
-
-whatsapp_worker_ready() {
-  "$UV" run python - <<'PYWORKER' >/dev/null 2>&1
-import asyncio
-import json
-import nats
-from automation_core.config import get_settings
-
-async def main():
-    settings = get_settings()
-    client = await nats.connect(
-        settings.whatsapp_nats_url,
-        connect_timeout=1,
-        max_reconnect_attempts=0,
-    )
-    try:
-        response = await client.request(
-            settings.whatsapp_health_subject,
-            b"{}",
-            timeout=2,
-        )
-        payload = json.loads(response.data.decode("utf-8"))
-        if not payload.get("ready"):
-            raise SystemExit(1)
-    finally:
-        await client.close()
-
-asyncio.run(main())
-PYWORKER
+  fail "The Celery worker did not register all three CRM tasks. Check the worker traceback above."
 }
 
 cd "$ROOT"
@@ -125,8 +93,6 @@ cd "$ROOT"
 info "Checking project prerequisites"
 [[ -f pyproject.toml ]] || fail "pyproject.toml was not found under $ROOT"
 [[ -f "$WEB_DIR/package.json" ]] || fail "apps/web/package.json was not found"
-[[ -n "$WHATSAPP_DIR" && -f "$WHATSAPP_DIR/package.json" ]] \
-  || fail "../whatsappbot/package.json was not found"
 
 if [[ ! -x "$UV" ]] && command -v uv >/dev/null 2>&1; then
   UV="$(command -v uv)"
@@ -145,7 +111,7 @@ port_in_use "$WEB_PORT" && fail "Web port $WEB_PORT is already in use. Stop the 
 if [[ ! -f .env ]]; then
   [[ -f .env.example ]] || fail ".env and .env.example are both missing"
   cp .env.example .env
-  echo "Created .env from .env.example. Add your local credentials before using integrations."
+  echo "Created .env from .env.example. Add your Paperless token or username/password once."
 fi
 
 info "Synchronizing Python dependencies"
@@ -178,55 +144,52 @@ else
   echo "Frontend dependencies are already synchronized."
 fi
 
-info "Synchronizing WhatsApp worker dependencies"
-if command -v pnpm >/dev/null 2>&1; then
-  PNPM=(pnpm)
-elif command -v corepack >/dev/null 2>&1; then
-  PNPM=(corepack pnpm)
-else
-  fail "pnpm or corepack is required for whatsappbot"
-fi
-(
-  cd "$WHATSAPP_DIR"
-  "${PNPM[@]}" install --frozen-lockfile --prefer-offline
-)
 info "Checking Docker RabbitMQ"
+
 COMPOSE_FILE="$ROOT/compose.yaml"
+
 command -v docker >/dev/null 2>&1 \
   || fail "Docker is required because RabbitMQ runs in Docker."
+
 docker compose version >/dev/null 2>&1 \
   || fail "Docker Compose is unavailable."
+
 rabbitmq_container_id="$(
   docker compose -f "$COMPOSE_FILE" ps -q rabbitmq 2>/dev/null
 )"
+
 if [[ -z "$rabbitmq_container_id" ]]; then
   echo "RabbitMQ container is not running. Starting it..."
   docker compose -f "$COMPOSE_FILE" up -d rabbitmq
-  rabbitmq_container_id="$(docker compose -f "$COMPOSE_FILE" ps -q rabbitmq)"
+
+  rabbitmq_container_id="$(
+    docker compose -f "$COMPOSE_FILE" ps -q rabbitmq
+  )"
 fi
-[[ -n "$rabbitmq_container_id" ]] || fail "RabbitMQ container could not be started."
+
+[[ -n "$rabbitmq_container_id" ]] \
+  || fail "RabbitMQ container could not be started."
+
 rabbitmq_ready=false
+
 for _ in {1..30}; do
   if docker compose -f "$COMPOSE_FILE" exec -T rabbitmq \
-    rabbitmq-diagnostics -q ping >/dev/null 2>&1; then
+    rabbitmq-diagnostics -q ping >/dev/null 2>&1
+  then
     rabbitmq_ready=true
     break
   fi
+
   sleep 1
 done
+
 if [[ "$rabbitmq_ready" != true ]]; then
   docker compose -f "$COMPOSE_FILE" ps rabbitmq || true
   docker compose -f "$COMPOSE_FILE" logs --tail=80 rabbitmq || true
   fail "RabbitMQ container did not become healthy."
 fi
+
 echo "Docker RabbitMQ is healthy."
-
-info "Checking NATS"
-wait_for_port 4222 2 \
-  || fail "NATS is not listening on port 4222. Start your NATS server before the development stack."
-
-info "Applying database migrations"
-"$UV" run alembic upgrade head
 
 info "Recovering jobs left active by an earlier development process"
 "$UV" run python scripts/recover_crm_jobs.py --all-active
@@ -235,27 +198,16 @@ info "Starting FastAPI"
 "$UV" run uvicorn automation_api.main:app --reload --port "$API_PORT" &
 pids+=("$!")
 
-info "Starting one Celery worker for AntiDengue, CRM, and WhatsApp exports"
+info "Starting one Celery worker for AntiDengue and CRM"
 "$UV" run celery \
   -A automation_worker.main.celery_app worker \
-  --queues=antidengue,crm,whatsapp \
+  --queues=antidengue,crm \
   --concurrency=1 \
   --hostname=automation@%h \
   --without-gossip \
   --without-mingle \
   --loglevel=INFO &
 pids+=("$!")
-
-if whatsapp_worker_ready; then
-  echo "An existing WhatsApp worker is already ready; it will be reused."
-else
-  info "Starting WhatsApp Node worker"
-  (
-    cd "$WHATSAPP_DIR"
-    exec "${PNPM[@]}" start
-  ) &
-  pids+=("$!")
-fi
 
 info "Starting Astro web application"
 (
@@ -264,15 +216,10 @@ info "Starting Astro web application"
 ) &
 pids+=("$!")
 
-info "Waiting for API, web UI, Celery, and WhatsApp worker"
+info "Waiting for API, web UI, and CRM worker"
 wait_for_http "http://127.0.0.1:$API_PORT/health" "FastAPI" 30
-wait_for_http "http://127.0.0.1:$WEB_PORT/whatsapp/inbound-files" "Astro" 45
-wait_for_platform_worker
-for _ in {1..45}; do
-  whatsapp_worker_ready && break
-  sleep 1
-done
-whatsapp_worker_ready || fail "The WhatsApp worker did not become ready."
+wait_for_http "http://127.0.0.1:$WEB_PORT/crm/" "Astro" 45
+wait_for_crm_worker
 
 echo
 echo "Automation Platform is ready:"
@@ -280,11 +227,10 @@ echo "  Web:               http://localhost:$WEB_PORT"
 echo "  CRM sheets:        http://localhost:$WEB_PORT/crm/"
 echo "  CRM PDFs:          http://localhost:$WEB_PORT/crm/pdfs/"
 echo "  Sheet rows to PDF: http://localhost:$WEB_PORT/crm/convert/"
-echo "  Inbound WA files:  http://localhost:$WEB_PORT/whatsapp/inbound-files"
 echo "  API:               http://localhost:$API_PORT"
 echo "  API docs:          http://localhost:$API_PORT/docs"
 echo
-echo "Press Ctrl+C to stop services started by this script."
+echo "Press Ctrl+C to stop all services."
 
 set +e
 wait -n "${pids[@]}"

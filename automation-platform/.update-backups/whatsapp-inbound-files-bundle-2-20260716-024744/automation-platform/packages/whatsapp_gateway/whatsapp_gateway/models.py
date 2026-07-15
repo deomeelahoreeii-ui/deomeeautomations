@@ -680,83 +680,12 @@ class WhatsAppInboundAttachment(SQLModel, table=True):
     message_key: str = Field(index=True)
     original_filename: str | None = Field(default=None, index=True)
     mime_type: str | None = Field(default=None, index=True)
-    detected_mime_type: str | None = Field(default=None, index=True)
-    media_category: str | None = Field(default=None, index=True)
-    safe_extension: str | None = Field(default=None, index=True)
     declared_size: int | None = None
-    actual_size: int | None = None
     media_sha256: str | None = Field(default=None, index=True)
-    actual_sha256: str | None = Field(default=None, index=True)
-    stored_path: str | None = Field(default=None, sa_column=Column(Text))
     caption: str | None = Field(default=None, sa_column=Column(Text))
     download_status: str = Field(default="metadata_only", index=True)
     download_attempts: int = 0
     last_error: str | None = Field(default=None, sa_column=Column(Text))
-    archived_at: datetime | None = Field(default=None, index=True)
-    created_at: datetime = Field(default_factory=utcnow, index=True)
-    updated_at: datetime = Field(default_factory=utcnow, index=True)
-
-
-class WhatsAppInboundExportRun(SQLModel, table=True):
-    __tablename__ = "whatsapp_inbound_export_runs"
-    __table_args__ = (
-        CheckConstraint(
-            "chat_scope IN ('direct', 'direct_and_groups')",
-            name="ck_whatsapp_inbound_export_runs_scope",
-        ),
-    )
-
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    job_id: uuid.UUID = Field(foreign_key="jobs.id", unique=True, index=True)
-    account_id: uuid.UUID = Field(foreign_key="whatsapp_accounts.id", index=True)
-    contact_id: uuid.UUID = Field(
-        foreign_key="whatsapp_directory_contacts.id", index=True
-    )
-    contact_name: str = Field(default="", index=True)
-    date_from: datetime | None = Field(default=None, index=True)
-    date_to: datetime | None = Field(default=None, index=True)
-    chat_scope: str = Field(default="direct", index=True)
-    media_types: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    status: str = Field(default="queued", index=True)
-    files_matched: int = 0
-    files_downloaded: int = 0
-    files_reused: int = 0
-    files_unavailable: int = 0
-    total_bytes: int = 0
-    coverage_earliest_at: datetime | None = None
-    coverage_latest_at: datetime | None = None
-    error: str | None = Field(default=None, sa_column=Column(Text))
-    created_at: datetime = Field(default_factory=utcnow, index=True)
-    started_at: datetime | None = Field(default=None, index=True)
-    finished_at: datetime | None = Field(default=None, index=True)
-    updated_at: datetime = Field(default_factory=utcnow, index=True)
-
-
-class WhatsAppInboundExportItem(SQLModel, table=True):
-    __tablename__ = "whatsapp_inbound_export_items"
-    __table_args__ = (
-        UniqueConstraint(
-            "export_run_id",
-            "attachment_id",
-            name="uq_whatsapp_inbound_export_items_run_attachment",
-        ),
-    )
-
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    export_run_id: uuid.UUID = Field(
-        foreign_key="whatsapp_inbound_export_runs.id", index=True
-    )
-    attachment_id: uuid.UUID = Field(
-        foreign_key="whatsapp_inbound_attachments.id", index=True
-    )
-    media_category: str = Field(index=True)
-    status: str = Field(default="pending", index=True)
-    output_path: str | None = Field(default=None, sa_column=Column(Text))
-    output_name: str | None = Field(default=None)
-    duplicate_of_item_id: uuid.UUID | None = Field(
-        default=None, foreign_key="whatsapp_inbound_export_items.id", index=True
-    )
-    error: str | None = Field(default=None, sa_column=Column(Text))
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
 

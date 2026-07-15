@@ -26,7 +26,6 @@ celery_app = Celery(
         "antidengue_automation.tasks",
         "crm_filters.tasks",
         "whatsapp_gateway.tasks",
-        "whatsapp_gateway.inbound_tasks",
     ],
 )
 
@@ -40,9 +39,7 @@ celery_app.conf.update(
     task_ignore_result=settings.celery_result_backend is None,
     task_routes={
         "antidengue_automation.*": {"queue": "antidengue"},
-        "whatsapp_gateway.compile_dispatch_preview": {"queue": "antidengue"},
-        "whatsapp_gateway.send_approved_preview": {"queue": "antidengue"},
-        "whatsapp_gateway.build_inbound_export": {"queue": "whatsapp"},
+        "whatsapp_gateway.*": {"queue": "antidengue"},
         "crm_filters.*": {"queue": "crm"},
     },
     task_serializer="json",
