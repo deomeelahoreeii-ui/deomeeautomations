@@ -39,13 +39,3 @@
 .crm-result-card.error { border-color: color-mix(in srgb, #dc2626 45%, var(--color-base-300)); }
 @media (max-width: 1350px) { .crm-result-grid-seven { grid-template-columns: repeat(4, 1fr); } }
 @media (max-width: 720px) { .crm-upload-options { grid-template-columns: 1fr; } .crm-result-grid-seven { grid-template-columns: repeat(2, 1fr); } }
-.crm-converter-result-grid { grid-template-columns: repeat(4, minmax(130px, 1fr)); }
-.crm-convert-metrics { margin-top: 22px; }
-[data-theme="automation-dark"] .crm-upload-drop { background: color-mix(in srgb, var(--color-primary) 8%, #111827); }
-[data-theme="automation-dark"] .crm-upload-drop:hover,
-[data-theme="automation-dark"] .crm-upload-drop.dragging { background: color-mix(in srgb, var(--color-primary) 14%, #111827); }
-[data-theme="automation-dark"] .crm-preflight-message { background: #10352d; color: #a7f3d0; }
-[data-theme="automation-dark"] .crm-preflight-message.warning { background: #3d2d0e; color: #fde68a; }
-[data-theme="automation-dark"] .crm-preflight-message.error { background: #3f171d; color: #fecaca; }
-[data-theme="automation-dark"] .crm-log-card pre { background: #05080d; color: #d7e0e8; }
-@media (max-width: 760px) { .crm-converter-result-grid { grid-template-columns: repeat(2, 1fr); } }

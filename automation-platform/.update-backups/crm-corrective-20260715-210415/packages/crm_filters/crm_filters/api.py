@@ -31,10 +31,9 @@ from automation_core.models import (
 )
 from automation_core.time import utcnow
 from crm_filters.intake import ALLOWED_EXTENSIONS, safe_filename, validate_crm_sheet
-from crm_filters.job_recovery import fail_stale_crm_jobs
 from crm_filters.pdf_intake import create_pdf_batch_archive, safe_pdf_filename
 from crm_filters.schemas import PdfBatchProcessRequest, PdfFilterJobRequest, SheetFilterJobRequest
-from crm_filters.tasks import run_pdf_filter_job, run_sheet_filter_job, run_sheet_to_pdf_job
+from crm_filters.tasks import run_pdf_filter_job, run_sheet_filter_job
 
 router = APIRouter(prefix="/api/v1/crm", tags=["crm"])
 
@@ -74,13 +73,10 @@ def _source_file_dict(session: Session, item: SourceFile, *, include_runs: bool 
         "latest_job": (
             {
                 "id": str(latest_job.id),
-                "type": latest_job.type,
-                "title": latest_job.title,
                 "status": latest_job.status,
                 "error": latest_job.error,
                 "result": latest_job.result,
                 "created_at": latest_job.created_at,
-                "updated_at": latest_job.updated_at,
                 "finished_at": latest_job.finished_at,
             }
             if latest_job
@@ -102,7 +98,6 @@ def _source_file_dict(session: Session, item: SourceFile, *, include_runs: bool 
                 "error": job.error,
                 "result": job.result,
                 "created_at": link.created_at,
-                "updated_at": job.updated_at,
                 "finished_at": job.finished_at,
             }
             for link, job in attempts
@@ -144,25 +139,17 @@ def _require_source(session: Session, source_file_id: uuid.UUID, source_kind: st
     return item
 
 
-def _ensure_processable(item: SourceFile, *, require_paperless: bool = True) -> None:
+def _ensure_processable(item: SourceFile) -> None:
     if item.validation_status != "valid":
         raise HTTPException(status_code=422, detail="Only a valid CRM source can be processed.")
     source_path = Path(item.stored_path).resolve()
     if not source_path.is_relative_to(get_settings().source_file_root) or not source_path.is_file():
         raise HTTPException(status_code=422, detail="The immutable source file is unavailable.")
-    if require_paperless and not _paperless_configured():
+    if not _paperless_configured():
         raise HTTPException(
             status_code=422,
             detail="Paperless credentials are not configured. Set PAPERLESS_TOKEN or username/password.",
         )
-
-
-def _reconcile_stale_jobs(session: Session) -> None:
-    settings = get_settings()
-    fail_stale_crm_jobs(
-        session,
-        older_than_minutes=settings.crm_job_stale_minutes,
-    )
 
 
 def _active_job(session: Session, item: SourceFile) -> tuple[SourceFileRun, Job] | None:
@@ -183,10 +170,8 @@ def _queue_source_job(
     title: str,
     task,
     parameters: dict | None = None,
-    require_paperless: bool = True,
 ) -> Job:
-    _ensure_processable(item, require_paperless=require_paperless)
-    _reconcile_stale_jobs(session)
+    _ensure_processable(item)
     active = _active_job(session, item)
     if active:
         raise HTTPException(
@@ -228,7 +213,6 @@ def _list_sources(
     page: int,
     page_size: int,
 ) -> dict:
-    _reconcile_stale_jobs(session)
     filters = [SourceFile.module_key == "crm", SourceFile.source_kind == source_kind]
     if search.strip():
         term = f"%{search.strip()}%"
@@ -275,7 +259,6 @@ def _hard_delete_source(session: Session, item: SourceFile) -> dict:
     output_roots = {
         JobType.crm_sheet_filter.value: settings.crm_filter_artifact_root,
         JobType.crm_pdf_filter.value: settings.crm_pdf_filter_artifact_root,
-        JobType.crm_sheet_to_pdf.value: settings.crm_sheet_pdf_artifact_root,
     }
     job_output_dirs: list[tuple[Path, Path]] = []
     for job in jobs:
@@ -321,7 +304,6 @@ def _hard_delete_source(session: Session, item: SourceFile) -> dict:
 
 @router.get("/overview")
 def read_crm_overview(session: Session = Depends(get_session)) -> dict:
-    _reconcile_stale_jobs(session)
     settings = get_settings()
     sheet_uploads = session.scalar(
         select(func.count()).select_from(SourceFile).where(
@@ -336,15 +318,7 @@ def read_crm_overview(session: Session = Depends(get_session)) -> dict:
     active_jobs = session.scalar(
         select(func.count())
         .select_from(Job)
-        .where(
-            Job.type.in_(
-                [
-                    JobType.crm_sheet_filter.value,
-                    JobType.crm_pdf_filter.value,
-                    JobType.crm_sheet_to_pdf.value,
-                ]
-            )
-        )
+        .where(Job.type.in_([JobType.crm_sheet_filter.value, JobType.crm_pdf_filter.value]))
         .where(Job.status.in_([JobStatus.queued.value, JobStatus.running.value]))
     ) or 0
     return {
@@ -478,26 +452,6 @@ def process_crm_sheet(source_file_id: uuid.UUID, session: Session = Depends(get_
         job_type=JobType.crm_sheet_filter.value,
         title=f"CRM sheet filter: {item.original_name}",
         task=run_sheet_filter_job,
-    )
-
-
-@router.post(
-    "/sheets/{source_file_id}/convert-to-pdfs",
-    response_model=JobPublic,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-def convert_crm_sheet_to_pdfs(
-    source_file_id: uuid.UUID,
-    session: Session = Depends(get_session),
-) -> JobPublic:
-    item = _require_source(session, source_file_id, SHEET_KIND)
-    return _queue_source_job(
-        session,
-        item,
-        job_type=JobType.crm_sheet_to_pdf.value,
-        title=f"CRM sheet rows to PDFs: {item.original_name}",
-        task=run_sheet_to_pdf_job,
-        require_paperless=False,
     )
 
 

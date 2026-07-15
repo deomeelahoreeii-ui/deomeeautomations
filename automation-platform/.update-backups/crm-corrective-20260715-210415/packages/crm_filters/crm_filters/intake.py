@@ -108,21 +108,6 @@ def read_crm_dataframe(path: Path) -> tuple[pd.DataFrame, int]:
     return frame, header_row
 
 
-
-def unique_complaint_numbers(path: Path) -> list[str]:
-    """Return non-blank complaint numbers in first-seen order."""
-
-    frame, _header_row = read_crm_dataframe(path)
-    if COMPLAINT_COLUMN not in frame.columns:
-        return []
-    return list(
-        dict.fromkeys(
-            number
-            for value in frame[COMPLAINT_COLUMN]
-            if (number := normalize_complaint_number(value))
-        )
-    )
-
 def validate_crm_sheet(
     path: Path,
 ) -> tuple[str, str | None, dict[str, Any], list[str], list[str]]:

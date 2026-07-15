@@ -22,13 +22,6 @@ const { title, eyebrow, description, active = "master-data" } = Astro.props;
     <meta name="description" content={description} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>{title} · Automation Platform</title>
-    <script is:inline>
-      (() => {
-        const stored = localStorage.getItem("automation-theme");
-        const dark = stored ? stored === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
-        document.documentElement.dataset.theme = dark ? "automation-dark" : "automation";
-      })();
-    </script>
   </head>
   <body>
     <div class="app-shell">
@@ -69,31 +62,10 @@ const { title, eyebrow, description, active = "master-data" } = Astro.props;
             <h1>{title}</h1>
             <p>{description}</p>
           </div>
-          <div class="topbar-actions">
-            <slot name="actions" />
-            <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
-          </div>
+          <slot name="actions" />
         </header>
         <slot />
       </main>
     </div>
-    <script is:inline>
-      const button = document.getElementById("theme-toggle");
-      const updateLabel = () => {
-        const dark = document.documentElement.dataset.theme === "automation-dark";
-        if (button) {
-          button.textContent = dark ? "☀" : "☾";
-          button.setAttribute("aria-label", dark ? "Use light mode" : "Use dark mode");
-          button.setAttribute("title", dark ? "Use light mode" : "Use dark mode");
-        }
-      };
-      button?.addEventListener("click", () => {
-        const dark = document.documentElement.dataset.theme !== "automation-dark";
-        document.documentElement.dataset.theme = dark ? "automation-dark" : "automation";
-        localStorage.setItem("automation-theme", dark ? "dark" : "light");
-        updateLabel();
-      });
-      updateLabel();
-    </script>
   </body>
 </html>

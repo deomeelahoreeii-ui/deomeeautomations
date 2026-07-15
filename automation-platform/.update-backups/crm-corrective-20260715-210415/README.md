@@ -91,14 +91,10 @@ Open <http://localhost:4321/crm/> to upload a CRM Excel/CSV sheet and compare ea
 calculates a SHA-256 checksum, detects the header within the first 20 rows, and
 records validation findings before a job is queued on the dedicated `crm` queue.
 
-The worker authenticates with Paperless once per run, loads the complaint list in
-pages, and matches the sheet's unique complaint numbers locally. It only falls back
-to exact per-number searches when an older Paperless list response omits both custom
-fields and the complaint number from the title. Progress logs update the job heartbeat;
-CRM runs that stop reporting progress are closed automatically instead of remaining
-`running` forever. Output is isolated per job under
-`data/artifacts/crm-sheet-filter/<job-id>/` and includes non-empty category workbooks,
-a full classification audit, `run_summary.json`, and a ZIP bundle.
+The worker authenticates with Paperless once per run, fetches document/custom-field
+metadata once, and caches repeated complaint-number lookups. Output is isolated per
+job under `data/artifacts/crm-sheet-filter/<job-id>/` and includes non-empty category
+workbooks, a full classification audit, `run_summary.json`, and a ZIP bundle.
 Paperless request failures, blank complaint numbers, and conflicting Submitted/Not
 Relevant matches are placed in Manual Review rather than being treated as fresh.
 
@@ -118,19 +114,6 @@ GET  /api/v1/crm/sheets/{source_file_id}
 POST /api/v1/crm/sheets/{source_file_id}/process
 GET  /api/v1/crm/sheets/{source_file_id}/download
 DELETE /api/v1/crm/sheets/{source_file_id}/hard
-```
-
-## Native CRM sheet rows to PDFs
-
-Open <http://localhost:4321/crm/convert/> or select **Sheet Rows to PDFs** in the
-CRM tabs. Choose any previously validated CRM sheet and start a background conversion.
-The worker creates one PDF per non-blank complaint row, preserves duplicate complaint
-rows with deterministic row suffixes, and generates a CSV manifest, JSON summary, and
-downloadable ZIP bundle under `data/artifacts/crm-sheet-to-pdf/<job-id>/`. This workflow
-does not require Paperless.
-
-```text
-POST /api/v1/crm/sheets/{source_file_id}/convert-to-pdfs
 ```
 
 ## Native CRM PDF duplicate filter

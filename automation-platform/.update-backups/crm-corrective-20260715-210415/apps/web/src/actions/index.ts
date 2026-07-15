@@ -105,10 +105,6 @@ export const server = {
       input: z.object({ id: z.string().uuid() }),
       handler: ({ id }) => api(`/api/v1/crm/sheets/${id}/process`, { method: "POST" }),
     }),
-    convertSheetToPdfs: defineAction({
-      input: z.object({ id: z.string().uuid() }),
-      handler: ({ id }) => api(`/api/v1/crm/sheets/${id}/convert-to-pdfs`, { method: "POST" }),
-    }),
     hardDeleteSheet: defineAction({
       input: z.object({ id: z.string().uuid() }),
       handler: ({ id }) => api(`/api/v1/crm/sheets/${id}/hard`, { method: "DELETE" }),

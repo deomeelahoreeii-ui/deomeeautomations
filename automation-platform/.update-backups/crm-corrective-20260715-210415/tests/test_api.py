@@ -220,7 +220,6 @@ def test_openapi_contains_filter_job_endpoints() -> None:
     assert "/api/v1/crm/sheets" in paths
     assert "/api/v1/crm/sheets/uploads" in paths
     assert "/api/v1/crm/sheets/{source_file_id}/process" in paths
-    assert "/api/v1/crm/sheets/{source_file_id}/convert-to-pdfs" in paths
     assert "/api/v1/crm/sheets/{source_file_id}/hard" in paths
     assert "/api/v1/crm/pdf-batches" in paths
     assert "/api/v1/crm/pdf-batches/uploads" in paths

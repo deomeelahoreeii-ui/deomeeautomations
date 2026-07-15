@@ -16,7 +16,3 @@ class PdfFilterJobRequest(SQLModel):
 
 class PdfBatchProcessRequest(SQLModel):
     paperless_limit: int | None = Field(default=None, ge=1, le=10000)
-
-
-class SheetToPdfJobRequest(SQLModel):
-    source_file_id: uuid.UUID

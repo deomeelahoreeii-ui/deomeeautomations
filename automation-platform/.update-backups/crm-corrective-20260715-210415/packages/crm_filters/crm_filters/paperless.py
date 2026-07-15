@@ -290,7 +290,6 @@ class PaperlessClient:
         self.session = requests.Session()
         self.metadata: PaperlessMetadata | None = None
         self.insecure_fallback_used = False
-        self._complaint_lookup_index: dict[str, ComplaintLookupResult] | None = None
 
         if self.ca_bundle and not self.ca_bundle.is_file():
             raise PaperlessConfigurationError(
@@ -376,7 +375,6 @@ class PaperlessClient:
         *,
         params: dict[str, object] | None = None,
         limit: int | None = None,
-        page_log: Callable[[int, int], None] | None = None,
     ) -> list[dict[str, Any]]:
         url: str | None = f"{self.base_url}{path}"
         request_params = dict(params or {})
@@ -395,8 +393,6 @@ class PaperlessClient:
             if limit is not None:
                 page_results = page_results[: max(0, limit - len(results))]
             results.extend(page_results)
-            if page_log:
-                page_log(pages + 1, len(results))
             if limit is not None and len(results) >= limit:
                 return results[:limit]
             next_url = body.get("next")
@@ -471,123 +467,9 @@ class PaperlessClient:
             )
         return metadata
 
-    def prepare_complaint_lookup_index(
-        self,
-        *,
-        complaint_numbers: list[str] | tuple[str, ...] | set[str] | None = None,
-        log: Callable[[str], None] | None = None,
-    ) -> dict[str, ComplaintLookupResult]:
-        if self.metadata is None:
-            raise RuntimeError("PaperlessClient.connect() must be called before indexing.")
-        logger = log or (lambda _message: None)
-        targets = {value.strip() for value in (complaint_numbers or []) if value.strip()}
-        if targets:
-            logger(
-                f"Loading the Paperless complaint list once for {len(targets)} sheet complaint number(s)."
-            )
-        else:
-            logger("Loading the Paperless CRM complaint index once for local matching.")
-
-        documents = self._get_all(
-            "/api/documents/",
-            params={
-                "document_type__id": self.metadata.complaint_type_id,
-                "page_size": 100,
-            },
-            page_log=lambda page, count: logger(
-                f"Fetched Paperless complaint page {page}; {count} document(s) loaded."
-            ),
-        )
-
-        grouped: dict[str, list[dict[str, Any]]] = {}
-        detail_fetches = 0
-        opaque_summaries = 0
-        title_pattern = re.compile(r"(?<!\d)\d{3}-\d{7}(?!\d)")
-        for item in documents:
-            document = item
-            complaint_number = field_text(
-                custom_field_value(document, self.metadata.complaint_number_field_id)
-            )
-            if not complaint_number:
-                match = title_pattern.search(field_text(document.get("title")))
-                complaint_number = match.group(0) if match else ""
-
-            # The list endpoint normally includes custom fields. If it does not,
-            # fetch details only for titles relevant to this sheet instead of
-            # issuing a detail request for every Paperless document.
-            if targets and complaint_number and complaint_number not in targets:
-                continue
-            if not document.get("custom_fields"):
-                if targets and not complaint_number:
-                    opaque_summaries += 1
-                    continue
-                document = self._get_document(item["id"])
-                detail_fetches += 1
-                complaint_number = field_text(
-                    custom_field_value(document, self.metadata.complaint_number_field_id)
-                ) or complaint_number
-                if not complaint_number:
-                    match = title_pattern.search(field_text(document.get("title")))
-                    complaint_number = match.group(0) if match else ""
-
-            if targets and complaint_number not in targets:
-                continue
-            if not is_crm_main_complaint(document, self.metadata):
-                continue
-            if complaint_number:
-                grouped.setdefault(complaint_number, []).append(document)
-
-        index = {
-            complaint_number: categorize_matching_documents(
-                matches, complaint_number, self.metadata
-            )
-            for complaint_number, matches in grouped.items()
-        }
-
-        # When an older Paperless list serializer omits custom fields and a title
-        # also omits the number, use the legacy exact search only for unresolved
-        # sheet numbers. This keeps correctness without returning to N requests
-        # for every row in the normal case.
-        unresolved = (
-            sorted(targets.difference(index))
-            if targets and opaque_summaries
-            else []
-        )
-        fallback_searches = 0
-        for position, complaint_number in enumerate(unresolved, start=1):
-            results = self._get_all(
-                "/api/documents/",
-                params={"query": complaint_number, "page_size": 100},
-            )
-            index[complaint_number] = categorize_matching_documents(
-                results, complaint_number, self.metadata
-            )
-            fallback_searches += 1
-            if position == 1 or position == len(unresolved) or position % 25 == 0:
-                logger(
-                    f"Resolved {position}/{len(unresolved)} number(s) through exact fallback search."
-                )
-
-        self._complaint_lookup_index = index
-        logger(
-            f"Paperless index ready: {len(documents)} list document(s), "
-            f"{len(index)} requested complaint number(s), "
-            f"{detail_fetches} detail request(s), {fallback_searches} exact fallback search(es), "
-            f"{opaque_summaries} opaque list item(s)."
-        )
-        return self._complaint_lookup_index
-
     def lookup_complaint(self, complaint_no: str) -> ComplaintLookupResult:
         if self.metadata is None:
             raise RuntimeError("PaperlessClient.connect() must be called before lookup.")
-        if self._complaint_lookup_index is not None:
-            return self._complaint_lookup_index.get(
-                complaint_no,
-                ComplaintLookupResult(
-                    category="fresh",
-                    reason="No matching CRM main complaint was found in the cached Paperless index.",
-                ),
-            )
         try:
             documents = self._get_all(
                 "/api/documents/",

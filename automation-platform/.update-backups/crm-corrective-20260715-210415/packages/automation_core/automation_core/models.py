@@ -25,7 +25,6 @@ class JobType(str, Enum):
     whatsapp_dispatch_send = "whatsapp.dispatch_send"
     crm_sheet_filter = "crm.sheet_filter"
     crm_pdf_filter = "crm.pdf_filter"
-    crm_sheet_to_pdf = "crm.sheet_to_pdf"
 
 
 class JobBase(SQLModel):

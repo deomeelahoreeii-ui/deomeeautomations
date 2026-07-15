@@ -6,8 +6,7 @@ import uuid
 from pathlib import Path
 
 import requests
-from celery import Task
-from celery.exceptions import Ignore, SoftTimeLimitExceeded
+from celery.exceptions import SoftTimeLimitExceeded
 from sqlmodel import Session
 
 from automation_core.celery_app import celery_app
@@ -16,65 +15,22 @@ from automation_core.config import Settings, get_settings
 from automation_core.database import engine
 from automation_core.job_service import (
     mark_job_failed,
+    mark_job_running,
     mark_job_succeeded,
     record_artifact,
     require_job,
 )
-from automation_core.models import Job, JobLog, JobStatus, SourceFile
-from automation_core.time import utcnow
-from crm_filters.intake import unique_complaint_numbers
+from automation_core.models import SourceFile
 from crm_filters.paperless import PaperlessClient
 from crm_filters.pdf_filter import run_pdf_filter
 from crm_filters.pdf_intake import extract_pdf_batch
 from crm_filters.sheet_filter import run_sheet_filter
-from crm_filters.sheet_to_pdf import convert_sheet_rows_to_pdfs
-
-
-class CrmTrackedTask(Task):
-    abstract = True
-
-    def on_failure(self, exc, task_id, args, kwargs, einfo) -> None:  # type: ignore[no-untyped-def]
-        job_id = str(args[0]) if args else str(kwargs.get("job_id") or "")
-        try:
-            uuid.UUID(job_id)
-        except (TypeError, ValueError):
-            return
-
-        with Session(engine) as session:
-            job = session.get(Job, uuid.UUID(job_id))
-            if job is None or job.status not in {JobStatus.queued.value, JobStatus.running.value}:
-                return
-            message = f"CRM worker stopped unexpectedly: {exc}"
-            now = utcnow()
-            job.status = JobStatus.failed.value
-            job.error = message
-            job.finished_at = now
-            job.updated_at = now
-            session.add(job)
-            session.add(JobLog(job_id=job.id, level="error", message=message))
-            session.commit()
 
 
 def start_job(job_id: str) -> dict:
     with Session(engine) as session:
         job = require_job(session, job_id)
-        if job.status != JobStatus.queued.value:
-            # A stale broker message must not revive a job that startup/API recovery
-            # already closed, and duplicate delivery must not run the same job twice.
-            raise Ignore()
-        now = utcnow()
-        job.status = JobStatus.running.value
-        job.started_at = now
-        job.updated_at = now
-        session.add(job)
-        session.add(
-            JobLog(
-                job_id=job.id,
-                level="info",
-                message="CRM worker accepted the job and started execution.",
-            )
-        )
-        session.commit()
+        mark_job_running(session, job_id)
         return dict(job.parameters)
 
 
@@ -98,8 +54,6 @@ def _artifact_kind(path: Path) -> str:
         return "bundle"
     if path.suffix.lower() in {".xlsx", ".xls", ".csv"}:
         return "report"
-    if path.suffix.lower() == ".pdf":
-        return "pdf"
     return "file"
 
 
@@ -166,7 +120,6 @@ def _register_artifacts(job_id: str, artifact_paths: list[Path]) -> None:
 
 
 @celery_app.task(
-    base=CrmTrackedTask,
     name="crm_filters.run_sheet_filter_job",
     soft_time_limit=60 * 30,
     time_limit=60 * 35,
@@ -204,15 +157,6 @@ def run_sheet_filter_job(job_id: str) -> dict:
         append_job_log(job_id, "Paperless authentication and metadata discovery succeeded.")
         for warning in metadata.warnings:
             append_job_log(job_id, warning, level="warning")
-        complaint_numbers = unique_complaint_numbers(source_path)
-        append_job_log(
-            job_id,
-            f"Prepared {len(complaint_numbers)} unique complaint number(s) for Paperless matching.",
-        )
-        client.prepare_complaint_lookup_index(
-            complaint_numbers=complaint_numbers,
-            log=lambda message: append_job_log(job_id, message),
-        )
         summary = run_sheet_filter(
             source_path=source_path,
             output_dir=output_dir,
@@ -251,7 +195,6 @@ def run_sheet_filter_job(job_id: str) -> dict:
 
 
 @celery_app.task(
-    base=CrmTrackedTask,
     name="crm_filters.run_pdf_filter_job",
     soft_time_limit=60 * 75,
     time_limit=60 * 85,
@@ -329,73 +272,6 @@ def run_pdf_filter_job(job_id: str) -> dict:
         return result
     except Exception as exc:
         error = f"Failed to register CRM PDF artifacts: {exc}"
-        append_job_log(job_id, error, level="error")
-        finish_failure(job_id, error)
-        raise
-
-@celery_app.task(
-    base=CrmTrackedTask,
-    name="crm_filters.run_sheet_to_pdf_job",
-    soft_time_limit=60 * 30,
-    time_limit=60 * 35,
-)
-def run_sheet_to_pdf_job(job_id: str) -> dict:
-    uuid.UUID(job_id)
-    settings = get_settings()
-    parameters = start_job(job_id)
-    try:
-        source_file_id = uuid.UUID(str(parameters.get("source_file_id")))
-        source_file = _load_source_file(
-            source_file_id,
-            expected_kind="crm_sheet_upload",
-        )
-        source_path = _validate_source_path(source_file, settings)
-    except Exception as exc:
-        error = str(exc)
-        finish_failure(job_id, error)
-        raise
-
-    output_dir = (settings.crm_sheet_pdf_artifact_root / job_id).resolve()
-    if output_dir.exists():
-        error = f"The output directory already exists for job {job_id}."
-        finish_failure(job_id, error)
-        raise FileExistsError(error)
-
-    append_job_log(
-        job_id,
-        f"Starting native CRM sheet-to-PDF conversion for {source_file.original_name}.",
-    )
-    try:
-        summary = convert_sheet_rows_to_pdfs(
-            source_path=source_path,
-            output_dir=output_dir,
-            log=lambda message: append_job_log(job_id, message),
-        )
-    except SoftTimeLimitExceeded:
-        error = "CRM sheet-to-PDF conversion exceeded the 30 minute execution limit."
-        shutil.rmtree(output_dir, ignore_errors=True)
-        append_job_log(job_id, error, level="error")
-        finish_failure(job_id, error)
-        raise
-    except Exception as exc:
-        error = str(exc)
-        shutil.rmtree(output_dir, ignore_errors=True)
-        append_job_log(job_id, error, level="error")
-        finish_failure(job_id, error)
-        raise
-
-    try:
-        artifact_paths = [Path(path) for path in summary.pop("artifact_paths")]
-        _register_artifacts(job_id, artifact_paths)
-        result = {
-            **summary,
-            "artifact_count": len(artifact_paths),
-            "source_file_id": str(source_file_id),
-        }
-        finish_success(job_id, result)
-        return result
-    except Exception as exc:
-        error = f"Failed to register CRM sheet-to-PDF artifacts: {exc}"
         append_job_log(job_id, error, level="error")
         finish_failure(job_id, error)
         raise

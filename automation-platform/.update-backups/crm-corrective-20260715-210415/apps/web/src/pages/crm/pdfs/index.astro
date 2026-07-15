@@ -257,11 +257,9 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
         document.querySelectorAll<HTMLElement>("[data-pdf-count]").forEach((node) => {
           node.textContent = String(counts[node.dataset.pdfCount || ""] ?? "—");
         });
-        const logBox = el<HTMLPreElement>("crm-pdf-job-log");
-        logBox.textContent = logs.length
+        el("crm-pdf-job-log").textContent = logs.length
           ? logs.map((entry: any) => `[${new Date(entry.created_at).toLocaleTimeString()}] ${entry.message}`).join("\n")
           : "Waiting for worker output…";
-        logBox.scrollTop = logBox.scrollHeight;
         const artifactBox = el("crm-pdf-artifacts");
         artifactBox.replaceChildren();
         if (!artifacts.length) {
@@ -284,7 +282,7 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
           }
         }
         if (["queued", "running"].includes(job.status)) {
-          jobPollTimer = window.setTimeout(() => void loadJob(jobId), 1000);
+          jobPollTimer = window.setTimeout(() => void loadJob(jobId), 2500);
         }
       } catch (error) {
         await showError(error);

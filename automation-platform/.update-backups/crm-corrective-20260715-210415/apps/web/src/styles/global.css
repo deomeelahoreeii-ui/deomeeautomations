@@ -32,37 +32,6 @@
   --border: 1px;
 }
 
-@plugin "daisyui/theme" {
-  name: "automation-dark";
-  default: false;
-  prefersdark: true;
-  color-scheme: dark;
-  --color-base-100: #111827;
-  --color-base-200: #0f172a;
-  --color-base-300: #334155;
-  --color-base-content: #e5e7eb;
-  --color-primary: #38bdf8;
-  --color-primary-content: #082f49;
-  --color-secondary: #a78bfa;
-  --color-secondary-content: #1e1b4b;
-  --color-accent: #2dd4bf;
-  --color-accent-content: #042f2e;
-  --color-neutral: #e5e7eb;
-  --color-neutral-content: #111827;
-  --color-info: #60a5fa;
-  --color-info-content: #172554;
-  --color-success: #4ade80;
-  --color-success-content: #052e16;
-  --color-warning: #fbbf24;
-  --color-warning-content: #451a03;
-  --color-error: #f87171;
-  --color-error-content: #450a0a;
-  --radius-selector: 0.25rem;
-  --radius-field: 0.25rem;
-  --radius-box: 0.5rem;
-  --border: 1px;
-}
-
 html {
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -738,31 +707,3 @@ input {
   .artifact-list { grid-template-columns: 1fr; }
   .log-row { grid-template-columns: 58px 46px minmax(0, 1fr); }
 }
-
-
-/* Dark theme overrides for legacy hard-coded surfaces. */
-[data-theme="automation-dark"] body { background: #0b1120; color: #e5e7eb; }
-[data-theme="automation-dark"] .sidebar { background: #111827; border-color: #273449; }
-[data-theme="automation-dark"] .brand,
-[data-theme="automation-dark"] .topbar h1,
-[data-theme="automation-dark"] .panel-heading h2,
-[data-theme="automation-dark"] .activity-header h2,
-[data-theme="automation-dark"] .metric-card strong { color: #f8fafc; }
-[data-theme="automation-dark"] .brand small,
-[data-theme="automation-dark"] .topbar p:last-child,
-[data-theme="automation-dark"] .metric-card span,
-[data-theme="automation-dark"] .metric-card small,
-[data-theme="automation-dark"] .empty-state { color: #94a3b8; }
-[data-theme="automation-dark"] .nav-item { color: #cbd5e1; }
-[data-theme="automation-dark"] .nav-item.active { background: #163244; color: #7dd3fc; }
-[data-theme="automation-dark"] .nav-item.muted { color: #64748b; }
-[data-theme="automation-dark"] .sidebar-status,
-[data-theme="automation-dark"] .metric-card,
-[data-theme="automation-dark"] .panel { background: #111827; border-color: #334155; }
-[data-theme="automation-dark"] .sidebar-status strong { color: #e2e8f0; }
-[data-theme="automation-dark"] .sidebar-status small { color: #94a3b8; }
-[data-theme="automation-dark"] .theme-toggle { background: #111827; border-color: #334155; color: #e2e8f0; }
-
-.topbar-actions { display: flex; align-items: center; gap: 8px; }
-.theme-toggle { min-width: 38px; border: 1px solid #d9e1ec; border-radius: 8px; background: #fff; padding: 7px 10px; color: #425067; cursor: pointer; }
-.theme-toggle:hover { border-color: #6aa9b4; }

@@ -3,7 +3,6 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,7 +24,6 @@ class Settings(BaseSettings):
     paperless_timeout_seconds: float = 15.0
     paperless_document_type_complaint: str = "Complaint"
     paperless_max_pages: int = 10
-    crm_job_stale_minutes: int = 15
     antidengue_project_root: Path | None = None
     antidengue_python_bin: Path | None = None
     antidengue_pocketbase_db_path: Path | None = None
@@ -88,10 +86,6 @@ class Settings(BaseSettings):
     @property
     def crm_pdf_filter_artifact_root(self) -> Path:
         return (self.artifact_root / "crm-pdf-filter").resolve()
-
-    @property
-    def crm_sheet_pdf_artifact_root(self) -> Path:
-        return (self.artifact_root / "crm-sheet-to-pdf").resolve()
 
     @property
     def cors_origins(self) -> list[str]:
