@@ -90,8 +90,8 @@ wait_for_platform_worker() {
   fail "The Celery worker did not register the CRM and WhatsApp inbound export tasks."
 }
 
-whatsapp_worker_health_json() {
-  "$UV" run python - <<'PYWORKER'
+whatsapp_worker_ready() {
+  "$UV" run python - <<'PYWORKER' >/dev/null 2>&1
 import asyncio
 import json
 import nats
@@ -110,111 +110,13 @@ async def main():
             b"{}",
             timeout=2,
         )
-        print(response.data.decode("utf-8"))
+        payload = json.loads(response.data.decode("utf-8"))
+        if not payload.get("ready"):
+            raise SystemExit(1)
     finally:
         await client.close()
 
 asyncio.run(main())
-PYWORKER
-}
-
-whatsapp_worker_ready() {
-  local health_json=""
-  health_json="$(whatsapp_worker_health_json 2>/dev/null)" || return 1
-  HEALTH_JSON="$health_json" "$UV" run python - <<'PYWORKER' >/dev/null 2>&1
-import json
-import os
-
-payload = json.loads(os.environ["HEALTH_JSON"])
-if not payload.get("ready"):
-    raise SystemExit(1)
-PYWORKER
-}
-
-whatsapp_worker_inbound_ready() {
-  local health_json=""
-  health_json="$(whatsapp_worker_health_json 2>/dev/null)" || return 1
-  HEALTH_JSON="$health_json" "$UV" run python - <<'PYWORKER' >/dev/null 2>&1
-import json
-import os
-from pathlib import Path
-import sqlite3
-
-payload = json.loads(os.environ["HEALTH_JSON"])
-inbound = payload.get("inboundCapture") or {}
-if not payload.get("ready"):
-    raise SystemExit(1)
-if not inbound.get("enabled"):
-    raise SystemExit(1)
-if int(inbound.get("schemaVersion") or 0) < 1:
-    raise SystemExit(1)
-store_path = Path(str(inbound.get("filePath") or ""))
-if not store_path.is_file():
-    raise SystemExit(1)
-with sqlite3.connect(f"file:{store_path}?mode=ro", uri=True) as connection:
-    tables = {
-        row[0]
-        for row in connection.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )
-    }
-required = {"inbound_messages", "inbound_attachments", "inbound_outbox"}
-if not required.issubset(tables):
-    raise SystemExit(1)
-PYWORKER
-}
-
-whatsapp_worker_lock_file() {
-  (
-    cd "$WHATSAPP_DIR"
-    node --input-type=module - <<'JSCONFIG'
-import { config } from "./lib/config.js";
-process.stdout.write(config.lockFile);
-JSCONFIG
-  )
-}
-
-stop_existing_whatsapp_worker() {
-  local lock_file=""
-  local worker_pid=""
-  lock_file="$(whatsapp_worker_lock_file 2>/dev/null || true)"
-  [[ -n "$lock_file" && -f "$lock_file" ]] \
-    || fail "An older WhatsApp worker answered health checks but its lock file could not be found. Stop that worker manually and run dev.sh again."
-  worker_pid="$(tr -cd '0-9' < "$lock_file")"
-  [[ -n "$worker_pid" ]] \
-    || fail "The WhatsApp worker lock file does not contain a valid PID: $lock_file"
-  kill -0 "$worker_pid" 2>/dev/null \
-    || fail "The WhatsApp worker lock refers to a process that is not running: PID $worker_pid"
-
-  echo "Stopping incompatible WhatsApp worker PID $worker_pid..."
-  kill "$worker_pid"
-  for _ in {1..20}; do
-    if ! kill -0 "$worker_pid" 2>/dev/null; then
-      rm -f "$lock_file"
-      return 0
-    fi
-    sleep 0.5
-  done
-  fail "WhatsApp worker PID $worker_pid did not stop. Stop it manually and run dev.sh again."
-}
-
-print_whatsapp_inbound_status() {
-  local health_json=""
-  health_json="$(whatsapp_worker_health_json 2>/dev/null)" || return 1
-  HEALTH_JSON="$health_json" "$UV" run python - <<'PYWORKER'
-import json
-import os
-
-payload = json.loads(os.environ["HEALTH_JSON"])
-inbound = payload.get("inboundCapture") or {}
-print(
-    "WhatsApp inbound capture is ready: "
-    f"schema={inbound.get('schemaVersion')}, "
-    f"messages={inbound.get('messages', 0)}, "
-    f"attachments={inbound.get('attachments', 0)}, "
-    f"outbox_pending={inbound.get('outboxPending', 0)}"
-)
-print(f"WhatsApp inbound SQLite store: {inbound.get('filePath')}")
 PYWORKER
 }
 
@@ -344,16 +246,8 @@ info "Starting one Celery worker for AntiDengue, CRM, and WhatsApp exports"
   --loglevel=INFO &
 pids+=("$!")
 
-if whatsapp_worker_inbound_ready; then
-  echo "An existing Bundle 2 WhatsApp worker is ready; it will be reused."
-elif whatsapp_worker_ready; then
-  info "Restarting older WhatsApp worker without inbound capture support"
-  stop_existing_whatsapp_worker
-  (
-    cd "$WHATSAPP_DIR"
-    exec "${PNPM[@]}" start
-  ) &
-  pids+=("$!")
+if whatsapp_worker_ready; then
+  echo "An existing WhatsApp worker is already ready; it will be reused."
 else
   info "Starting WhatsApp Node worker"
   (
@@ -375,15 +269,10 @@ wait_for_http "http://127.0.0.1:$API_PORT/health" "FastAPI" 30
 wait_for_http "http://127.0.0.1:$WEB_PORT/whatsapp/inbound-files" "Astro" 45
 wait_for_platform_worker
 for _ in {1..45}; do
-  whatsapp_worker_inbound_ready && break
+  whatsapp_worker_ready && break
   sleep 1
 done
-if ! whatsapp_worker_inbound_ready; then
-  echo "Latest WhatsApp worker health payload:" >&2
-  whatsapp_worker_health_json >&2 || true
-  fail "The WhatsApp worker became reachable, but Bundle 2 inbound capture is not ready."
-fi
-print_whatsapp_inbound_status
+whatsapp_worker_ready || fail "The WhatsApp worker did not become ready."
 
 echo
 echo "Automation Platform is ready:"
