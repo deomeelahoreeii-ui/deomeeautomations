@@ -252,18 +252,6 @@ async function fetchHistoryPage(client, chat, limit, timeoutMs, pageRecoveryTime
     officialError = formatError(error, `official_fetch:${limit}`);
   }
 
-  // A native Store chat already loads and serializes messages directly from
-  // WAWebCollections. Falling through to the compatibility loader would call
-  // window.WWebJS.getChat/getMessageModel again—the exact serializer path this
-  // adapter exists to bypass.
-  if (chat?.__nativeStore) {
-    if (officialError) throw new Error(officialError);
-    return {
-      messages: officialMessages,
-      diagnostic: { limit, strategy: "native_store", count: officialMessages.length, officialError: null },
-    };
-  }
-
   if (officialMessages.length >= limit || !client?.pupPage?.evaluate) {
     if (officialError) throw new Error(officialError);
     return {

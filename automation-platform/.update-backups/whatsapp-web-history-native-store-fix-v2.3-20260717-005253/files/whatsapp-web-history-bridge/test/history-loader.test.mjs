@@ -141,29 +141,3 @@ test("both loader failures preserve phase and browser diagnostics", async () => 
     /history_fetch:.*official_fetch:100: r.*loader signatures failed.*loaderKeys/s,
   );
 });
-
-test("native Store chats never fall back into the broken WWebJS serializer", async () => {
-  let browserEvaluations = 0;
-  const client = {
-    pupPage: {
-      async evaluate() {
-        browserEvaluations += 1;
-        throw new Error("compatibility serializer must not run");
-      },
-    },
-  };
-  const chat = {
-    __nativeStore: true,
-    id: { _serialized: "251371852939507@lid" },
-    async fetchMessages() { return [message("native-1", 1000)]; },
-  };
-  const loaded = await fetchOlderMessages(client, chat, {
-    count: 1,
-    maxScan: 100,
-    syncHistory: false,
-  });
-  assert.equal(loaded.messages.length, 1);
-  assert.equal(loaded.diagnostics.pages[0].strategy, "native_store");
-  assert.equal(browserEvaluations, 0);
-});
-

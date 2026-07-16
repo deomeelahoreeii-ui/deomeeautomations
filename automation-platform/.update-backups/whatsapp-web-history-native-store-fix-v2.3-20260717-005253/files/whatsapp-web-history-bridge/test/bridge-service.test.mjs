@@ -81,7 +81,6 @@ test("health exposes protocol 3 and the managed visible profile", () => {
   assert.equal(health.mode, "visible_profile");
   assert.equal(health.browserUrl, null);
   assert.equal(health.visibleProfile.profileDirectory, "Profile 1");
-  assert.equal(health.chatResolver, "native_store_v1");
 });
 
 test("health keeps LocalAuth alive but marks it unusable for history", () => {
@@ -211,6 +210,6 @@ test("opaque thrown strings are persisted with a useful phase", async () => {
   const item = store.create({ requestId: "opaque", workerId: "default", requestedCount: 10, remoteJid: "923360249999@s.whatsapp.net" });
   await instance.processRequest({ remoteJids: ["923360249999@s.whatsapp.net"] }, item);
   assert.equal(store.status("opaque").status, "failed");
-  assert.match(store.status("opaque").error, /history_request:.*get_chats_legacy: r/s);
+  assert.match(store.status("opaque").error, /history_request:.*get_chats: r/s);
   assert.notEqual(store.status("opaque").error, "r");
 });

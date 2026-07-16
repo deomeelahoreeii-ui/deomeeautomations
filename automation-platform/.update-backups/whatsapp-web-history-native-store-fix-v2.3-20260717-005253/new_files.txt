@@ -1,0 +1,2 @@
+whatsapp-web-history-bridge/lib/native-store.js
+whatsapp-web-history-bridge/test/native-store.test.mjs

@@ -57,7 +57,3 @@ npm run check
 npm test
 npm start
 ```
-
-## Native Store resolver (v1.3.0)
-
-WhatsApp Web can remain fully usable while `window.WWebJS.getChats()` throws an opaque minified error. Historical retrieval therefore does not enumerate chats through the high-level whatsapp-web.js serializer anymore. The bridge now resolves the selected phone/LID directly from WhatsApp Web's `WAWebCollections.Chat` store, loads earlier messages from that exact chat model, and downloads media by stable message ID. The standard whatsapp-web.js APIs remain the first attempt and the dependency stays pinned to 1.34.7, but the broken broad `getChats()` path is bypassed in real browser sessions.

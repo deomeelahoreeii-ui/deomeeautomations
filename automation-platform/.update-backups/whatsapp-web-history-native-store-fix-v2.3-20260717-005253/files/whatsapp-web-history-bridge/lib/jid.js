@@ -1,6 +1,5 @@
 import { formatError } from "./errors.js";
 import { withPageRecovery } from "./page-session.js";
-import { resolveNativeDirectChat } from "./native-store.js";
 
 export function phoneDigits(value) {
   const local = String(value || "").split("@")[0];
@@ -103,47 +102,28 @@ export async function resolveDirectChat(client, remoteJids) {
     }
   }
 
-  if (client?.pupPage?.evaluate) {
-    try {
-      const native = await resolveNativeDirectChat(client, remoteJids, {
-        pageRecoveryTimeoutMs: 30000,
-      });
-      diagnostics.nativeStore = native.diagnostics || null;
-      if (native.chat) {
-        diagnostics.matchedBy = "nativeStore";
-        diagnostics.matchedChatId = String(native.chat?.id?._serialized || "");
-        return { chat: native.chat, diagnostics };
-      }
-    } catch (error) {
-      diagnostics.failures.push(formatError(error, "native_store"));
-    }
+  let chats;
+  try {
+    chats = await withPageRecovery(
+      client,
+      "get_chats_page",
+      () => client.getChats(),
+    );
+  } catch (error) {
+    throw new Error(`WhatsApp Web could not list chats. ${formatError(error, "get_chats")}`);
   }
-
-  // Keep the old broad serializer only for non-browser mocks and archived tests.
-  // In a real WhatsApp Web page, window.WWebJS.getChats() can fail while the
-  // native WAWebCollections store and the visible chat remain healthy.
-  if (!client?.pupPage?.evaluate && typeof client?.getChats === "function") {
-    try {
-      const chats = await client.getChats();
-      for (const chat of chats || []) {
-        if (chat?.isGroup) continue;
-        const serialized = String(chat?.id?._serialized || "");
-        const user = String(chat?.id?.user || "");
-        if (uniqueCandidates.includes(serialized) || digits.includes(user) || digits.includes(phoneDigits(serialized))) {
-          diagnostics.matchedBy = "getChatsLegacy";
-          diagnostics.matchedChatId = serialized;
-          return { chat, diagnostics };
-        }
-      }
-    } catch (error) {
-      diagnostics.failures.push(formatError(error, "get_chats_legacy"));
+  for (const chat of chats || []) {
+    if (chat?.isGroup) continue;
+    const serialized = String(chat?.id?._serialized || "");
+    const user = String(chat?.id?.user || "");
+    if (uniqueCandidates.includes(serialized) || digits.includes(user) || digits.includes(phoneDigits(serialized))) {
+      diagnostics.matchedBy = "getChats";
+      diagnostics.matchedChatId = serialized;
+      return { chat, diagnostics };
     }
   }
 
   const attempted = uniqueCandidates.length ? uniqueCandidates.join(", ") : "no valid candidates";
-  const detail = diagnostics.failures.slice(-6).join(" || ");
-  const nativeDetail = diagnostics.nativeStore?.topCandidates?.length
-    ? ` Native candidates: ${diagnostics.nativeStore.topCandidates.map((item) => `${item.id}:${item.score}`).join(", ")}.`
-    : "";
-  throw new Error(`WhatsApp Web direct chat was not found. Requested: ${(remoteJids || []).join(", ")}. Tried: ${attempted}.${nativeDetail}${detail ? ` Diagnostics: ${detail}` : ""}`);
+  const detail = diagnostics.failures.slice(-4).join(" || ");
+  throw new Error(`WhatsApp Web direct chat was not found. Requested: ${(remoteJids || []).join(", ")}. Tried: ${attempted}${detail ? `. Diagnostics: ${detail}` : ""}`);
 }

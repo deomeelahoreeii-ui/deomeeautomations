@@ -1,7 +1,6 @@
 import { formatError } from "./errors.js";
 import { resolveDirectChat } from "./jid.js";
 import { withPageRecovery } from "./page-session.js";
-import { downloadNativeMediaById } from "./native-store.js";
 import {
   fetchOlderMessages,
   isSupportedMedia,
@@ -195,34 +194,19 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
     const attachmentId = String(request.attachmentId || "").trim();
     const messageId = String(request.messageId || "").trim();
     if (!attachmentId || !messageId) throw new Error("attachmentId and messageId are required");
-    let media = null;
-    let nativeError = null;
-    if (client?.pupPage?.evaluate) {
-      try {
-        media = await downloadNativeMediaById(client, messageId, {
-          pageRecoveryTimeoutMs: config.pageRecoveryTimeoutMs,
-        });
-      } catch (error) {
-        nativeError = formatError(error, "native_attachment_media");
-      }
-    }
-    if (!media) {
-      const message = await withPageRecovery(
-        client,
-        "attachment_message_reload",
-        () => client.getMessageById(messageId),
-        { pageTimeoutMs: config.pageRecoveryTimeoutMs },
-      );
-      if (!message) {
-        throw new Error(`WhatsApp Web could not reload the requested historical message${nativeError ? `. ${nativeError}` : ""}`);
-      }
-      media = await withPageRecovery(
-        client,
-        "attachment_media_download",
-        () => message.downloadMedia(),
-        { pageTimeoutMs: config.pageRecoveryTimeoutMs },
-      );
-    }
+    const message = await withPageRecovery(
+      client,
+      "attachment_message_reload",
+      () => client.getMessageById(messageId),
+      { pageTimeoutMs: config.pageRecoveryTimeoutMs },
+    );
+    if (!message) throw new Error("WhatsApp Web could not reload the requested historical message");
+    const media = await withPageRecovery(
+      client,
+      "attachment_media_download",
+      () => message.downloadMedia(),
+      { pageTimeoutMs: config.pageRecoveryTimeoutMs },
+    );
     const buffer = mediaToBuffer(media, config.mediaMaxBytes);
     const uploaded = await platform.uploadAttachment(attachmentId, buffer, media?.mimetype || request.declaredMimeType || null);
     return { uploaded: true, workerId: config.workerId, provider: "wwebjs", ...uploaded };
@@ -248,7 +232,6 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
       browserEndpoint: runtime.browserEndpoint || null,
       visibleProfile: runtime.visibleProfile || null,
       page: runtime.page || null,
-      chatResolver: "native_store_v1",
       activeRequest: store.active()?.requestId || null,
     };
   }
