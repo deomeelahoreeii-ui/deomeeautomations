@@ -5,7 +5,7 @@ import json
 import uuid
 from collections import defaultdict
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -96,7 +96,7 @@ def repair_inbound_message_identities(
     """
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     identity_index = build_contact_identity_index(session)
     messages = session.exec(
         select(WhatsAppInboundMessage)

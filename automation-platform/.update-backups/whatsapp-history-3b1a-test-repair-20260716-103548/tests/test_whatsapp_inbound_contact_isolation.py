@@ -232,11 +232,6 @@ def test_identity_repair_corrects_assigns_and_clears_unproved_ownership(
         session.add(contact_c)
         session.add(contact_d)
         session.flush()
-        # Snapshot scalar IDs before commit/session close. SQLAlchemy expires ORM
-        # instances on commit, so reading contact_a.id outside this Session can
-        # otherwise raise DetachedInstanceError even when production code is correct.
-        contact_a_id = contact_a.id
-        contact_b_id = contact_b.id
 
         corrected = _add_file(
             session,
@@ -289,8 +284,8 @@ def test_identity_repair_corrects_assigns_and_clears_unproved_ownership(
         session.refresh(cleared)
         session.refresh(ambiguous)
 
-    assert corrected.directory_contact_id == contact_a_id
-    assert assigned.directory_contact_id == contact_b_id
+    assert corrected.directory_contact_id == contact_a.id
+    assert assigned.directory_contact_id == contact_b.id
     assert cleared.directory_contact_id is None
     assert ambiguous.directory_contact_id is None
     assert result["counts"]["corrected"] == 1
