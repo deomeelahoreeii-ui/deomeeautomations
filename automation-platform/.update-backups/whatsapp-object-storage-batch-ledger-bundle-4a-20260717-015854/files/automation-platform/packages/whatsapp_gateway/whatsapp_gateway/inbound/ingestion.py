@@ -9,7 +9,6 @@ from sqlmodel import Session
 from automation_core.database import get_session
 from automation_core.time import utcnow
 from whatsapp_gateway.inbound.accounts import resolve_account, resolve_contact_id
-from whatsapp_gateway.inbound.batches import register_batch_item
 from whatsapp_gateway.inbound.history_tracking import record_history_progress
 from whatsapp_gateway.inbound.schemas import InboundMessageEvent
 from whatsapp_gateway.inbound.upserts import (
@@ -93,12 +92,6 @@ def ingest_event(
             message_id=message_id,
             mapped=mapped_attachment,
             now=now,
-        )
-        register_batch_item(
-            session,
-            batch_id=event.batchId,
-            attachment_id=attachment_id,
-            message_id=message_id,
         )
 
     record_history_progress(

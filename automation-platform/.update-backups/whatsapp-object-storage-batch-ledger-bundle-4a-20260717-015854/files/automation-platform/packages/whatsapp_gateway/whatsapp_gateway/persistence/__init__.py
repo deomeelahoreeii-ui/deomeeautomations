@@ -28,9 +28,6 @@ from whatsapp_gateway.persistence.inbound import (
     WhatsAppInboundExportItem,
     WhatsAppInboundExportRun,
     WhatsAppInboundHistoryRequest,
-    WhatsAppInboundStoredObject,
-    WhatsAppInboundBatch,
-    WhatsAppInboundBatchItem,
     WhatsAppInboundMessage,
 )
 from whatsapp_gateway.persistence.previews import (
@@ -65,9 +62,6 @@ __all__ = [
     "WhatsAppInboundMessage",
     "WhatsAppInboundAttachment",
     "WhatsAppInboundHistoryRequest",
-    "WhatsAppInboundStoredObject",
-    "WhatsAppInboundBatch",
-    "WhatsAppInboundBatchItem",
     "WhatsAppInboundExportRun",
     "WhatsAppInboundExportItem",
 ]

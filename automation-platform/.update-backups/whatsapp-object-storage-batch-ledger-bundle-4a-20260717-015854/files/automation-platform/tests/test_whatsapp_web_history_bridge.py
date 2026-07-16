@@ -141,7 +141,7 @@ def test_bridge_source_files_are_pinned_and_baileys_is_preserved() -> None:
         (root / "whatsapp-web-history-bridge" / "package.json").read_text()
     )
     assert package["dependencies"]["whatsapp-web.js"] == "1.34.7"
-    assert package["version"] == "1.3.0"
+    assert package["version"] == "1.2.0"
     config_source = (root / "whatsapp-web-history-bridge" / "lib" / "config.js").read_text()
     assert "protocolVersion: 3" in config_source
     assert 'process.env.WWEBJS_MODE || "visible_profile"' in config_source

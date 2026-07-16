@@ -11,10 +11,8 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from sqlmodel import Session
 
 from automation_core.config import Settings, get_settings
-from automation_core.object_storage import ObjectStorageError
 from automation_core.database import get_session
 from automation_core.time import utcnow
-from whatsapp_gateway.inbound.batches import store_attachment_object
 from whatsapp_gateway.inbound.media_types import detect_file_type
 from whatsapp_gateway.models import WhatsAppInboundAttachment, WhatsAppInboundMessage
 
@@ -103,23 +101,6 @@ async def upload_attachment_content(
         attachment.archived_at = utcnow()
         attachment.updated_at = utcnow()
         session.add(attachment)
-        session.flush()
-        try:
-            storage_result = store_attachment_object(
-                session,
-                attachment=attachment,
-                message=message,
-                source_path=final_path,
-                settings=settings,
-            )
-        except ObjectStorageError as exc:
-            # The verified local compatibility archive remains intact. Persist the
-            # durable-storage failure so the batch can be retried safely.
-            session.commit()
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Inbound media was archived locally but object storage failed: {exc}",
-            ) from exc
         session.commit()
         return {
             "uploaded": True,
@@ -128,7 +109,6 @@ async def upload_attachment_content(
             "sha256": actual_sha256,
             "detected_mime_type": detected_mime,
             "media_category": category,
-            "object_storage": storage_result,
         }
     finally:
         temporary.unlink(missing_ok=True)

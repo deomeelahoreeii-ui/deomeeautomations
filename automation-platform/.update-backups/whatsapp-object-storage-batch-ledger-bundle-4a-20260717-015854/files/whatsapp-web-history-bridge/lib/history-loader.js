@@ -384,7 +384,6 @@ export function mediaToBuffer(media, maxBytes) {
 export function normalizeMessageEvent(message, {
   workerId,
   platformRemoteJid,
-  batchId = null,
   media = null,
 } = {}) {
   const timestamp = messageTimestampSeconds(message) || Math.floor(Date.now() / 1000);
@@ -416,7 +415,6 @@ export function normalizeMessageEvent(message, {
     : null;
   return {
     workerId,
-    batchId,
     messageId: id,
     remoteJid,
     participantJid: null,

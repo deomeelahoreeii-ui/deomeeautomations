@@ -243,9 +243,6 @@ def test_openapi_contains_filter_job_endpoints() -> None:
     assert "/api/v1/whatsapp/inbound/exports/preview" in paths
     assert "/api/v1/whatsapp/inbound/exports" in paths
     assert "/api/v1/whatsapp/inbound/attachments/{attachment_id}/content" in paths
-    assert "/api/v1/whatsapp/inbound/storage/status" in paths
-    assert "/api/v1/whatsapp/inbound/batches" in paths
-    assert "/api/v1/whatsapp/inbound/batches/{batch_id}" in paths
 
 
 def test_jobs_endpoint_starts_empty() -> None:

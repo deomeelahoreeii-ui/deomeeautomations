@@ -8,7 +8,6 @@ from whatsapp_gateway.inbound.accounts import (
     resolve_contact_id as _resolve_contact_id,
 )
 from whatsapp_gateway.inbound.authentication import verify_worker_token as _verify_worker_token
-from whatsapp_gateway.inbound.batch_api import list_inbound_batches, object_storage_status, read_inbound_batch
 from whatsapp_gateway.inbound.export_api import (
     create_inbound_export,
     list_inbound_exports,
@@ -55,9 +54,6 @@ router.post(
     dependencies=[Depends(_verify_worker_token)],
 )(upload_attachment_content)
 router.get("/history/bridge/status")(history_bridge_status)
-router.get("/storage/status")(object_storage_status)
-router.get("/batches")(list_inbound_batches)
-router.get("/batches/{batch_id}")(read_inbound_batch)
 router.post("/history/request", status_code=status.HTTP_202_ACCEPTED)(request_inbound_history)
 router.get("/history/requests")(list_inbound_history_requests)
 router.get("/history/requests/{request_id}")(get_inbound_history_request)
@@ -76,7 +72,7 @@ __all__ = [
     "_serialize_history_request", "_upsert_inbound_attachment", "_upsert_inbound_message",
     "_utc_naive", "_verify_worker_token", "create_inbound_export",
     "get_inbound_history_request", "history_bridge_status", "inbound_status", "ingest_event",
-    "list_inbound_batches", "list_inbound_exports", "list_inbound_history_requests", "nats",
+    "list_inbound_exports", "list_inbound_history_requests", "nats",
     "preview_inbound_export", "read_inbound_export", "request_inbound_history",
-    "object_storage_status", "read_inbound_batch", "router", "upload_attachment_content",
+    "router", "upload_attachment_content",
 ]

@@ -8,7 +8,6 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from automation_core.database import get_session
-from whatsapp_gateway.inbound.batches import batch_counts
 from whatsapp_gateway.models import WhatsAppInboundAttachment, WhatsAppInboundMessage
 
 router = APIRouter()
@@ -40,7 +39,6 @@ def inbound_status(session: Session = Depends(get_session)) -> dict[str, Any]:
             WhatsAppInboundMessage.from_me.is_(False),
         )
     ).one()
-    batches = batch_counts(session)
     return {
         "messages": int(message_count),
         "attachments": int(attachment_count),
@@ -48,5 +46,4 @@ def inbound_status(session: Session = Depends(get_session)) -> dict[str, Any]:
         "unresolved_messages": int(unresolved),
         "earliest_message_at": bounds[0],
         "latest_message_at": bounds[1],
-        **batches,
     }

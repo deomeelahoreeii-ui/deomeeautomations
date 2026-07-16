@@ -55,21 +55,6 @@ class Settings(BaseSettings):
     whatsapp_inbound_media_max_bytes: int = 75 * 1024 * 1024
     whatsapp_inbound_media_timeout_seconds: int = 180
 
-    object_storage_enabled: bool = False
-    object_storage_provider: str = "s3"
-    object_storage_endpoint_url: str = ""
-    object_storage_access_key: str = ""
-    object_storage_secret_key: str = ""
-    object_storage_region: str = "us-east-1"
-    object_storage_path_style: bool = True
-    object_storage_verify_ssl: bool = True
-    object_storage_ca_bundle: Path | None = None
-    object_storage_auto_create_buckets: bool = True
-    object_storage_raw_bucket: str = "whatsapp-inbound-raw"
-    object_storage_manifest_bucket: str = "whatsapp-inbound-manifests"
-    object_storage_connect_timeout_seconds: float = 5.0
-    object_storage_read_timeout_seconds: float = 120.0
-
     api_cors_origins: str = (
         "http://localhost:4321,http://127.0.0.1:4321,"
         "http://localhost:5173,http://127.0.0.1:5173"
@@ -82,10 +67,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    @field_validator("paperless_ca_bundle", "object_storage_ca_bundle", mode="before")
+    @field_validator("paperless_ca_bundle", mode="before")
     @classmethod
     def normalize_optional_ca_bundle(cls, value: object) -> object:
-        """Treat empty optional CA-bundle settings as unset."""
+        """Treat an empty PAPERLESS_CA_BUNDLE value as unset."""
         if value is None:
             return None
 

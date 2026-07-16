@@ -19,7 +19,6 @@ class AttachmentEvent(BaseModel):
 
 class InboundMessageEvent(BaseModel):
     workerId: str
-    batchId: uuid.UUID | None = None
     messageId: str
     remoteJid: str
     participantJid: str | None = None

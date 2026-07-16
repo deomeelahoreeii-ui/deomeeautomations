@@ -13,7 +13,6 @@ from sqlmodel import Session, select
 from automation_core.config import Settings, get_settings
 from automation_core.database import get_session
 from automation_core.time import utcnow
-from whatsapp_gateway.inbound.batches import create_history_batch, reconcile_batch
 from whatsapp_gateway.inbound.history_tracking import (
     HISTORY_ACTIVE_STATUSES,
     history_contact_anchor as _history_contact_anchor,
@@ -189,30 +188,16 @@ async def request_inbound_history(
     baseline_messages, baseline_attachments = _history_contact_counts(
         session, account.id, contact.id
     )
-    platform_remote_jid = contact.phone_jid or contact.primary_lid_jid or remote_jids[0]
-    batch = create_history_batch(
-        session,
-        account_id=account.id,
-        contact_id=contact.id,
-        worker_key=account.worker_key,
-        provider=provider,
-        requested_count=data.count,
-        remote_jid=platform_remote_jid,
-        anchor_message_id=anchor.message_id if anchor else None,
-        anchor_timestamp=anchor.message_timestamp if anchor else None,
-        settings=settings,
-    )
     audit = WhatsAppInboundHistoryRequest(
         request_id=request_id,
         account_id=account.id,
         contact_id=contact.id,
         worker_key=account.worker_key,
         provider=provider,
-        batch_id=batch.id,
         requested_count=data.count,
         baseline_messages=baseline_messages,
         baseline_attachments=baseline_attachments,
-        remote_jid=platform_remote_jid,
+        remote_jid=contact.phone_jid or contact.primary_lid_jid or remote_jids[0],
         anchor_message_id=anchor.message_id if anchor else None,
         anchor_timestamp=anchor.message_timestamp if anchor else None,
     )
@@ -223,8 +208,6 @@ async def request_inbound_history(
     payload = {
         "action": "request_history",
         "requestId": request_id,
-        "batchId": str(batch.id),
-        "batchCode": batch.batch_code,
         "workerId": account.worker_key,
         "provider": provider,
         "remoteJids": remote_jids,
@@ -256,26 +239,15 @@ async def request_inbound_history(
         audit.operation_id = result.get("operationId")
         audit.accepted_at = now
         audit.updated_at = now
-        batch.status = "fetching"
-        batch.started_at = batch.started_at or now
-        batch.updated_at = now
-        session.add(batch)
         session.add(audit)
         session.commit()
         session.refresh(audit)
-        reconcile_batch(session, batch_id=audit.batch_id, settings=settings)
-        session.commit()
         return _serialize_history_request(audit)
     except HTTPException as exc:
         audit.status = "failed"
         audit.error = str(exc.detail)
         audit.finished_at = utcnow()
         audit.updated_at = utcnow()
-        batch.status = "failed"
-        batch.error = audit.error
-        batch.finished_at = audit.finished_at
-        batch.updated_at = audit.updated_at
-        session.add(batch)
         session.add(audit)
         session.commit()
         raise
@@ -286,11 +258,6 @@ async def request_inbound_history(
         audit.error = detail
         audit.finished_at = utcnow()
         audit.updated_at = utcnow()
-        batch.status = "failed"
-        batch.error = detail
-        batch.finished_at = audit.finished_at
-        batch.updated_at = audit.updated_at
-        session.add(batch)
         session.add(audit)
         session.commit()
         raise HTTPException(status_code=503, detail=detail) from exc
@@ -300,11 +267,6 @@ async def request_inbound_history(
         audit.error = detail
         audit.finished_at = utcnow()
         audit.updated_at = utcnow()
-        batch.status = "failed"
-        batch.error = detail
-        batch.finished_at = audit.finished_at
-        batch.updated_at = audit.updated_at
-        session.add(batch)
         session.add(audit)
         session.commit()
         raise HTTPException(status_code=504, detail=detail) from exc
@@ -314,11 +276,6 @@ async def request_inbound_history(
         audit.error = detail
         audit.finished_at = utcnow()
         audit.updated_at = utcnow()
-        batch.status = "failed"
-        batch.error = detail
-        batch.finished_at = audit.finished_at
-        batch.updated_at = audit.updated_at
-        session.add(batch)
         session.add(audit)
         session.commit()
         raise HTTPException(status_code=502, detail=detail) from exc
@@ -329,7 +286,6 @@ def list_inbound_history_requests(
     contact_id: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=10, ge=1, le=100),
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     _reconcile_history_requests(session, contact_id=contact_id)
     query = select(WhatsAppInboundHistoryRequest)
@@ -338,9 +294,6 @@ def list_inbound_history_requests(
     items = session.exec(
         query.order_by(WhatsAppInboundHistoryRequest.requested_at.desc()).limit(limit)
     ).all()
-    for item in items:
-        reconcile_batch(session, batch_id=item.batch_id, settings=settings)
-    session.commit()
     return {"items": [_serialize_history_request(item) for item in items]}
 
 
@@ -355,7 +308,5 @@ async def get_inbound_history_request(
         raise HTTPException(status_code=404, detail="History request not found")
     await refresh_history_request_from_worker(session, item=item, settings=settings)
     _reconcile_history_requests(session, contact_id=item.contact_id)
-    reconcile_batch(session, batch_id=item.batch_id, settings=settings)
-    session.commit()
     session.refresh(item)
     return _serialize_history_request(item)

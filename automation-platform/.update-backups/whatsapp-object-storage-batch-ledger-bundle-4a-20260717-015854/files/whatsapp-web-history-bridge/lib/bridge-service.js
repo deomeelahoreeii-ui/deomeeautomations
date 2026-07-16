@@ -111,7 +111,6 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
         const event = normalizeMessageEvent(message, {
           workerId: config.workerId,
           platformRemoteJid: request.platformRemoteJid || request.remoteJids?.[0],
-          batchId: request.batchId || null,
           media: prepared.metadata,
         });
         const ingested = await platform.ingest(event);

@@ -182,7 +182,6 @@ test("historical PDF metadata and bytes are ingested for only the selected direc
   await instance.processRequest({
     remoteJids: ["923360249999@s.whatsapp.net"],
     platformRemoteJid: "923360249999@s.whatsapp.net",
-    batchId: "batch-123",
   }, item);
 
   assert.equal(store.status("pdf").status, "succeeded");
@@ -194,7 +193,6 @@ test("historical PDF metadata and bytes are ingested for only the selected direc
   assert.equal(ingested[0].senderJid, "923360249999@s.whatsapp.net");
   assert.equal(ingested[0].chatScope, "direct");
   assert.equal(ingested[0].attachment.originalFilename, "complaint.pdf");
-  assert.equal(ingested[0].batchId, "batch-123");
   assert.equal(uploaded.length, 1);
   assert.equal(uploaded[0].id, "attachment-1");
   assert.equal(uploaded[0].mimetype, "application/pdf");

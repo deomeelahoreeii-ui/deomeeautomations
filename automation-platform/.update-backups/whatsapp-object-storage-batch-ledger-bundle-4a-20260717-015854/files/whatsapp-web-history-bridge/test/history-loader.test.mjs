@@ -51,12 +51,10 @@ test("normalized event keeps the platform contact jid", () => {
   const event = normalizeMessageEvent(message("abc", 1000, { body: "hello" }), {
     workerId: "default",
     platformRemoteJid: "923360249999@s.whatsapp.net",
-    batchId: "batch-123",
   });
   assert.equal(event.senderJid, "923360249999@s.whatsapp.net");
   assert.equal(event.ingestionSource, "web_history");
   assert.equal(event.messageId, "abc");
-  assert.equal(event.batchId, "batch-123");
 });
 
 test("loader keeps same-second peers while excluding the anchor", async () => {
