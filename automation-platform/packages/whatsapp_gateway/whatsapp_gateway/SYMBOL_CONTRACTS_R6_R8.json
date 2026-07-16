@@ -1,0 +1,127 @@
+{
+  "DormantSourceRow": {
+    "ast_sha256": "3816522808c60fbec0a5b5c78bf1d62d9188e72dc6a3b98c93a5e05ced85a81f",
+    "destination_file": "rendering/antidengue/models.py",
+    "source": "antidengue_renderer.py"
+  },
+  "RenderedTehsilDormantReport": {
+    "ast_sha256": "29883cc8703286a1251e9f372b724b754374845329fc64141b05f56c0c524661",
+    "destination_file": "rendering/antidengue/models.py",
+    "source": "antidengue_renderer.py"
+  },
+  "RenderedWingDormantReport": {
+    "ast_sha256": "dbdf6299fed59f1c3a0936c156a84b83e41a9483c3a7a011ce10a6ed7a2b7155",
+    "destination_file": "rendering/antidengue/models.py",
+    "source": "antidengue_renderer.py"
+  },
+  "ScopedDormantSchool": {
+    "ast_sha256": "bbd2fd3562b0e0eaad66f57f9e59baf220611f26190b0e11e096c3486fcc8308",
+    "destination_file": "rendering/antidengue/models.py",
+    "source": "antidengue_renderer.py"
+  },
+  "_build_message": {
+    "ast_sha256": "1652473728f6f7c790037e2aa8a79128cad1e0c46b35af3195896c7a34f608d9",
+    "destination_file": "rendering/antidengue/messages.py",
+    "source": "antidengue_renderer.py"
+  },
+  "_build_wing_message": {
+    "ast_sha256": "14d7e2b309a30629fd3685a1b9309497415b8ef592a03eaa194b5c7105a935dd",
+    "destination_file": "rendering/antidengue/messages.py",
+    "source": "antidengue_renderer.py"
+  },
+  "_canonical_report_artifact": {
+    "ast_sha256": "0b9428ee8efd8abbe9460a615b570c975d1bffee951ae4ed4aaaea004e4773c7",
+    "destination_file": "rendering/antidengue/source_data.py",
+    "source": "antidengue_renderer.py"
+  },
+  "_ensure_excel_attachment": {
+    "ast_sha256": "2aafb5ef01519ae37fb23e2e6428de226c8fc3168d47caebb2aaf1a7d5a86a5d",
+    "destination_file": "rendering/antidengue/excel.py",
+    "source": "antidengue_renderer.py"
+  },
+  "_ensure_image_attachment": {
+    "ast_sha256": "fbf7df7eda04ead26bd4fa030d70284332a6491bda937eb917c26e1ad53f7140",
+    "destination_file": "rendering/antidengue/images.py",
+    "source": "antidengue_renderer.py"
+  },
+  "_font": {
+    "ast_sha256": "2f335f1f3925233ee3b8de16f4ec1ecd67d7b5668b32be45c03ecde8f8b62b8d",
+    "destination_file": "rendering/antidengue/fonts.py",
+    "source": "antidengue_renderer.py"
+  },
+  "_has_attachment": {
+    "ast_sha256": "3e836972e25f9e30a23ed7fbb43a27f81db5e1a68d558ba72a887bf15525d5d4",
+    "destination_file": "rendering/antidengue/policy.py",
+    "source": "antidengue_renderer.py"
+  },
+  "_issue": {
+    "ast_sha256": "79bb060fb1f8e2c21b2451fe7d43a582b7ab3bc70bbc1da46ffadae35cedb276",
+    "destination_file": "rendering/antidengue/issues.py",
+    "source": "antidengue_renderer.py"
+  },
+  "_normalize_emis": {
+    "ast_sha256": "84ca92c6ebf21cf01acda440d7be09398ae0bf559ebcc7849fbfda2397fd06b8",
+    "destination_file": "rendering/antidengue/source_data.py",
+    "source": "antidengue_renderer.py"
+  },
+  "_publish_approved_deliveries": {
+    "ast_sha256": "e8077a6fe68be2b18006ab12cb6af5a236333428770b72ca9c6b876fc541e814",
+    "destination_file": "dispatch/approved_delivery.py",
+    "source": "tasks.py"
+  },
+  "_report_rows": {
+    "ast_sha256": "58131f912fb258b94257f803db67607f764cb96fb707a745f55f6fb2ac9aa952",
+    "destination_file": "rendering/antidengue/source_data.py",
+    "source": "antidengue_renderer.py"
+  },
+  "_report_time": {
+    "ast_sha256": "e26550f34f3dd69a5ab238a27f80d42f8bf715c02cb009403da8f60818300ebc",
+    "destination_file": "rendering/antidengue/formatting.py",
+    "source": "antidengue_renderer.py"
+  },
+  "_school_count": {
+    "ast_sha256": "118105a58212bc05edb47366cec38251e0a39ec89547883f1aedb5ac340fd59e",
+    "destination_file": "rendering/antidengue/formatting.py",
+    "source": "antidengue_renderer.py"
+  },
+  "_wing_display_name": {
+    "ast_sha256": "bd9d86b498509926bccab7bb14fd44071f69bd17a7b41c40cd3940897e8c804c",
+    "destination_file": "rendering/antidengue/formatting.py",
+    "source": "antidengue_renderer.py"
+  },
+  "_wing_label": {
+    "ast_sha256": "f5bc40d27b75cf5c9b3201b160739cb03852c46e6adda97c814cfe5d9856e9a1",
+    "destination_file": "rendering/antidengue/formatting.py",
+    "source": "antidengue_renderer.py"
+  },
+  "_wrap_text": {
+    "ast_sha256": "062ca3b0fbc134cf7838fe77566771ee31ee7882eb51fab19c5d901e5c50e5e0",
+    "destination_file": "rendering/antidengue/fonts.py",
+    "source": "antidengue_renderer.py"
+  },
+  "compile_dispatch_preview_job": {
+    "ast_sha256": "35a42f41ac83ce718a3e41aea14fed1ba2a0395cac5f983633e6bfc3c1f7cc9e",
+    "destination_file": "dispatch/task_entrypoints.py",
+    "source": "tasks.py"
+  },
+  "normalize_presentation_policy": {
+    "ast_sha256": "5fea19882753f45d2c452572dfe811892bf396a8dc0d7e2e3382c9f7d925ac0b",
+    "destination_file": "rendering/antidengue/policy.py",
+    "source": "antidengue_renderer.py"
+  },
+  "render_tehsil_dormant_report": {
+    "ast_sha256": "cabb6c4ca731eb67ba6c53ed2c0e88075ff12b394b394f35c6b77b8fc1ac6c0a",
+    "destination_file": "rendering/antidengue/tehsil_report.py",
+    "source": "antidengue_renderer.py"
+  },
+  "render_wing_dormant_report": {
+    "ast_sha256": "b19d397dc72beea9c1505370a8c71ed192a674bdf74a955d818107be593bb1c1",
+    "destination_file": "rendering/antidengue/wing_report.py",
+    "source": "antidengue_renderer.py"
+  },
+  "send_approved_preview_job": {
+    "ast_sha256": "63786d6874205bd8fc662114a3d552fe7d6834a0ee7d992a14d74ccae36e75d5",
+    "destination_file": "dispatch/task_entrypoints.py",
+    "source": "tasks.py"
+  }
+}

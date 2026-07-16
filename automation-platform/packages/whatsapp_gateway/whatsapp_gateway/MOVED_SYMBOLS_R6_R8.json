@@ -1,0 +1,35 @@
+{
+  "antidengue_renderer.py": {
+    "DormantSourceRow": "whatsapp_gateway.rendering.antidengue.models.DormantSourceRow",
+    "PAKISTAN_TIME": "whatsapp_gateway.rendering.antidengue.models.PAKISTAN_TIME",
+    "RENDERER_KEY": "whatsapp_gateway.rendering.antidengue.models.RENDERER_KEY",
+    "REQUIRED_COLUMNS": "whatsapp_gateway.rendering.antidengue.models.REQUIRED_COLUMNS",
+    "RenderedTehsilDormantReport": "whatsapp_gateway.rendering.antidengue.models.RenderedTehsilDormantReport",
+    "RenderedWingDormantReport": "whatsapp_gateway.rendering.antidengue.models.RenderedWingDormantReport",
+    "ScopedDormantSchool": "whatsapp_gateway.rendering.antidengue.models.ScopedDormantSchool",
+    "WING_RENDERER_KEY": "whatsapp_gateway.rendering.antidengue.models.WING_RENDERER_KEY",
+    "_build_message": "whatsapp_gateway.rendering.antidengue.messages._build_message",
+    "_build_wing_message": "whatsapp_gateway.rendering.antidengue.messages._build_wing_message",
+    "_canonical_report_artifact": "whatsapp_gateway.rendering.antidengue.source_data._canonical_report_artifact",
+    "_ensure_excel_attachment": "whatsapp_gateway.rendering.antidengue.excel._ensure_excel_attachment",
+    "_ensure_image_attachment": "whatsapp_gateway.rendering.antidengue.images._ensure_image_attachment",
+    "_font": "whatsapp_gateway.rendering.antidengue.fonts._font",
+    "_has_attachment": "whatsapp_gateway.rendering.antidengue.policy._has_attachment",
+    "_issue": "whatsapp_gateway.rendering.antidengue.issues._issue",
+    "_normalize_emis": "whatsapp_gateway.rendering.antidengue.source_data._normalize_emis",
+    "_report_rows": "whatsapp_gateway.rendering.antidengue.source_data._report_rows",
+    "_report_time": "whatsapp_gateway.rendering.antidengue.formatting._report_time",
+    "_school_count": "whatsapp_gateway.rendering.antidengue.formatting._school_count",
+    "_wing_display_name": "whatsapp_gateway.rendering.antidengue.formatting._wing_display_name",
+    "_wing_label": "whatsapp_gateway.rendering.antidengue.formatting._wing_label",
+    "_wrap_text": "whatsapp_gateway.rendering.antidengue.fonts._wrap_text",
+    "normalize_presentation_policy": "whatsapp_gateway.rendering.antidengue.policy.normalize_presentation_policy",
+    "render_tehsil_dormant_report": "whatsapp_gateway.rendering.antidengue.tehsil_report.render_tehsil_dormant_report",
+    "render_wing_dormant_report": "whatsapp_gateway.rendering.antidengue.wing_report.render_wing_dormant_report"
+  },
+  "tasks.py": {
+    "_publish_approved_deliveries": "whatsapp_gateway.dispatch.approved_delivery._publish_approved_deliveries",
+    "compile_dispatch_preview_job": "whatsapp_gateway.dispatch.task_entrypoints.compile_dispatch_preview_job",
+    "send_approved_preview_job": "whatsapp_gateway.dispatch.task_entrypoints.send_approved_preview_job"
+  }
+}
