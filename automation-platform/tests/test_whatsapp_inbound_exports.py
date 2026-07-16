@@ -79,7 +79,7 @@ def test_normalizes_media_types_and_safe_names() -> None:
     assert safe_filename("../../CRM: complaints?.pdf") == "CRM_ complaints_.pdf"
 
 
-def test_preview_matches_unreconciled_contact_by_phone_jid() -> None:
+def test_preview_matches_unreconciled_contact_by_phone_jid_without_mutation() -> None:
     from sqlalchemy.pool import StaticPool
     from sqlmodel import SQLModel, Session, create_engine
 
@@ -153,7 +153,7 @@ def test_preview_matches_unreconciled_contact_by_phone_jid() -> None:
 
     assert preview["files_found"] == 1
     assert preview["category_counts"] == {"pdf": 1}
-    assert message.directory_contact_id == contact.id
+    assert message.directory_contact_id is None
 
 
 def test_worker_upload_archives_supported_content(tmp_path: Path) -> None:
@@ -444,3 +444,85 @@ def test_packages_archived_files_with_manifests(tmp_path: Path) -> None:
         names = archive.namelist()
     assert any(name.endswith("manifest.csv") for name in names)
     assert any("/pdfs/" in name and name.endswith(".pdf") for name in names)
+
+
+def test_requests_contact_history_from_bound_worker(monkeypatch) -> None:
+    import asyncio
+    import json
+
+    from sqlalchemy.pool import StaticPool
+    from sqlmodel import SQLModel, Session, create_engine
+
+    import automation_core.models  # noqa: F401
+    import master_data.models  # noqa: F401
+    import whatsapp_gateway.models  # noqa: F401
+    from automation_core.config import Settings
+    from whatsapp_gateway.inbound_api import (
+        RequestInboundHistory,
+        request_inbound_history,
+    )
+    from whatsapp_gateway.models import WhatsAppAccount, WhatsAppDirectoryContact
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        account = WhatsAppAccount(name="Default", worker_key="default")
+        session.add(account)
+        session.flush()
+        contact = WhatsAppDirectoryContact(
+            account_id=account.id,
+            canonical_key="faheem",
+            phone_jid="923360249999@s.whatsapp.net",
+            display_name="Faheem Bukhari",
+        )
+        session.add(contact)
+        session.commit()
+        contact_id = contact.id
+
+    requests = []
+
+    class FakeMessage:
+        data = json.dumps(
+            {
+                "accepted": True,
+                "workerId": "default",
+                "requestedCount": 50,
+                "anchorMessageId": "message-1",
+                "anchorTimestamp": "2026-07-15T22:23:03.000Z",
+            }
+        ).encode()
+
+    class FakeClient:
+        async def request(self, subject, payload, timeout):
+            requests.append((subject, json.loads(payload), timeout))
+            return FakeMessage()
+
+        async def close(self):
+            return None
+
+    async def fake_connect(*_args, **_kwargs):
+        return FakeClient()
+
+    monkeypatch.setattr("whatsapp_gateway.inbound_api.nats.connect", fake_connect)
+    settings = Settings(
+        whatsapp_nats_url="nats://127.0.0.1:4222",
+        whatsapp_inbound_history_subject="whatsapp.worker.inbound.history",
+        whatsapp_inbound_history_timeout_seconds=15,
+    )
+    with Session(engine) as session:
+        result = asyncio.run(
+            request_inbound_history(
+                RequestInboundHistory(contact_id=contact_id, count=50),
+                session=session,
+                settings=settings,
+            )
+        )
+
+    assert result["accepted"] is True
+    assert requests[0][0] == "whatsapp.worker.inbound.history.default"
+    assert requests[0][1]["remoteJids"] == ["923360249999@s.whatsapp.net"]
+    assert requests[0][1]["count"] == 50

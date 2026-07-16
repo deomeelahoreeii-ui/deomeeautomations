@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlmodel import Session, select
 
 from automation_core.time import utcnow
@@ -76,23 +76,38 @@ def contact_identity_jids(
     return {str(value) for value in values if value}
 
 
-def _contact_message_filter(
+def contact_message_filter(
     session: Session, contact: WhatsAppDirectoryContact
 ):
+    """Return a strict, account-scoped identity predicate for one contact.
+
+    The account constraint must be combined with the identity alternatives via
+    ``AND``.  Treating ``account_id`` as an independent ``OR`` clause causes
+    every message captured by the same WhatsApp account to match every contact.
+
+    For group chats, ``remote_jid`` is the group JID and must never identify the
+    sender.  It is therefore used only for direct chats.
+    """
+
     jids = contact_identity_jids(session, contact)
-    clauses = [
-        WhatsAppInboundMessage.account_id == contact.account_id,
-        WhatsAppInboundMessage.directory_contact_id == contact.id,
-    ]
     if jids:
-        clauses.extend(
-            [
-                WhatsAppInboundMessage.sender_jid.in_(jids),
-                WhatsAppInboundMessage.participant_jid.in_(jids),
+        identity_match = or_(
+            WhatsAppInboundMessage.sender_jid.in_(jids),
+            WhatsAppInboundMessage.participant_jid.in_(jids),
+            and_(
+                WhatsAppInboundMessage.chat_scope == "direct",
                 WhatsAppInboundMessage.remote_jid.in_(jids),
-            ]
+            ),
         )
-    return or_(*clauses)
+    else:
+        # A directory record without any JID can only use its already-resolved
+        # contact assignment.  This fallback remains account-scoped.
+        identity_match = WhatsAppInboundMessage.directory_contact_id == contact.id
+
+    return and_(
+        WhatsAppInboundMessage.account_id == contact.account_id,
+        identity_match,
+    )
 
 
 def attachment_matches_category(
@@ -121,7 +136,7 @@ def find_matching_attachments(
     categories = set(normalize_media_types(media_types))
     contact = require_contact(session, contact_id)
     filters: list[Any] = [
-        _contact_message_filter(session, contact),
+        contact_message_filter(session, contact),
         WhatsAppInboundMessage.from_me.is_(False),
     ]
     if chat_scope == "direct":
@@ -148,18 +163,13 @@ def find_matching_attachments(
         )
     ).all()
     matches: list[tuple[WhatsAppInboundAttachment, WhatsAppInboundMessage, str]] = []
-    reconciled = False
     for attachment, message in rows:
-        if message.directory_contact_id is None:
-            message.directory_contact_id = contact.id
-            message.last_ingested_at = utcnow()
-            session.add(message)
-            reconciled = True
+        # Preview and export scans are deliberately read-only.  Identity
+        # reconciliation is performed by the explicit repair service, never as
+        # a side effect of selecting a contact in the web interface.
         is_match, category = attachment_matches_category(attachment, categories)
         if is_match and category:
             matches.append((attachment, message, category))
-    if reconciled:
-        session.commit()
     return matches
 
 
@@ -173,7 +183,7 @@ def contact_coverage(
             func.min(WhatsAppInboundMessage.message_timestamp),
             func.max(WhatsAppInboundMessage.message_timestamp),
         ).where(
-            _contact_message_filter(session, contact),
+            contact_message_filter(session, contact),
             WhatsAppInboundMessage.from_me.is_(False),
         )
     ).one()

@@ -74,6 +74,20 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
         <label><input type="checkbox" value="spreadsheet" checked /> Excel / CSV / ODS</label>
       </fieldset>
 
+      <div class="inbound-history-request">
+        <label>
+          <span>Older messages to request</span>
+          <select class="select select-bordered" id="inbound-history-count">
+            <option value="25">25</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+          </select>
+        </label>
+        <button class="btn" id="request-inbound-history" type="button" disabled>Request older history</button>
+      </div>
+      <small class="inbound-history-help">Uses the oldest captured direct message as an anchor. WhatsApp may return fewer messages or none if history is unavailable.</small>
+
       <div class="inbound-primary-actions">
         <button class="btn btn-primary" id="scan-inbound-files" type="button">Scan available files</button>
         <button class="btn" id="build-inbound-export" type="button" disabled>Build download package</button>
@@ -101,6 +115,29 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
         Select a contact and scan to see captured history coverage.
       </div>
     </article>
+  </section>
+
+  <section class="master-card inbound-history-request-card">
+    <div class="inbound-card-heading">
+      <div><p class="eyebrow">Historical backfill</p><h2>History request activity</h2></div>
+      <div class="inbound-primary-actions">
+        <button class="btn btn-xs" id="scan-history-results" type="button" disabled>Scan results now</button>
+        <span class="badge" id="inbound-history-state">No request</span>
+      </div>
+    </div>
+    <div class="inbound-metrics">
+      <article><span>Requested</span><strong id="history-metric-requested">—</strong></article>
+      <article><span>Messages received</span><strong id="history-metric-messages">—</strong></article>
+      <article><span>Files discovered</span><strong id="history-metric-attachments">—</strong></article>
+      <article><span>Last activity</span><strong id="history-metric-activity">—</strong></article>
+    </div>
+    <p class="inbound-history-help" id="inbound-history-summary">Select a contact to view auditable history requests.</p>
+    <div class="table-wrap">
+      <table class="table table-sm inbound-file-table">
+        <thead><tr><th>Requested</th><th>Anchor</th><th>Results</th><th>Status</th><th>Details</th></tr></thead>
+        <tbody id="inbound-history-request-items"><tr><td colspan="5" class="empty-cell">No contact selected.</td></tr></tbody>
+      </table>
+    </div>
   </section>
 
   <section class="master-card inbound-preview-list-card">
@@ -158,6 +195,9 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
     const formStatus = el<HTMLParagraphElement>("inbound-form-status");
     const scanButton = el<HTMLButtonElement>("scan-inbound-files");
     const buildButton = el<HTMLButtonElement>("build-inbound-export");
+    const historyButton = el<HTMLButtonElement>("request-inbound-history");
+    const historyScanButton = el<HTMLButtonElement>("scan-history-results");
+    const historyRequestItems = el<HTMLTableSectionElement>("inbound-history-request-items");
     const previewItems = el<HTMLTableSectionElement>("inbound-preview-items");
     const historyItems = el<HTMLTableSectionElement>("inbound-history-items");
     const jobLog = el<HTMLPreElement>("inbound-job-log");
@@ -167,6 +207,8 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
     let currentJobId = "";
     let currentExportId = "";
     let pollTimer: number | undefined;
+    let historyRequestPollTimer: number | undefined;
+    let currentHistoryRequestId = "";
     let searchTimer: number | undefined;
 
     function escapeHtml(value: unknown) {
@@ -225,7 +267,9 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
       contactResults.hidden = true;
       latestPreview = null;
       buildButton.disabled = true;
-      setStatus("Contact selected. Scan to review available files.");
+      historyButton.disabled = false;
+      setStatus("Contact selected. Scan captured files or request older history.");
+      void loadHistoryRequests();
     }
 
     function clearContact() {
@@ -236,6 +280,13 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
       selectedContact.hidden = true;
       latestPreview = null;
       buildButton.disabled = true;
+      historyButton.disabled = true;
+      historyScanButton.disabled = true;
+      currentHistoryRequestId = "";
+      if (historyRequestPollTimer) window.clearInterval(historyRequestPollTimer);
+      historyRequestPollTimer = undefined;
+      historyRequestItems.innerHTML = '<tr><td colspan="5" class="empty-cell">No contact selected.</td></tr>';
+      el<HTMLElement>("inbound-history-state").textContent = "No request";
       contactSearch.focus();
     }
 
@@ -309,6 +360,88 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
         setStatus(`Scan complete: ${(result.data as any).files_found} matching file(s).`, "success");
       } catch (error: any) {
         setStatus(error.message || String(error), "error");
+      } finally {
+        scanButton.disabled = false;
+      }
+    }
+
+    function renderHistoryRequests(items: any[]) {
+      const latest = items[0];
+      historyRequestItems.innerHTML = items.length
+        ? items.map((item: any) => `<tr><td>${escapeHtml(formatDate(item.requested_at))}<small>${escapeHtml(String(item.requested_count))} requested</small></td><td>${escapeHtml(formatDate(item.anchor_timestamp))}<small>${escapeHtml(item.remote_jid || "Waiting for worker")}</small></td><td>${escapeHtml(String(item.messages_received || 0))} messages<small>${escapeHtml(String(item.attachments_discovered || 0))} files</small></td><td><span class="badge">${escapeHtml(item.status)}</span></td><td>${escapeHtml(item.error || (item.active ? "Waiting for WhatsApp" : "Completed"))}</td></tr>`).join("")
+        : '<tr><td colspan="5" class="empty-cell">No history requests for this contact.</td></tr>';
+      if (!latest) {
+        currentHistoryRequestId = "";
+        historyButton.disabled = !contactId.value;
+        historyButton.textContent = "Request older history";
+        historyScanButton.disabled = true;
+        el<HTMLElement>("inbound-history-state").textContent = "No request";
+        return;
+      }
+      currentHistoryRequestId = latest.id;
+      el<HTMLElement>("inbound-history-state").textContent = latest.status;
+      el<HTMLElement>("history-metric-requested").textContent = String(latest.requested_count || 0);
+      el<HTMLElement>("history-metric-messages").textContent = String(latest.messages_received || 0);
+      el<HTMLElement>("history-metric-attachments").textContent = String(latest.attachments_discovered || 0);
+      el<HTMLElement>("history-metric-activity").textContent = formatDate(latest.last_activity_at || latest.accepted_at || latest.requested_at);
+      el<HTMLElement>("inbound-history-summary").textContent = latest.error || (latest.active
+        ? "The worker accepted this request. New history events will update these counters automatically."
+        : latest.status === "succeeded"
+          ? "WhatsApp delivered older messages. Scan results to review newly discovered files."
+          : latest.status === "no_results"
+            ? "WhatsApp returned no new messages before the observation window closed. You may retry later."
+            : "This request is complete and remains in the audit history.");
+      historyButton.disabled = Boolean(latest.active);
+      historyButton.textContent = latest.active ? "History request active" : "Retry older history";
+      historyScanButton.disabled = false;
+      if (latest.active) startHistoryRequestPolling();
+    }
+
+    async function loadHistoryRequests() {
+      if (!contactId.value) return;
+      const result = await actions.whatsapp.inboundHistoryRequests({ contactId: contactId.value, limit: 10 });
+      if (result.error) {
+        historyRequestItems.innerHTML = `<tr><td colspan="5" class="empty-cell">${escapeHtml(result.error.message)}</td></tr>`;
+        return;
+      }
+      renderHistoryRequests((result.data as any).items || []);
+    }
+
+    async function pollHistoryRequest() {
+      if (!currentHistoryRequestId) return;
+      const result = await actions.whatsapp.inboundHistoryRequest({ id: currentHistoryRequestId });
+      if (result.error) return;
+      const item = result.data as any;
+      await loadHistoryRequests();
+      if (!item.active) {
+        if (historyRequestPollTimer) window.clearInterval(historyRequestPollTimer);
+        historyRequestPollTimer = undefined;
+        if (["succeeded", "no_results"].includes(item.status)) await scanFiles();
+      }
+    }
+
+    function startHistoryRequestPolling() {
+      if (historyRequestPollTimer) return;
+      historyRequestPollTimer = window.setInterval(() => void pollHistoryRequest(), 2000);
+    }
+
+    async function requestOlderHistory() {
+      try {
+        if (!contactId.value) throw new Error("Select a WhatsApp contact first.");
+        historyButton.disabled = true;
+        scanButton.disabled = true;
+        const count = Number(el<HTMLSelectElement>("inbound-history-count").value || 50);
+        setStatus(`Requesting up to ${count} older WhatsApp messages…`);
+        const result = await actions.whatsapp.requestInboundHistory({ contact_id: contactId.value, count });
+        if (result.error) throw new Error(result.error.message);
+        const data = result.data as any;
+        currentHistoryRequestId = data.id;
+        setStatus(`History request accepted from ${formatDate(data.anchor_timestamp)}. Live progress is shown below.`, "success");
+        await loadHistoryRequests();
+        startHistoryRequestPolling();
+      } catch (error: any) {
+        setStatus(error.message || String(error), "error");
+        await loadHistoryRequests();
       } finally {
         scanButton.disabled = false;
       }
@@ -401,9 +534,11 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
       document.querySelectorAll<HTMLElement>(".custom-date-field").forEach((item) => { item.hidden = !custom; });
     });
     scanButton.addEventListener("click", () => void scanFiles());
+    historyButton.addEventListener("click", () => void requestOlderHistory());
+    historyScanButton.addEventListener("click", () => void scanFiles());
     buildButton.addEventListener("click", () => void buildExport());
     el<HTMLButtonElement>("refresh-inbound-history").addEventListener("click", () => void loadHistory());
-    el<HTMLButtonElement>("refresh-page").addEventListener("click", () => { void loadHistory(); if (currentJobId) void pollJob(); });
+    el<HTMLButtonElement>("refresh-page").addEventListener("click", () => { void loadHistory(); if (contactId.value) void loadHistoryRequests(); if (currentJobId) void pollJob(); });
     historyItems.addEventListener("click", (event) => {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-open-export]");
       if (!button) return;

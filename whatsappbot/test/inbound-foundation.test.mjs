@@ -83,3 +83,57 @@ test("downloads inbound media and uploads bytes to the platform", async () => {
   assert.equal(uploads[0].init.headers["x-whatsapp-worker-token"], "test-secret");
   assert.equal(uploads[0].init.headers["x-whatsapp-worker-id"], "default");
 });
+
+import { createInboundHistoryResponder } from "../lib/inbound-history.js";
+
+test("selects oldest captured message as history anchor", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wa-history-anchor-"));
+  const store = new InboundMessageStore({ filePath: path.join(dir, "store.sqlite"), workerId: "default", log: console });
+  const newer = normalizeInboundMessage({ ...sample, key: { ...sample.key, id: "NEW" }, messageTimestamp: 1720000100 });
+  const older = normalizeInboundMessage({ ...sample, key: { ...sample.key, id: "OLD" }, messageTimestamp: 1719990000 });
+  store.upsert(newer);
+  store.upsert(older);
+  const anchor = store.oldestBoundary([sample.key.remoteJid]);
+  assert.equal(anchor.message_id, "OLD");
+  assert.equal(anchor.remote_jid, sample.key.remoteJid);
+  store.close();
+});
+
+test("requests on-demand history from the oldest anchor", async () => {
+  const calls = [];
+  const responder = createInboundHistoryResponder({
+    config: { workerId: "default", inboundHistoryMaxCount: 200 },
+    store: {
+      oldestBoundary() {
+        return {
+          remote_jid: sample.key.remoteJid,
+          message_id: "OLD",
+          from_me: 0,
+          message_timestamp: "2024-07-03T00:00:00.000Z",
+        };
+      },
+      recordHistoryRequest(value) { calls.push({ stored: value }); },
+      markHistoryRequestFailed() {},
+    },
+    log: { info() {}, warn() {} },
+    sc: { encode: (value) => Buffer.from(value), decode: (value) => Buffer.from(value).toString() },
+  });
+  const result = await responder.requestHistory({
+    async fetchMessageHistory(count, key, timestamp) {
+      calls.push({ count, key, timestamp });
+      return "operation-1";
+    },
+  }, {
+    action: "request_history",
+    workerId: "default",
+    requestId: "request-1",
+    remoteJids: [sample.key.remoteJid],
+    count: 50,
+  });
+  assert.equal(result.accepted, true);
+  assert.equal(result.operationId, "operation-1");
+  assert.equal(calls[0].stored.requestId, "request-1");
+  assert.equal(calls[1].count, 50);
+  assert.equal(calls[1].key.id, "OLD");
+  assert.equal(calls[2].stored.operationId, "operation-1");
+});

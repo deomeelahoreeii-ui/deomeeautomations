@@ -697,6 +697,42 @@ class WhatsAppInboundAttachment(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow, index=True)
 
 
+class WhatsAppInboundHistoryRequest(SQLModel, table=True):
+    """Auditable lifecycle for one on-demand WhatsApp history request."""
+
+    __tablename__ = "whatsapp_inbound_history_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('requested', 'accepted', 'syncing', 'succeeded', 'no_results', 'failed', 'timed_out')",
+            name="ck_whatsapp_inbound_history_requests_status",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    request_id: str = Field(unique=True, index=True)
+    account_id: uuid.UUID = Field(foreign_key="whatsapp_accounts.id", index=True)
+    contact_id: uuid.UUID = Field(
+        foreign_key="whatsapp_directory_contacts.id", index=True
+    )
+    worker_key: str = Field(index=True)
+    requested_count: int = 50
+    remote_jid: str | None = Field(default=None, index=True)
+    anchor_message_id: str | None = Field(default=None, index=True)
+    anchor_timestamp: datetime | None = Field(default=None, index=True)
+    operation_id: str | None = Field(default=None, index=True)
+    status: str = Field(default="requested", index=True)
+    baseline_messages: int = 0
+    baseline_attachments: int = 0
+    messages_received: int = 0
+    attachments_discovered: int = 0
+    error: str | None = Field(default=None, sa_column=Column(Text))
+    requested_at: datetime = Field(default_factory=utcnow, index=True)
+    accepted_at: datetime | None = Field(default=None, index=True)
+    last_activity_at: datetime | None = Field(default=None, index=True)
+    finished_at: datetime | None = Field(default=None, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
 class WhatsAppInboundExportRun(SQLModel, table=True):
     __tablename__ = "whatsapp_inbound_export_runs"
     __table_args__ = (

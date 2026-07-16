@@ -146,7 +146,7 @@ if not payload.get("ready"):
     raise SystemExit(1)
 if not inbound.get("enabled"):
     raise SystemExit(1)
-if int(inbound.get("schemaVersion") or 0) < 1:
+if int(inbound.get("schemaVersion") or 0) < 2:
     raise SystemExit(1)
 store_path = Path(str(inbound.get("filePath") or ""))
 if not store_path.is_file():
@@ -174,29 +174,72 @@ JSCONFIG
   )
 }
 
+find_running_whatsapp_worker_pids() {
+  local process_dir=""
+  local process_pid=""
+  local process_cwd=""
+  local process_args=""
+
+  for process_dir in /proc/[0-9]*; do
+    [[ -r "$process_dir/cmdline" ]] || continue
+    process_pid="${process_dir##*/}"
+    process_cwd="$(readlink "$process_dir/cwd" 2>/dev/null || true)"
+    [[ "$process_cwd" == "$WHATSAPP_DIR" ]] || continue
+    process_args="$(tr '\0' ' ' < "$process_dir/cmdline" 2>/dev/null || true)"
+    if [[ "$process_args" == *node* && "$process_args" == *worker.js* ]]; then
+      printf '%s\n' "$process_pid"
+    fi
+  done
+}
+
 stop_existing_whatsapp_worker() {
   local lock_file=""
-  local worker_pid=""
-  lock_file="$(whatsapp_worker_lock_file 2>/dev/null || true)"
-  [[ -n "$lock_file" && -f "$lock_file" ]] \
-    || fail "An older WhatsApp worker answered health checks but its lock file could not be found. Stop that worker manually and run dev.sh again."
-  worker_pid="$(tr -cd '0-9' < "$lock_file")"
-  [[ -n "$worker_pid" ]] \
-    || fail "The WhatsApp worker lock file does not contain a valid PID: $lock_file"
-  kill -0 "$worker_pid" 2>/dev/null \
-    || fail "The WhatsApp worker lock refers to a process that is not running: PID $worker_pid"
+  local lock_pid=""
+  local candidate_pid=""
+  local -a worker_pids=()
 
-  echo "Stopping incompatible WhatsApp worker PID $worker_pid..."
-  kill "$worker_pid"
-  for _ in {1..20}; do
-    if ! kill -0 "$worker_pid" 2>/dev/null; then
-      rm -f "$lock_file"
+  lock_file="$(whatsapp_worker_lock_file 2>/dev/null || true)"
+  if [[ -n "$lock_file" && -f "$lock_file" ]]; then
+    lock_pid="$(tr -cd '0-9' < "$lock_file")"
+  fi
+
+  mapfile -t worker_pids < <(find_running_whatsapp_worker_pids)
+
+  # The Node worker is authoritative about stale-lock cleanup.  dev.sh must
+  # not abort merely because a previous PID file survived a worker restart.
+  if ((${#worker_pids[@]} == 0)); then
+    if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
+      worker_pids+=("$lock_pid")
+    else
+      [[ -n "$lock_file" ]] && rm -f "$lock_file"
+      echo "Removed stale WhatsApp worker lock; no live worker process was found."
+      return 0
+    fi
+  fi
+
+  echo "Stopping incompatible WhatsApp worker PID(s): ${worker_pids[*]}..."
+  for candidate_pid in "${worker_pids[@]}"; do
+    kill "$candidate_pid" 2>/dev/null || true
+  done
+
+  for _ in {1..30}; do
+    local any_running=false
+    for candidate_pid in "${worker_pids[@]}"; do
+      if kill -0 "$candidate_pid" 2>/dev/null; then
+        any_running=true
+        break
+      fi
+    done
+    if [[ "$any_running" == false ]]; then
+      [[ -n "$lock_file" ]] && rm -f "$lock_file"
       return 0
     fi
     sleep 0.5
   done
-  fail "WhatsApp worker PID $worker_pid did not stop. Stop it manually and run dev.sh again."
+
+  fail "The incompatible WhatsApp worker did not stop. Stop PID(s) ${worker_pids[*]} manually and run dev.sh again."
 }
+
 
 print_whatsapp_inbound_status() {
   local health_json=""
@@ -345,9 +388,9 @@ info "Starting one Celery worker for AntiDengue, CRM, and WhatsApp exports"
 pids+=("$!")
 
 if whatsapp_worker_inbound_ready; then
-  echo "An existing Bundle 2 WhatsApp worker is ready; it will be reused."
+  echo "An existing Bundle 3A WhatsApp worker is ready; it will be reused."
 elif whatsapp_worker_ready; then
-  info "Restarting older WhatsApp worker without inbound capture support"
+  info "Restarting older WhatsApp worker without on-demand history support"
   stop_existing_whatsapp_worker
   (
     cd "$WHATSAPP_DIR"
@@ -381,7 +424,7 @@ done
 if ! whatsapp_worker_inbound_ready; then
   echo "Latest WhatsApp worker health payload:" >&2
   whatsapp_worker_health_json >&2 || true
-  fail "The WhatsApp worker became reachable, but Bundle 2 inbound capture is not ready."
+  fail "The WhatsApp worker became reachable, but Bundle 3A inbound capture/history support is not ready."
 fi
 print_whatsapp_inbound_status
 

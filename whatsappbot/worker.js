@@ -35,6 +35,7 @@ import { createLogger } from "./lib/logger.js";
 import { InboundMessageStore } from "./lib/inbound-message-store.js";
 import { createInboundCapture } from "./lib/inbound-capture.js";
 import { createInboundMediaResponder } from "./lib/inbound-media.js";
+import { createInboundHistoryResponder } from "./lib/inbound-history.js";
 
 const log = createLogger("worker");
 const sc = StringCodec();
@@ -54,6 +55,9 @@ const inboundCapture = inboundMessageStore
   : null;
 const inboundMediaResponder = inboundMessageStore
   ? createInboundMediaResponder({ config, store: inboundMessageStore, log, sc })
+  : null;
+const inboundHistoryResponder = inboundMessageStore
+  ? createInboundHistoryResponder({ config, store: inboundMessageStore, log, sc })
   : null;
 const MAX_WHATSAPP_CAPTION_CHARS = 900;
 const MAX_WHATSAPP_TEXT_CHARS = 3500;
@@ -1710,6 +1714,11 @@ async function startNatsConsumer(sock) {
         void inboundMediaResponder?.respond(sock, message);
       },
     });
+    nc.subscribe(`${config.inboundHistorySubject}.${config.workerId}`, {
+      callback: (_error, message) => {
+        void inboundHistoryResponder?.respond(sock, message);
+      },
+    });
     const jsm = await nc.jetstreamManager();
 
     const jetStreamResources = await ensureJetStreamWorkerResources(jsm, {
@@ -1748,6 +1757,7 @@ async function startNatsConsumer(sock) {
       groupMembersSubject: config.groupMembersSubject,
       identityDirectorySubject: config.identityDirectorySubject,
       inboundMediaSubject: `${config.inboundMediaSubject}.${config.workerId}`,
+      inboundHistorySubject: `${config.inboundHistorySubject}.${config.workerId}`,
       subject: config.natsSubject,
       stream: queueStreamName,
       consumer: config.consumerName,
@@ -1850,6 +1860,10 @@ async function startWorker() {
 
     sock.ev.on("messaging-history.set", (event) => {
       inboundCapture?.handleMessagingHistorySet(event);
+    });
+
+    sock.ev.on("messaging-history.status", (event) => {
+      log.info("WhatsApp history synchronization status", event);
     });
 
     sock.ev.on("messages.update", handleMessageUpdates);

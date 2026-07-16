@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 function json(value) {
   return JSON.stringify(value ?? null);
@@ -78,6 +78,20 @@ export class InboundMessageStore {
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS ix_inbound_outbox_pending ON inbound_outbox(delivered_at, available_at, id);
+      CREATE TABLE IF NOT EXISTS inbound_history_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        request_id TEXT NOT NULL UNIQUE,
+        remote_jid TEXT NOT NULL,
+        requested_count INTEGER NOT NULL,
+        anchor_message_id TEXT NOT NULL,
+        anchor_timestamp TEXT NOT NULL,
+        operation_id TEXT,
+        status TEXT NOT NULL DEFAULT 'requested',
+        last_error TEXT,
+        requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS ix_inbound_history_requests_status ON inbound_history_requests(status, requested_at);
     `);
     this.db.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES('schema_version', ?)").run(String(SCHEMA_VERSION));
   }
@@ -165,11 +179,47 @@ export class InboundMessageStore {
     return row ? JSON.parse(row.raw_payload_json, reviveBuffer) : undefined;
   }
 
+  oldestBoundary(remoteJids) {
+    const candidates = [...new Set((remoteJids || []).map((value) => String(value || "").trim()).filter(Boolean))];
+    if (!candidates.length) return null;
+    const placeholders = candidates.map(() => "?").join(",");
+    return this.db.prepare(`
+      SELECT remote_jid, message_id, from_me, message_timestamp
+      FROM inbound_messages
+      WHERE worker_id=? AND remote_jid IN (${placeholders})
+      ORDER BY message_timestamp ASC, id ASC
+      LIMIT 1
+    `).get(this.workerId, ...candidates) || null;
+  }
+
+  recordHistoryRequest({ requestId, remoteJid, count, anchorMessageId, anchorTimestamp, operationId }) {
+    this.db.prepare(`
+      INSERT INTO inbound_history_requests (
+        request_id, remote_jid, requested_count, anchor_message_id,
+        anchor_timestamp, operation_id, status
+      ) VALUES (?, ?, ?, ?, ?, ?, 'requested')
+      ON CONFLICT(request_id) DO UPDATE SET
+        operation_id=excluded.operation_id,
+        status='requested',
+        last_error=NULL,
+        updated_at=CURRENT_TIMESTAMP
+    `).run(requestId, remoteJid, count, anchorMessageId, anchorTimestamp, operationId || null);
+  }
+
+  markHistoryRequestFailed(requestId, error) {
+    this.db.prepare(`
+      UPDATE inbound_history_requests
+      SET status='failed', last_error=?, updated_at=CURRENT_TIMESTAMP
+      WHERE request_id=?
+    `).run(String(error || "unknown error").slice(0, 2000), requestId);
+  }
+
   stats() {
     const messages = this.db.prepare("SELECT COUNT(*) AS count, MIN(message_timestamp) AS earliest, MAX(message_timestamp) AS latest FROM inbound_messages WHERE worker_id=?").get(this.workerId);
     const attachments = this.db.prepare("SELECT COUNT(*) AS count FROM inbound_attachments a JOIN inbound_messages m ON m.id=a.message_row_id WHERE m.worker_id=?").get(this.workerId);
     const pending = this.db.prepare("SELECT COUNT(*) AS count FROM inbound_outbox WHERE delivered_at IS NULL").get();
-    return { schemaVersion: SCHEMA_VERSION, filePath: this.filePath, messages: Number(messages.count), attachments: Number(attachments.count), outboxPending: Number(pending.count), earliestMessageAt: messages.earliest || null, latestMessageAt: messages.latest || null };
+    const historyRequests = this.db.prepare("SELECT COUNT(*) AS count FROM inbound_history_requests").get();
+    return { schemaVersion: SCHEMA_VERSION, filePath: this.filePath, messages: Number(messages.count), attachments: Number(attachments.count), outboxPending: Number(pending.count), historyRequests: Number(historyRequests.count), earliestMessageAt: messages.earliest || null, latestMessageAt: messages.latest || null };
   }
 
   close() { this.db.close(); }

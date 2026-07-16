@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     whatsapp_qr_image_path: Path = Path("./data/whatsapp/login-qr.png")
     whatsapp_inbound_ingest_token: str = ""
     whatsapp_inbound_media_subject: str = "whatsapp.worker.inbound.media"
+    whatsapp_inbound_history_subject: str = "whatsapp.worker.inbound.history"
+    whatsapp_inbound_history_timeout_seconds: int = 15
     whatsapp_inbound_media_max_bytes: int = 75 * 1024 * 1024
     whatsapp_inbound_media_timeout_seconds: int = 180
 

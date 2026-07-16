@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import hmac
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import nats
+from nats.errors import NoRespondersError, TimeoutError as NatsTimeoutError
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
 from automation_core.config import Settings, get_settings
@@ -21,6 +27,7 @@ from automation_core.time import utcnow
 from whatsapp_gateway.inbound_media import detect_file_type
 from whatsapp_gateway.inbound_service import (
     build_preview,
+    contact_message_filter,
     create_export_run,
     serialize_run,
 )
@@ -31,6 +38,7 @@ from whatsapp_gateway.models import (
     WhatsAppIdentityAlias,
     WhatsAppInboundAttachment,
     WhatsAppInboundExportRun,
+    WhatsAppInboundHistoryRequest,
     WhatsAppInboundMessage,
 )
 
@@ -75,6 +83,11 @@ class InboundFileFilter(BaseModel):
 
 class CreateInboundExportRequest(InboundFileFilter):
     requested_by: str = Field(default="web-operator", max_length=100)
+
+
+class RequestInboundHistory(BaseModel):
+    contact_id: uuid.UUID
+    count: int = Field(default=50, ge=1, le=200)
 
 
 def _verify_worker_token(
@@ -129,19 +142,285 @@ def _resolve_contact_id(session: Session, account_id, sender_jid: str):
     return alias.contact_id if alias else None
 
 
+def _insert_idempotently(
+    session: Session,
+    *,
+    table: Any,
+    values: dict[str, Any],
+    constraint_name: str,
+    conflict_columns: list[str],
+) -> uuid.UUID | None:
+    """Insert once and return the new id, or ``None`` after a conflict.
+
+    History sync and the durable worker outbox can legitimately deliver the
+    same WhatsApp event at the same time.  A SELECT followed by INSERT is not
+    atomic, so concurrent requests could both observe no row and one would
+    fail with a unique-constraint error.  Use the database's native
+    ``ON CONFLICT DO NOTHING`` support for PostgreSQL and SQLite instead.
+    """
+
+    dialect_name = session.get_bind().dialect.name
+    if dialect_name == "postgresql":
+        statement = (
+            postgresql_insert(table)
+            .values(**values)
+            .on_conflict_do_nothing(constraint=constraint_name)
+            .returning(table.c.id)
+        )
+        return session.execute(statement).scalar_one_or_none()
+
+    if dialect_name == "sqlite":
+        statement = (
+            sqlite_insert(table)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=conflict_columns)
+            .returning(table.c.id)
+        )
+        return session.execute(statement).scalar_one_or_none()
+
+    # Portable fallback for an unexpected SQLAlchemy dialect.  The nested
+    # transaction keeps the outer request Session usable after a conflict.
+    try:
+        with session.begin_nested():
+            session.execute(table.insert().values(**values))
+        return values["id"]
+    except IntegrityError:
+        return None
+
+
+def _upsert_inbound_message(
+    session: Session,
+    *,
+    account_id: uuid.UUID,
+    event: InboundMessageEvent,
+    values: dict[str, Any],
+    now: datetime,
+) -> tuple[uuid.UUID, bool]:
+    table = WhatsAppInboundMessage.__table__
+    candidate_id = uuid.uuid4()
+    inserted_id = _insert_idempotently(
+        session,
+        table=table,
+        values={
+            "id": candidate_id,
+            "account_id": account_id,
+            "message_id": event.messageId,
+            "remote_jid": event.remoteJid,
+            "first_ingested_at": now,
+            **values,
+        },
+        constraint_name="uq_whatsapp_inbound_message_identity",
+        conflict_columns=["account_id", "remote_jid", "message_id"],
+    )
+    if inserted_id is not None:
+        return inserted_id, True
+
+    existing_id = session.execute(
+        update(table)
+        .where(
+            table.c.account_id == account_id,
+            table.c.remote_jid == event.remoteJid,
+            table.c.message_id == event.messageId,
+        )
+        .values(**values)
+        .returning(table.c.id)
+    ).scalar_one_or_none()
+    if existing_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The inbound message conflicted but could not be reloaded",
+        )
+    return existing_id, False
+
+
+HISTORY_ACTIVE_STATUSES = {"requested", "accepted", "syncing"}
+HISTORY_QUIET_SECONDS = 8
+HISTORY_NO_RESULT_SECONDS = 45
+HISTORY_HARD_TIMEOUT_SECONDS = 180
+
+
+def _history_contact_counts(
+    session: Session, account_id: uuid.UUID, contact_id: uuid.UUID
+) -> tuple[int, int]:
+    contact = session.get(WhatsAppDirectoryContact, contact_id)
+    if contact is None or contact.account_id != account_id:
+        return 0, 0
+    identity_filter = contact_message_filter(session, contact)
+    message_count = session.exec(
+        select(func.count(WhatsAppInboundMessage.id)).where(
+            identity_filter,
+            WhatsAppInboundMessage.from_me.is_(False),
+        )
+    ).one()
+    attachment_count = session.exec(
+        select(func.count(WhatsAppInboundAttachment.id))
+        .join(
+            WhatsAppInboundMessage,
+            WhatsAppInboundMessage.id == WhatsAppInboundAttachment.message_id,
+        )
+        .where(
+            identity_filter,
+            WhatsAppInboundMessage.from_me.is_(False),
+        )
+    ).one()
+    return int(message_count or 0), int(attachment_count or 0)
+
+
+def _utc_naive(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _serialize_history_request(item: WhatsAppInboundHistoryRequest) -> dict[str, Any]:
+    return {
+        "accepted": item.status not in {"failed", "timed_out"},
+        "id": str(item.id),
+        "request_id": item.request_id,
+        "account_id": str(item.account_id),
+        "contact_id": str(item.contact_id),
+        "worker_key": item.worker_key,
+        "requested_count": item.requested_count,
+        "remote_jid": item.remote_jid,
+        "anchor_message_id": item.anchor_message_id,
+        "anchor_timestamp": item.anchor_timestamp,
+        "operation_id": item.operation_id,
+        "status": item.status,
+        "baseline_messages": item.baseline_messages,
+        "baseline_attachments": item.baseline_attachments,
+        "messages_received": item.messages_received,
+        "attachments_discovered": item.attachments_discovered,
+        "error": item.error,
+        "requested_at": item.requested_at,
+        "accepted_at": item.accepted_at,
+        "last_activity_at": item.last_activity_at,
+        "finished_at": item.finished_at,
+        "updated_at": item.updated_at,
+        "active": item.status in HISTORY_ACTIVE_STATUSES,
+    }
+
+
+def _reconcile_history_requests(
+    session: Session, *, contact_id: uuid.UUID | None = None
+) -> bool:
+    now = _utc_naive(utcnow())
+    query = select(WhatsAppInboundHistoryRequest).where(
+        WhatsAppInboundHistoryRequest.status.in_(HISTORY_ACTIVE_STATUSES)
+    )
+    if contact_id is not None:
+        query = query.where(WhatsAppInboundHistoryRequest.contact_id == contact_id)
+    changed = False
+    for item in session.exec(query).all():
+        requested_at = _utc_naive(item.requested_at)
+        age = (now - requested_at).total_seconds()
+        quiet_since = _utc_naive(
+            item.last_activity_at or item.accepted_at or item.requested_at
+        )
+        quiet = (now - quiet_since).total_seconds()
+        if item.messages_received > 0 and quiet >= HISTORY_QUIET_SECONDS:
+            item.status = "succeeded"
+            item.finished_at = now
+        elif item.messages_received == 0 and age >= HISTORY_NO_RESULT_SECONDS:
+            item.status = "no_results"
+            item.finished_at = now
+        elif age >= HISTORY_HARD_TIMEOUT_SECONDS:
+            item.status = "timed_out"
+            item.finished_at = now
+            item.error = item.error or "WhatsApp did not finish the history request in time"
+        else:
+            continue
+        item.updated_at = now
+        session.add(item)
+        changed = True
+    if changed:
+        session.commit()
+    return changed
+
+
+def _record_history_progress(
+    session: Session,
+    *,
+    account_id: uuid.UUID,
+    contact_id: uuid.UUID | None,
+    created_message: bool,
+    has_attachment: bool,
+    ingestion_source: str,
+) -> None:
+    if not created_message or contact_id is None:
+        return
+    if ingestion_source not in {"history_sync", "offline_sync"}:
+        return
+    cutoff = _utc_naive(utcnow()) - timedelta(minutes=10)
+    request = session.exec(
+        select(WhatsAppInboundHistoryRequest)
+        .where(
+            WhatsAppInboundHistoryRequest.account_id == account_id,
+            WhatsAppInboundHistoryRequest.contact_id == contact_id,
+            WhatsAppInboundHistoryRequest.requested_at >= cutoff,
+            WhatsAppInboundHistoryRequest.status.in_(
+                ["requested", "accepted", "syncing", "no_results", "timed_out"]
+            ),
+        )
+        .order_by(WhatsAppInboundHistoryRequest.requested_at.desc())
+    ).first()
+    if request is None:
+        return
+    now = _utc_naive(utcnow())
+    request.status = "syncing"
+    request.messages_received += 1
+    if has_attachment:
+        request.attachments_discovered += 1
+    request.last_activity_at = now
+    request.finished_at = None
+    request.error = None
+    request.updated_at = now
+    session.add(request)
+
+
+def _upsert_inbound_attachment(
+    session: Session,
+    *,
+    message_id: uuid.UUID,
+    mapped: dict[str, Any],
+    now: datetime,
+) -> uuid.UUID:
+    table = WhatsAppInboundAttachment.__table__
+    candidate_id = uuid.uuid4()
+    inserted_id = _insert_idempotently(
+        session,
+        table=table,
+        values={
+            "id": candidate_id,
+            "message_id": message_id,
+            "created_at": now,
+            **mapped,
+        },
+        constraint_name="uq_whatsapp_inbound_attachment_message",
+        conflict_columns=["message_id"],
+    )
+    if inserted_id is not None:
+        return inserted_id
+
+    existing_id = session.execute(
+        update(table)
+        .where(table.c.message_id == message_id)
+        .values(**mapped)
+        .returning(table.c.id)
+    ).scalar_one_or_none()
+    if existing_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The inbound attachment conflicted but could not be reloaded",
+        )
+    return existing_id
+
+
 @router.post("/events", dependencies=[Depends(_verify_worker_token)])
 def ingest_event(
     event: InboundMessageEvent,
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     account = _resolve_account(session, event.workerId)
-    message = session.exec(
-        select(WhatsAppInboundMessage).where(
-            WhatsAppInboundMessage.account_id == account.id,
-            WhatsAppInboundMessage.remote_jid == event.remoteJid,
-            WhatsAppInboundMessage.message_id == event.messageId,
-        )
-    ).first()
     now = utcnow()
     values = {
         "worker_key": event.workerId,
@@ -163,45 +442,42 @@ def ingest_event(
         "raw_payload": event.rawPayload,
         "last_ingested_at": now,
     }
-    created = message is None
-    if message is None:
-        message = WhatsAppInboundMessage(
-            account_id=account.id,
-            message_id=event.messageId,
-            remote_jid=event.remoteJid,
-            **values,
-        )
-        session.add(message)
-        session.flush()
-    else:
-        for key, value in values.items():
-            setattr(message, key, value)
+    message_id, created = _upsert_inbound_message(
+        session,
+        account_id=account.id,
+        event=event,
+        values=values,
+        now=now,
+    )
 
     if event.attachment:
-        attachment = session.exec(
-            select(WhatsAppInboundAttachment).where(
-                WhatsAppInboundAttachment.message_id == message.id
-            )
-        ).first()
         data = event.attachment.model_dump()
-        mapped = {
-            "media_kind": data["mediaKind"],
-            "message_key": data["messageKey"],
-            "original_filename": data.get("originalFilename"),
-            "mime_type": data.get("mimeType"),
-            "declared_size": data.get("declaredSize"),
-            "media_sha256": data.get("mediaSha256"),
-            "caption": data.get("caption"),
-            "updated_at": now,
-        }
-        if attachment is None:
-            attachment = WhatsAppInboundAttachment(message_id=message.id, **mapped)
-            session.add(attachment)
-        else:
-            for key, value in mapped.items():
-                setattr(attachment, key, value)
+        _upsert_inbound_attachment(
+            session,
+            message_id=message_id,
+            now=now,
+            mapped={
+                "media_kind": data["mediaKind"],
+                "message_key": data["messageKey"],
+                "original_filename": data.get("originalFilename"),
+                "mime_type": data.get("mimeType"),
+                "declared_size": data.get("declaredSize"),
+                "media_sha256": data.get("mediaSha256"),
+                "caption": data.get("caption"),
+                "updated_at": now,
+            },
+        )
+
+    _record_history_progress(
+        session,
+        account_id=account.id,
+        contact_id=values["directory_contact_id"],
+        created_message=created,
+        has_attachment=event.attachment is not None,
+        ingestion_source=event.ingestionSource,
+    )
     session.commit()
-    return {"accepted": True, "created": created, "message_id": str(message.id)}
+    return {"accepted": True, "created": created, "message_id": str(message_id)}
 
 
 @router.post(
@@ -300,6 +576,147 @@ async def upload_attachment_content(
         }
     finally:
         temporary.unlink(missing_ok=True)
+
+
+@router.post("/history/request", status_code=status.HTTP_202_ACCEPTED)
+async def request_inbound_history(
+    data: RequestInboundHistory,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    _reconcile_history_requests(session, contact_id=data.contact_id)
+    contact = session.get(WhatsAppDirectoryContact, data.contact_id)
+    if contact is None or not contact.active:
+        raise HTTPException(status_code=404, detail="WhatsApp contact was not found")
+    account = session.get(WhatsAppAccount, contact.account_id)
+    if account is None or not account.enabled:
+        raise HTTPException(status_code=409, detail="WhatsApp account is unavailable")
+    active = session.exec(
+        select(WhatsAppInboundHistoryRequest)
+        .where(
+            WhatsAppInboundHistoryRequest.contact_id == contact.id,
+            WhatsAppInboundHistoryRequest.status.in_(HISTORY_ACTIVE_STATUSES),
+        )
+        .order_by(WhatsAppInboundHistoryRequest.requested_at.desc())
+    ).first()
+    if active is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A history request is already active ({active.request_id})",
+        )
+    aliases = session.exec(
+        select(WhatsAppIdentityAlias.lid_jid).where(
+            WhatsAppIdentityAlias.account_id == account.id,
+            WhatsAppIdentityAlias.contact_id == contact.id,
+        )
+    ).all()
+    remote_jids = list(dict.fromkeys(
+        value for value in [contact.phone_jid, contact.primary_lid_jid, *aliases] if value
+    ))
+    if not remote_jids:
+        raise HTTPException(status_code=409, detail="This contact has no WhatsApp JID available for history lookup")
+
+    request_id = str(uuid.uuid4())
+    baseline_messages, baseline_attachments = _history_contact_counts(
+        session, account.id, contact.id
+    )
+    audit = WhatsAppInboundHistoryRequest(
+        request_id=request_id,
+        account_id=account.id,
+        contact_id=contact.id,
+        worker_key=account.worker_key,
+        requested_count=data.count,
+        baseline_messages=baseline_messages,
+        baseline_attachments=baseline_attachments,
+    )
+    session.add(audit)
+    session.commit()
+    session.refresh(audit)
+
+    payload = {
+        "action": "request_history",
+        "requestId": request_id,
+        "workerId": account.worker_key,
+        "remoteJids": remote_jids,
+        "count": data.count,
+    }
+    subject = f"{settings.whatsapp_inbound_history_subject}.{account.worker_key}"
+    client = None
+    try:
+        client = await nats.connect(settings.whatsapp_nats_url, connect_timeout=2)
+        message = await client.request(
+            subject,
+            json.dumps(payload).encode("utf-8"),
+            timeout=settings.whatsapp_inbound_history_timeout_seconds,
+        )
+        result = json.loads(message.data.decode("utf-8"))
+        if not result.get("accepted"):
+            raise HTTPException(status_code=409, detail=result.get("error") or "WhatsApp history request was rejected")
+        now = utcnow()
+        audit.status = "accepted"
+        audit.remote_jid = result.get("remoteJid")
+        audit.anchor_message_id = result.get("anchorMessageId")
+        anchor = result.get("anchorTimestamp")
+        audit.anchor_timestamp = datetime.fromisoformat(anchor.replace("Z", "+00:00")).replace(tzinfo=None) if anchor else None
+        audit.operation_id = result.get("operationId")
+        audit.accepted_at = now
+        audit.updated_at = now
+        session.add(audit)
+        session.commit()
+        session.refresh(audit)
+        return _serialize_history_request(audit)
+    except HTTPException as exc:
+        audit.status = "failed"
+        audit.error = str(exc.detail)
+        audit.finished_at = utcnow()
+        audit.updated_at = utcnow()
+        session.add(audit)
+        session.commit()
+        raise
+    except NoRespondersError as exc:
+        detail = "WhatsApp worker is not listening for history requests"
+        audit.status = "failed"; audit.error = detail; audit.finished_at = utcnow(); audit.updated_at = utcnow(); session.add(audit); session.commit()
+        raise HTTPException(status_code=503, detail=detail) from exc
+    except NatsTimeoutError as exc:
+        detail = "WhatsApp history request timed out"
+        audit.status = "failed"; audit.error = detail; audit.finished_at = utcnow(); audit.updated_at = utcnow(); session.add(audit); session.commit()
+        raise HTTPException(status_code=504, detail=detail) from exc
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        detail = f"WhatsApp history request failed: {exc}"
+        audit.status = "failed"; audit.error = detail; audit.finished_at = utcnow(); audit.updated_at = utcnow(); session.add(audit); session.commit()
+        raise HTTPException(status_code=502, detail=detail) from exc
+    finally:
+        if client is not None:
+            await client.close()
+
+
+@router.get("/history/requests")
+def list_inbound_history_requests(
+    contact_id: uuid.UUID | None = Query(default=None),
+    limit: int = Query(default=10, ge=1, le=100),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    _reconcile_history_requests(session, contact_id=contact_id)
+    query = select(WhatsAppInboundHistoryRequest)
+    if contact_id is not None:
+        query = query.where(WhatsAppInboundHistoryRequest.contact_id == contact_id)
+    items = session.exec(
+        query.order_by(WhatsAppInboundHistoryRequest.requested_at.desc()).limit(limit)
+    ).all()
+    return {"items": [_serialize_history_request(item) for item in items]}
+
+
+@router.get("/history/requests/{request_id}")
+def get_inbound_history_request(
+    request_id: uuid.UUID,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    item = session.get(WhatsAppInboundHistoryRequest, request_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="History request not found")
+    _reconcile_history_requests(session, contact_id=item.contact_id)
+    session.refresh(item)
+    return _serialize_history_request(item)
 
 
 @router.post("/exports/preview")

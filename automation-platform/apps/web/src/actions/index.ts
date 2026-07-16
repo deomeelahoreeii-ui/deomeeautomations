@@ -310,6 +310,31 @@ export const server = {
     inboundStatus: defineAction({
       handler: () => api("/api/v1/whatsapp/inbound/status"),
     }),
+    requestInboundHistory: defineAction({
+      input: z.object({
+        contact_id: z.string().uuid(),
+        count: z.number().int().min(1).max(200).default(50),
+      }),
+      handler: (input) => api("/api/v1/whatsapp/inbound/history/request", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    }),
+    inboundHistoryRequests: defineAction({
+      input: z.object({
+        contactId: z.string().uuid().optional(),
+        limit: z.number().int().min(1).max(100).default(10),
+      }),
+      handler: (input) => {
+        const params = new URLSearchParams({ limit: String(input.limit) });
+        if (input.contactId) params.set("contact_id", input.contactId);
+        return api(`/api/v1/whatsapp/inbound/history/requests?${params}`);
+      },
+    }),
+    inboundHistoryRequest: defineAction({
+      input: z.object({ id: z.string().uuid() }),
+      handler: ({ id }) => api(`/api/v1/whatsapp/inbound/history/requests/${id}`),
+    }),
     inboundExportPreview: defineAction({
       input: z.object({
         contact_id: z.string().uuid(),
