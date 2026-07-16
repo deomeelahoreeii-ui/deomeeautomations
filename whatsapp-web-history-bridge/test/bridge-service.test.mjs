@@ -22,27 +22,71 @@ function stateStore() {
 
 const sc = { encode: (value) => Buffer.from(value), decode: (value) => Buffer.from(value).toString() };
 
-test("history request is rejected until WhatsApp Web is ready", async () => {
-  const service = createBridgeService({
-    config: { workerId: "default", maxHistoryCount: 200, maxMessagesScanned: 500, mediaMaxBytes: 1000, requestTimeoutMs: 1000, qrPath: "/tmp/qr.png", mode: "local_auth", protocolVersion: 1 },
-    client: {}, store: stateStore(), platform: {}, log: { info() {}, error() {} }, sc,
-    runtime: { status: "qr", authenticated: false, error: null },
+function config(overrides = {}) {
+  return {
+    workerId: "default",
+    maxHistoryCount: 200,
+    maxMessagesScanned: 500,
+    mediaMaxBytes: 1000,
+    requestTimeoutMs: 1000,
+    fetchAttemptTimeoutMs: 1000,
+    syncHistory: false,
+    syncHistoryTimeoutMs: 1000,
+    syncSettleMs: 0,
+    qrPath: "/tmp/qr.png",
+    browserUrl: "http://127.0.0.1:9222",
+    mode: "browser_url",
+    allowLocalAuthHistory: false,
+    protocolVersion: 2,
+    ...overrides,
+  };
+}
+
+function service(overrides = {}) {
+  return createBridgeService({
+    config: config(overrides.config),
+    client: overrides.client || {},
+    store: overrides.store || stateStore(),
+    platform: overrides.platform || {},
+    log: overrides.log || { info() {}, error() {}, warn() {} },
+    sc,
+    runtime: overrides.runtime || { status: "ready", authenticated: true, error: null, browserEndpoint: { browser: "Brave" } },
   });
-  await assert.rejects(() => service.requestHistory({ workerId: "default", requestId: "r1", remoteJids: ["1@s.whatsapp.net"], count: 10 }), /needs pairing/);
+}
+
+test("history request is rejected until the attached WhatsApp Web page is ready", async () => {
+  const instance = service({ runtime: { status: "qr", authenticated: false, error: null } });
+  await assert.rejects(
+    () => instance.requestHistory({ workerId: "default", requestId: "r1", remoteJids: ["1@s.whatsapp.net"], count: 10 }),
+    /needs pairing/,
+  );
 });
 
-test("health exposes protocol and QR state", () => {
-  const service = createBridgeService({
-    config: { workerId: "default", maxHistoryCount: 200, maxMessagesScanned: 500, mediaMaxBytes: 1000, requestTimeoutMs: 1000, qrPath: "/tmp/qr.png", mode: "local_auth", protocolVersion: 1 },
-    client: {}, store: stateStore(), platform: {}, log: { info() {}, error() {} }, sc,
-    runtime: { status: "qr", authenticated: false, error: null, webVersion: null },
-  });
-  const health = service.health();
-  assert.equal(health.protocolVersion, 1);
-  assert.equal(health.ready, false);
-  assert.equal(health.qrPath, "/tmp/qr.png");
+test("local_auth is explicitly blocked because it is not the visible browser profile", async () => {
+  const instance = service({ config: { mode: "local_auth", allowLocalAuthHistory: false } });
+  await assert.rejects(
+    () => instance.requestHistory({ workerId: "default", requestId: "r1", remoteJids: ["923360249999@s.whatsapp.net"], count: 10 }),
+    /separate linked-device browser session.*launch-brave-debug\.sh/s,
+  );
 });
 
+test("health exposes protocol 2 and whether historical retrieval is actually ready", () => {
+  const instance = service();
+  const health = instance.health();
+  assert.equal(health.protocolVersion, 2);
+  assert.equal(health.ready, true);
+  assert.equal(health.historyReady, true);
+  assert.equal(health.mode, "browser_url");
+  assert.equal(health.browserUrl, "http://127.0.0.1:9222");
+});
+
+test("health keeps LocalAuth alive but marks it unusable for history", () => {
+  const instance = service({ config: { mode: "local_auth", allowLocalAuthHistory: false } });
+  const health = instance.health();
+  assert.equal(health.ready, true);
+  assert.equal(health.historyReady, false);
+  assert.match(health.warning, /separate linked-device/);
+});
 
 test("a timed-out request cannot be resurrected by late WhatsApp Web results", async () => {
   const store = stateStore();
@@ -57,17 +101,14 @@ test("a timed-out request cannot be resurrected by late WhatsApp Web results", a
     async getNumberId() { return { _serialized: "923360249999@c.us" }; },
     async getChatById() { return chat; },
   };
-  const service = createBridgeService({
-    config: { workerId: "default", maxHistoryCount: 200, maxMessagesScanned: 500, mediaMaxBytes: 1000, requestTimeoutMs: 5, qrPath: "/tmp/qr.png", mode: "local_auth", protocolVersion: 1 },
+  const instance = service({
+    config: { requestTimeoutMs: 5 },
     client,
     store,
     platform: { async ingest() { throw new Error("should not ingest"); } },
-    log: { info() {}, error() {}, warn() {} },
-    sc,
-    runtime: { status: "ready", authenticated: true, error: null },
   });
   const item = store.create({ requestId: "late", workerId: "default", requestedCount: 10, remoteJid: "923360249999@s.whatsapp.net" });
-  await service.processRequest({ remoteJids: ["923360249999@s.whatsapp.net"] }, item);
+  await instance.processRequest({ remoteJids: ["923360249999@s.whatsapp.net"] }, item);
   assert.equal(store.status("late").status, "timed_out");
 });
 
@@ -118,17 +159,9 @@ test("historical PDF metadata and bytes are ingested for only the selected direc
       return { uploaded: true };
     },
   };
-  const service = createBridgeService({
-    config: { workerId: "default", maxHistoryCount: 200, maxMessagesScanned: 500, mediaMaxBytes: 1000, requestTimeoutMs: 1000, qrPath: "/tmp/qr.png", mode: "local_auth", protocolVersion: 1 },
-    client,
-    store,
-    platform,
-    log: { info() {}, error() {}, warn() {} },
-    sc,
-    runtime: { status: "ready", authenticated: true, error: null },
-  });
+  const instance = service({ client, store, platform });
   const item = store.create({ requestId: "pdf", workerId: "default", requestedCount: 10, remoteJid: "923360249999@s.whatsapp.net" });
-  await service.processRequest({
+  await instance.processRequest({
     remoteJids: ["923360249999@s.whatsapp.net"],
     platformRemoteJid: "923360249999@s.whatsapp.net",
   }, item);
@@ -137,6 +170,7 @@ test("historical PDF metadata and bytes are ingested for only the selected direc
   assert.equal(store.status("pdf").messagesReceived, 1);
   assert.equal(store.status("pdf").attachmentsDiscovered, 1);
   assert.equal(store.status("pdf").attachmentsArchived, 1);
+  assert.equal(store.status("pdf").diagnostics.resolution.matchedBy, "getChatById");
   assert.equal(ingested.length, 1);
   assert.equal(ingested[0].senderJid, "923360249999@s.whatsapp.net");
   assert.equal(ingested[0].chatScope, "direct");
@@ -145,4 +179,20 @@ test("historical PDF metadata and bytes are ingested for only the selected direc
   assert.equal(uploaded[0].id, "attachment-1");
   assert.equal(uploaded[0].mimetype, "application/pdf");
   assert.deepEqual(uploaded[0].bytes, pdf);
+});
+
+test("opaque thrown strings are persisted with a useful phase", async () => {
+  const store = stateStore();
+  const client = {
+    async getNumberId() { throw "r"; },
+    async getContactLidAndPhone() { throw "mapping unavailable"; },
+    async getChatById() { throw "chat lookup unavailable"; },
+    async getChats() { throw "r"; },
+  };
+  const instance = service({ client, store });
+  const item = store.create({ requestId: "opaque", workerId: "default", requestedCount: 10, remoteJid: "923360249999@s.whatsapp.net" });
+  await instance.processRequest({ remoteJids: ["923360249999@s.whatsapp.net"] }, item);
+  assert.equal(store.status("opaque").status, "failed");
+  assert.match(store.status("opaque").error, /history_request:.*get_chats: r/s);
+  assert.notEqual(store.status("opaque").error, "r");
 });

@@ -35,7 +35,7 @@ function defaultBrowserExecutable() {
   return candidates.find((candidate) => fs.existsSync(candidate)) || "";
 }
 
-const mode = String(process.env.WWEBJS_MODE || "local_auth").trim().toLowerCase();
+const mode = String(process.env.WWEBJS_MODE || "browser_url").trim().toLowerCase();
 if (!["local_auth", "browser_url"].includes(mode)) {
   throw new Error("WWEBJS_MODE must be local_auth or browser_url");
 }
@@ -44,11 +44,12 @@ const workerId = String(process.env.WWEBJS_WORKER_ID || process.env.WA_WORKER_ID
 if (!workerId) throw new Error("WWEBJS_WORKER_ID cannot be empty");
 
 export const config = Object.freeze({
-  protocolVersion: 1,
+  protocolVersion: 2,
   workerId,
   natsUrl: process.env.NATS_URL || "nats://127.0.0.1:4222",
   historySubject: process.env.WWEBJS_HISTORY_SUBJECT || "whatsapp.web.inbound.history",
   mode,
+  allowLocalAuthHistory: parseBoolean("WWEBJS_ALLOW_LOCAL_AUTH_HISTORY", false),
   browserUrl: String(process.env.WWEBJS_BROWSER_URL || "http://127.0.0.1:9222").trim(),
   browserExecutable: String(process.env.WWEBJS_BROWSER_EXECUTABLE || defaultBrowserExecutable()).trim(),
   headless: parseBoolean("WWEBJS_HEADLESS", false),
@@ -60,6 +61,10 @@ export const config = Object.freeze({
   maxHistoryCount: parseInteger("WWEBJS_MAX_HISTORY_COUNT", 200, { min: 1, max: 1000 }),
   maxMessagesScanned: parseInteger("WWEBJS_MAX_MESSAGES_SCANNED", 5000, { min: 100, max: 50000 }),
   requestTimeoutMs: parseInteger("WWEBJS_REQUEST_TIMEOUT_MS", 600000, { min: 30000, max: 3600000 }),
+  fetchAttemptTimeoutMs: parseInteger("WWEBJS_FETCH_ATTEMPT_TIMEOUT_MS", 120000, { min: 5000, max: 600000 }),
+  syncHistory: parseBoolean("WWEBJS_SYNC_HISTORY", true),
+  syncHistoryTimeoutMs: parseInteger("WWEBJS_SYNC_HISTORY_TIMEOUT_MS", 30000, { min: 1000, max: 180000 }),
+  syncSettleMs: parseInteger("WWEBJS_SYNC_SETTLE_MS", 3500, { min: 0, max: 30000 }),
   mediaMaxBytes: parseInteger("WWEBJS_MEDIA_MAX_BYTES", 75 * 1024 * 1024, { min: 1024, max: 1024 * 1024 * 1024 }),
   platformUrl: String(process.env.WWEBJS_PLATFORM_URL || process.env.WA_INBOUND_PLATFORM_URL || "http://127.0.0.1:8020").replace(/\/$/, ""),
   platformToken: String(process.env.WWEBJS_PLATFORM_TOKEN || process.env.WA_INBOUND_PLATFORM_TOKEN || "").trim(),

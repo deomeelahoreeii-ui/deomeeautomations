@@ -1,0 +1,127 @@
+{
+  "patch_id": "whatsapp-web-history-visible-profile-fix-v2.1",
+  "created_at": "2026-07-16",
+  "target_repository": "deomeelahoreeii-ui/deomeeautomations",
+  "baseline_description": "Current main branch after whatsapp-web-history-bridge-v1, before this visible-profile protocol-v2 correction.",
+  "files": [
+    {
+      "path": "automation-platform/apps/web/src/pages/whatsapp/inbound-files.astro",
+      "state": "modified",
+      "pre_sha256": "29bceb530912b1794f98ad73c22da249026d153e11a2de2e21c72150e75675f0",
+      "post_sha256": "5d9021978065d2dd96bc8b6c5dfb6b2468d85be8ceb38d6a8d9fa0d3a15b1529",
+      "reason": "Require a history-capable visible-browser session, expose bridge state, and render full diagnostic errors."
+    },
+    {
+      "path": "automation-platform/scripts/dev.sh",
+      "state": "modified",
+      "pre_sha256": "ce74e3153bc838bad6393d10fff4ef9b0fb46453bb2f9effdf00348a56f040e0",
+      "post_sha256": "1cf4e1ed934cae524cc235a0f4700a6bd5faef85226c94338d35f47c1cb17e3a",
+      "reason": "Require bridge protocol v2, reject LocalAuth for normal history, preflight the Brave debugging endpoint, and restart incompatible bridge processes."
+    },
+    {
+      "path": "automation-platform/tests/test_whatsapp_web_history_bridge.py",
+      "state": "modified",
+      "pre_sha256": "ff4f88ddc1ba1111c34852122aa67bfde44946d00c5bdda1d449e799ed91d35a",
+      "post_sha256": "e38b261e5adb037c4fa82436c06554434c7139894ac0ede0d928bc5141dd9935",
+      "reason": "Update platform contract tests for protocol v2, browser_url mode, and preserved Baileys sources."
+    },
+    {
+      "path": "automation-platform/tests/test_whatsapp_inbound_history_ui_contract.py",
+      "state": "modified",
+      "pre_sha256": "0a9aef59761125150ff388bd50edf57fcb0e47ce812d3ada0a8f1778ba6569c1",
+      "post_sha256": "a10a3ede8d9fb723ecd9ab868d43e5375aae19dc6a6f4a1fb7862bb331898d21",
+      "reason": "Replace stale Baileys-only UI expectations with the visible-browser bridge timeout, terminal-state wording, and readiness contract."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/.env.example",
+      "state": "modified",
+      "pre_sha256": "09d32aa7b1e86fc0af5250dbd94b3e81916d4a5ea9cb66c12f2f21d464e7ff3d",
+      "post_sha256": "287565d6fd3afbb809a92cc4c29b26c9eac97df0ee8b12450860b0ba89e81e30",
+      "reason": "Make browser_url the safe default and document loader timeout/synchronization controls."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/README.md",
+      "state": "modified",
+      "pre_sha256": "8f9c12c941b6ed037c1f4f91a02343e1e1fc9a532b909b529651707aacc005fb",
+      "post_sha256": "682a5fe5e2a57578c8f9ebde9511b3998155d8f63701952a21258a6b6ded6f1a",
+      "reason": "Document visible-profile snapshot startup, fallback loader behavior, and preserved implementations."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/bridge.js",
+      "state": "modified",
+      "pre_sha256": "19ad58b78940a85f012b153a24cb357b85f184b99c114bab7451ac7ae7fa1ce3",
+      "post_sha256": "43e72cf6251fb8b49aeaacce851cf8a598fb384593807379183f12768dab08ea",
+      "reason": "Preflight the debugging browser, report endpoint diagnostics, and run protocol v2 against the attached profile."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/lib/bridge-service.js",
+      "state": "modified",
+      "pre_sha256": "e37082caf500eee1f31855750d70b8b898a80da7ec69a404a62d01c1de0f792a",
+      "post_sha256": "07168c1e89aebf97625b5f12c7b61becce459959b6f0895774f8307e1030f5a7",
+      "reason": "Block unintended LocalAuth retrieval, retain phase diagnostics, expose historyReady, and pass resilient loader settings."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/lib/config.js",
+      "state": "modified",
+      "pre_sha256": "14b1757fd97521563b8d21455e23a3a0a56150d9314a738c8089f56e445f6aaa",
+      "post_sha256": "82de135c678883c8fb6b699566c444ad10e1d40115123fb50f4bdd387f9e25ae",
+      "reason": "Add protocol v2, visible-browser defaults, LocalAuth guard, and bounded history-loader configuration."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/lib/errors.js",
+      "state": "new",
+      "pre_sha256": null,
+      "post_sha256": "bcd9277ba3bd13f422486a048b8c760ca27e0b97f1a1ea1b986b548ff8bba0a3",
+      "reason": "Add robust formatting for opaque browser exceptions, thrown strings, stack excerpts, and processing phases."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/lib/history-loader.js",
+      "state": "modified",
+      "pre_sha256": "24357a82fa2f9f72d4dab64507bf51f3f311878ce495e51861fabce2c8886fd4",
+      "post_sha256": "c9db17d66e92fce0f33aa25a7c3657a140d4fc4593b4c21d727bad104f30e112",
+      "reason": "Use syncHistory, official fetchMessages, browser-page compatibility pagination, stable-ID hydration, and detailed diagnostics."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/lib/jid.js",
+      "state": "modified",
+      "pre_sha256": "ac79e20213440f5adfd7341fe480cbdc47ee2c688208127e4b8cbf431e16ac23",
+      "post_sha256": "db966b72a40f42404b7160650cbe35ac330afb3c0072342d04cf5ca8128107b2",
+      "reason": "Resolve phone/LID mappings with the official API before fallback chat scans and retain candidate diagnostics."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/package.json",
+      "state": "modified",
+      "pre_sha256": "b298cffd01017ef9d27033d031d739801c23d6aba0413cbd1b0e2a31fac64fb7",
+      "post_sha256": "ce5c927a194cb5da4b7d615dac5a764e383aaaa5b2a5f6d8b3618df826983694",
+      "reason": "Mark bridge source version 1.1.0 while keeping whatsapp-web.js pinned exactly to 1.34.7."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/scripts/launch-brave-debug.sh",
+      "state": "modified",
+      "pre_sha256": "acb2960aca3ccf3b85fcec9b323abcb4e40669aabf10690591153750b311c823",
+      "post_sha256": "275b65dcc7b7ac3e5e559d50aa9233827674b9efcba2cca2be66ee48092b1fcb",
+      "reason": "Create a private snapshot of the visible Brave profile and launch it with loopback-only remote debugging using a non-default data directory."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/test/bridge-service.test.mjs",
+      "state": "modified",
+      "pre_sha256": "c77237030840d36a033949a67f7b0789ab5ea75a8b3491a26e64df6780ad333e",
+      "post_sha256": "4ce814e556ae7dcf160c3d4b29338ea265473b6c1517f065d24cb1e901a709ee",
+      "reason": "Test LocalAuth blocking, protocol-v2 health, timeout safety, ingestion, and opaque error persistence."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/test/history-loader.test.mjs",
+      "state": "modified",
+      "pre_sha256": "c4632c3b1036dae0f251b8d31a97963a9ac16f89f28eade70026cc530789df98",
+      "post_sha256": "9c13b66ab5d361ebb9b67da4250a1302bceb3a01177f3071b4ee98b5008792e8",
+      "reason": "Test pagination, same-second anchors, syncHistory behavior, compatibility fallback, and diagnostics."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/test/jid.test.mjs",
+      "state": "new",
+      "pre_sha256": null,
+      "post_sha256": "8039f806cf10c1cc8dfa58268078b8cc302d07699f28f60807a9ca8b3fa5b37a",
+      "reason": "Test phone/LID candidate conversion and official mapping-first direct-chat resolution."
+    }
+  ]
+}

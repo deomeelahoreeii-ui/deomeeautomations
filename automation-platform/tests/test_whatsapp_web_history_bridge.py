@@ -31,11 +31,13 @@ class FakeBridge:
             return FakeMessage(
                 {
                     "provider": "wwebjs",
-                    "protocolVersion": 1,
+                    "protocolVersion": 2,
                     "workerId": "default",
                     "status": "ready",
                     "ready": True,
-                    "mode": "local_auth",
+                    "mode": "browser_url",
+                    "historyReady": True,
+                    "browserUrl": "http://127.0.0.1:9222",
                 }
             )
         return FakeMessage(
@@ -113,6 +115,8 @@ def test_bridge_health_and_history_route_use_wwebjs_subject(tmp_path, monkeypatc
             )
             assert health.status_code == 200, health.text
             assert health.json()["ready"] is True
+            assert health.json()["historyReady"] is True
+            assert health.json()["mode"] == "browser_url"
 
             request = client.post(
                 "/api/v1/whatsapp/inbound/history/request",
@@ -137,5 +141,9 @@ def test_bridge_source_files_are_pinned_and_baileys_is_preserved() -> None:
         (root / "whatsapp-web-history-bridge" / "package.json").read_text()
     )
     assert package["dependencies"]["whatsapp-web.js"] == "1.34.7"
+    assert package["version"] == "1.1.0"
+    config_source = (root / "whatsapp-web-history-bridge" / "lib" / "config.js").read_text()
+    assert "protocolVersion: 2" in config_source
+    assert 'process.env.WWEBJS_MODE || "browser_url"' in config_source
     assert (root / "whatsappbot" / "lib" / "inbound-history.js").is_file()
     assert (root / "whatsappbot" / "ARCHIVED_BAILEYS_HISTORY.md").is_file()

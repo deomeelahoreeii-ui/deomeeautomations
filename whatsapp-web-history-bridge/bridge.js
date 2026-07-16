@@ -9,6 +9,7 @@ import { config } from "./lib/config.js";
 import { HistoryStateStore } from "./lib/state-store.js";
 import { PlatformClient } from "./lib/platform-client.js";
 import { createBridgeService } from "./lib/bridge-service.js";
+import { formatError } from "./lib/errors.js";
 
 const log = pino({ level: config.logLevel });
 const sc = StringCodec();
@@ -17,6 +18,7 @@ const runtime = {
   authenticated: false,
   error: null,
   webVersion: null,
+  browserEndpoint: null,
 };
 
 function acquireLock() {
@@ -139,9 +141,41 @@ process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 process.once("exit", releaseLock);
 
-log.info({ workerId: config.workerId, subject: config.subject(), mode: config.mode, wwebjs: "1.34.7" }, "Starting WhatsApp Web history bridge");
-client.initialize().catch((error) => {
-  runtime.status = "failed";
-  runtime.error = error?.message || String(error);
-  log.error({ error: runtime.error }, "WhatsApp Web bridge initialization failed");
-});
+async function verifyBrowserEndpoint() {
+  if (config.mode !== "browser_url") return;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  timer.unref?.();
+  try {
+    const response = await fetch(`${config.browserUrl.replace(/\/$/, "")}/json/version`, {
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    const payload = await response.json();
+    runtime.browserEndpoint = {
+      browser: payload.Browser || null,
+      protocolVersion: payload["Protocol-Version"] || null,
+      webSocketDebuggerUrl: payload.webSocketDebuggerUrl || null,
+    };
+    if (!runtime.browserEndpoint.webSocketDebuggerUrl) {
+      throw new Error("The debugging endpoint did not return webSocketDebuggerUrl");
+    }
+  } catch (error) {
+    throw new Error(
+      `Cannot attach to the visible Brave profile at ${config.browserUrl}. Close all Brave windows, run `
+      + `whatsapp-web-history-bridge/scripts/launch-brave-debug.sh, verify the required WhatsApp chat/files are visible there, then restart dev.sh. `
+      + formatError(error, "browser_debug_endpoint"),
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+log.info({ workerId: config.workerId, subject: config.subject(), mode: config.mode, wwebjs: "1.34.7", protocolVersion: config.protocolVersion }, "Starting WhatsApp Web history bridge");
+verifyBrowserEndpoint()
+  .then(() => client.initialize())
+  .catch((error) => {
+    runtime.status = "failed";
+    runtime.error = formatError(error, "bridge_initialize");
+    log.error({ error: runtime.error, stack: error?.stack || null }, "WhatsApp Web bridge initialization failed");
+  });

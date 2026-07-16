@@ -1,3 +1,4 @@
+import { formatError } from "./errors.js";
 import { resolveDirectChat } from "./jid.js";
 import {
   fetchOlderMessages,
@@ -10,8 +11,8 @@ import {
 function parseRequest(sc, message) {
   try {
     return JSON.parse(sc.decode(message.data) || "{}");
-  } catch {
-    throw new Error("WhatsApp Web bridge request is not valid JSON");
+  } catch (error) {
+    throw new Error(formatError(error, "request_json"));
   }
 }
 
@@ -20,6 +21,17 @@ function responseItem(item) {
     accepted: item.status !== "failed",
     ...item,
   };
+}
+
+function localAuthHistoryBlocked(config) {
+  return config.mode === "local_auth" && config.allowLocalAuthHistory !== true;
+}
+
+function localAuthInstruction(config) {
+  return `Historical retrieval is blocked in WWEBJS_MODE=local_auth because that is a separate linked-device browser session. `
+    + `Use the Brave profile where the files are visibly available: close Brave, run whatsapp-web-history-bridge/scripts/launch-brave-debug.sh, `
+    + `set WWEBJS_MODE=browser_url and WWEBJS_BROWSER_URL=${config.browserUrl || "http://127.0.0.1:9222"}, then restart dev.sh. `
+    + `The LocalAuth data and Baileys implementation remain preserved.`;
 }
 
 export function createBridgeService({ config, client, store, platform, log, sc, runtime }) {
@@ -41,19 +53,28 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
   async function processRequest(request, item) {
     const timeout = setTimeout(() => {
       try {
-        store.update(item.requestId, { status: "timed_out", error: "WhatsApp Web history request exceeded its time limit" });
+        store.update(item.requestId, { status: "timed_out", error: "request_timeout: WhatsApp Web history request exceeded its time limit" });
       } catch {}
     }, config.requestTimeoutMs);
     timeout.unref?.();
 
     try {
-      store.update(item.requestId, { status: "syncing" });
-      const chat = await resolveDirectChat(client, request.remoteJids || []);
-      const messages = await fetchOlderMessages(chat, {
+      store.update(item.requestId, { status: "syncing", error: null });
+      const resolved = await resolveDirectChat(client, request.remoteJids || []);
+      store.update(item.requestId, { diagnostics: { resolution: resolved.diagnostics } });
+      const loaded = await fetchOlderMessages(client, resolved.chat, {
         beforeTimestamp: request.beforeTimestamp || null,
         anchorMessageId: request.anchorMessageId || null,
         count: item.requestedCount,
         maxScan: config.maxMessagesScanned,
+        attemptTimeoutMs: config.fetchAttemptTimeoutMs || 120000,
+        syncHistory: config.syncHistory !== false,
+        syncHistoryTimeoutMs: config.syncHistoryTimeoutMs || 30000,
+        syncSettleMs: config.syncSettleMs ?? 3500,
+      });
+      const messages = loaded.messages;
+      store.update(item.requestId, {
+        diagnostics: { resolution: resolved.diagnostics, loading: loaded.diagnostics },
       });
       let messagesReceived = 0;
       let attachmentsDiscovered = 0;
@@ -66,7 +87,7 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
         try {
           prepared = await prepareMedia(message);
         } catch (error) {
-          mediaError = error.message;
+          mediaError = formatError(error, "media_download");
           const metadata = rawMediaMetadata(message);
           if (isSupportedMedia(metadata)) prepared = { metadata, buffer: null };
         }
@@ -85,7 +106,7 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
             if (store.status(item.requestId).status === "timed_out") break;
             attachmentsArchived += 1;
           } catch (error) {
-            mediaError = error.message;
+            mediaError = formatError(error, "media_archive");
             log.warn({ requestId: item.requestId, messageId: event.messageId, error: mediaError }, "Historical media metadata was ingested but immediate archive failed");
           }
         }
@@ -106,12 +127,19 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
           error: null,
         });
       }
-      log.info({ requestId: item.requestId, messages: messages.length, attachmentsDiscovered, attachmentsArchived }, "WhatsApp Web history request completed");
+      log.info({
+        requestId: item.requestId,
+        messages: messages.length,
+        attachmentsDiscovered,
+        attachmentsArchived,
+        diagnostics: loaded.diagnostics,
+      }, "WhatsApp Web history request completed");
     } catch (error) {
+      const detail = formatError(error, error?.phase || "history_request");
       if (store.status(item.requestId).status !== "timed_out") {
-        store.update(item.requestId, { status: "failed", error: error.message });
+        store.update(item.requestId, { status: "failed", error: detail });
       }
-      log.error({ requestId: item.requestId, error: error.message }, "WhatsApp Web history request failed");
+      log.error({ requestId: item.requestId, error: detail, stack: error?.stack || null }, "WhatsApp Web history request failed");
     } finally {
       clearTimeout(timeout);
     }
@@ -121,6 +149,7 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
     if (request.workerId && request.workerId !== config.workerId) {
       throw new Error(`Request targets worker ${request.workerId}, not ${config.workerId}`);
     }
+    if (localAuthHistoryBlocked(config)) throw new Error(localAuthInstruction(config));
     if (runtime.status !== "ready") {
       const detail = runtime.status === "qr"
         ? `WhatsApp Web bridge needs pairing; scan ${config.qrPath}`
@@ -158,18 +187,23 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
   }
 
   function health() {
+    const blocked = localAuthHistoryBlocked(config);
     return {
       accepted: true,
       provider: "wwebjs",
       protocolVersion: config.protocolVersion,
       workerId: config.workerId,
       mode: config.mode,
+      browserUrl: config.mode === "browser_url" ? config.browserUrl : null,
       status: runtime.status,
       ready: runtime.status === "ready",
+      historyReady: runtime.status === "ready" && !blocked,
       authenticated: Boolean(runtime.authenticated),
-      error: runtime.error || null,
+      error: runtime.error || (blocked ? localAuthInstruction(config) : null),
+      warning: blocked ? localAuthInstruction(config) : null,
       qrPath: runtime.status === "qr" ? config.qrPath : null,
       webVersion: runtime.webVersion || null,
+      browserEndpoint: runtime.browserEndpoint || null,
       activeRequest: store.active()?.requestId || null,
     };
   }
@@ -193,7 +227,7 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
         requestId: request.requestId || null,
         status: "failed",
         active: false,
-        error: error.message,
+        error: formatError(error, "bridge_response"),
       })));
     }
   }
