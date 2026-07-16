@@ -1,36 +1,40 @@
-"""Stable public exports for WhatsApp persistence models.
+"""Persistence models grouped by responsibility.
 
-The model implementations are grouped under :mod:`whatsapp_gateway.persistence`
-to keep each file focused. Existing imports from this module remain supported.
+Import from :mod:`whatsapp_gateway.models` for the stable public API.
 """
 
-from whatsapp_gateway.persistence import (
-    WhatsAppAccount,
-    WhatsAppDirectoryGroup,
-    WhatsAppDirectoryContact,
-    WhatsAppIdentityAlias,
-    WhatsAppGroupMember,
-    WhatsAppGroup,
+from whatsapp_gateway.persistence.account import WhatsAppAccount
+from whatsapp_gateway.persistence.configuration import (
     WhatsAppApplication,
-    WhatsAppReportType,
-    WhatsAppRecipientScope,
     WhatsAppAudience,
     WhatsAppAudienceMember,
-    WhatsAppTemplate,
     WhatsAppDispatchProfile,
+    WhatsAppRecipientScope,
+    WhatsAppReportType,
+    WhatsAppSettings,
+    WhatsAppTemplate,
+)
+from whatsapp_gateway.persistence.deliveries import WhatsAppActivity, WhatsAppDelivery
+from whatsapp_gateway.persistence.directory import (
     WhatsAppContactLink,
+    WhatsAppDirectoryContact,
+    WhatsAppDirectoryGroup,
+    WhatsAppGroup,
+    WhatsAppGroupMember,
+    WhatsAppIdentityAlias,
+)
+from whatsapp_gateway.persistence.inbound import (
+    WhatsAppInboundAttachment,
+    WhatsAppInboundExportItem,
+    WhatsAppInboundExportRun,
+    WhatsAppInboundHistoryRequest,
+    WhatsAppInboundMessage,
+)
+from whatsapp_gateway.persistence.previews import (
+    WhatsAppDispatchApproval,
     WhatsAppDispatchPreview,
     WhatsAppDispatchPreviewArtifact,
     WhatsAppDispatchPreviewDelivery,
-    WhatsAppDispatchApproval,
-    WhatsAppDelivery,
-    WhatsAppActivity,
-    WhatsAppSettings,
-    WhatsAppInboundMessage,
-    WhatsAppInboundAttachment,
-    WhatsAppInboundHistoryRequest,
-    WhatsAppInboundExportRun,
-    WhatsAppInboundExportItem,
 )
 
 __all__ = [

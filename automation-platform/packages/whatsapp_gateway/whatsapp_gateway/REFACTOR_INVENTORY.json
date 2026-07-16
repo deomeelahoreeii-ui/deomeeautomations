@@ -1,0 +1,1539 @@
+{
+  "antidengue_renderer.py": {
+    "lines": 840,
+    "symbols": [
+      {
+        "end_line": 34,
+        "kind": "class",
+        "name": "DormantSourceRow",
+        "start_line": 32
+      },
+      {
+        "end_line": 42,
+        "kind": "class",
+        "name": "ScopedDormantSchool",
+        "start_line": 38
+      },
+      {
+        "end_line": 53,
+        "kind": "class",
+        "name": "RenderedTehsilDormantReport",
+        "start_line": 46
+      },
+      {
+        "end_line": 65,
+        "kind": "class",
+        "name": "RenderedWingDormantReport",
+        "start_line": 57
+      },
+      {
+        "end_line": 69,
+        "kind": "function",
+        "name": "_issue",
+        "start_line": 68
+      },
+      {
+        "end_line": 76,
+        "kind": "function",
+        "name": "_normalize_emis",
+        "start_line": 72
+      },
+      {
+        "end_line": 106,
+        "kind": "function",
+        "name": "_report_rows",
+        "start_line": 79
+      },
+      {
+        "end_line": 130,
+        "kind": "function",
+        "name": "_canonical_report_artifact",
+        "start_line": 109
+      },
+      {
+        "end_line": 134,
+        "kind": "function",
+        "name": "_school_count",
+        "start_line": 133
+      },
+      {
+        "end_line": 154,
+        "kind": "function",
+        "name": "normalize_presentation_policy",
+        "start_line": 137
+      },
+      {
+        "end_line": 159,
+        "kind": "function",
+        "name": "_has_attachment",
+        "start_line": 157
+      },
+      {
+        "end_line": 164,
+        "kind": "function",
+        "name": "_wing_label",
+        "start_line": 162
+      },
+      {
+        "end_line": 171,
+        "kind": "function",
+        "name": "_wing_display_name",
+        "start_line": 167
+      },
+      {
+        "end_line": 181,
+        "kind": "function",
+        "name": "_report_time",
+        "start_line": 174
+      },
+      {
+        "end_line": 259,
+        "kind": "function",
+        "name": "_build_message",
+        "start_line": 184
+      },
+      {
+        "end_line": 336,
+        "kind": "function",
+        "name": "_build_wing_message",
+        "start_line": 262
+      },
+      {
+        "end_line": 421,
+        "kind": "function",
+        "name": "_ensure_excel_attachment",
+        "start_line": 339
+      },
+      {
+        "end_line": 434,
+        "kind": "function",
+        "name": "_font",
+        "start_line": 424
+      },
+      {
+        "end_line": 450,
+        "kind": "function",
+        "name": "_wrap_text",
+        "start_line": 437
+      },
+      {
+        "end_line": 549,
+        "kind": "function",
+        "name": "_ensure_image_attachment",
+        "start_line": 453
+      },
+      {
+        "end_line": 700,
+        "kind": "function",
+        "name": "render_wing_dormant_report",
+        "start_line": 552
+      },
+      {
+        "end_line": 840,
+        "kind": "function",
+        "name": "render_tehsil_dormant_report",
+        "start_line": 703
+      }
+    ]
+  },
+  "api.py": {
+    "lines": 3114,
+    "symbols": [
+      {
+        "end_line": 75,
+        "kind": "function",
+        "name": "_delete_profile_records",
+        "start_line": 52
+      },
+      {
+        "end_line": 100,
+        "kind": "function",
+        "name": "_delete_audience_records",
+        "start_line": 78
+      },
+      {
+        "end_line": 133,
+        "kind": "function",
+        "name": "_delete_guided_setup_records",
+        "start_line": 103
+      },
+      {
+        "end_line": 200,
+        "kind": "class",
+        "name": "TestMessageInput",
+        "start_line": 197
+      },
+      {
+        "end_line": 211,
+        "kind": "class",
+        "name": "GroupInput",
+        "start_line": 203
+      },
+      {
+        "end_line": 224,
+        "kind": "class",
+        "name": "TemplateInput",
+        "start_line": 214
+      },
+      {
+        "end_line": 232,
+        "kind": "class",
+        "name": "SettingsInput",
+        "start_line": 227
+      },
+      {
+        "end_line": 242,
+        "kind": "class",
+        "name": "ReportTypeInput",
+        "start_line": 235
+      },
+      {
+        "end_line": 254,
+        "kind": "class",
+        "name": "RecipientScopeInput",
+        "start_line": 245
+      },
+      {
+        "end_line": 265,
+        "kind": "class",
+        "name": "AudienceInput",
+        "start_line": 257
+      },
+      {
+        "end_line": 274,
+        "kind": "class",
+        "name": "AudienceMemberInput",
+        "start_line": 268
+      },
+      {
+        "end_line": 298,
+        "kind": "class",
+        "name": "DispatchProfileInput",
+        "start_line": 277
+      },
+      {
+        "end_line": 324,
+        "kind": "class",
+        "name": "ReportingRouteSetupInput",
+        "start_line": 301
+      },
+      {
+        "end_line": 335,
+        "kind": "function",
+        "name": "gateway_datetime",
+        "start_line": 327
+      },
+      {
+        "end_line": 426,
+        "kind": "function",
+        "name": "ensure_defaults",
+        "start_line": 338
+      },
+      {
+        "end_line": 446,
+        "kind": "function",
+        "name": "activity",
+        "start_line": 429
+      },
+      {
+        "end_line": 480,
+        "kind": "async_function",
+        "name": "worker_health",
+        "start_line": 449
+      },
+      {
+        "end_line": 517,
+        "kind": "async_function",
+        "name": "gateway_request",
+        "start_line": 483
+      },
+      {
+        "end_line": 530,
+        "kind": "async_function",
+        "name": "refresh_health",
+        "start_line": 520
+      },
+      {
+        "end_line": 546,
+        "kind": "function",
+        "name": "account_dict",
+        "start_line": 533
+      },
+      {
+        "end_line": 556,
+        "kind": "function",
+        "name": "settings_dict",
+        "start_line": 549
+      },
+      {
+        "end_line": 587,
+        "kind": "async_function",
+        "name": "overview",
+        "start_line": 560
+      },
+      {
+        "end_line": 598,
+        "kind": "async_function",
+        "name": "connection",
+        "start_line": 591
+      },
+      {
+        "end_line": 606,
+        "kind": "function",
+        "name": "connection_qr",
+        "start_line": 602
+      },
+      {
+        "end_line": 630,
+        "kind": "function",
+        "name": "directory_group_dict",
+        "start_line": 609
+      },
+      {
+        "end_line": 715,
+        "kind": "function",
+        "name": "upsert_directory_contact",
+        "start_line": 633
+      },
+      {
+        "end_line": 788,
+        "kind": "async_function",
+        "name": "sync_directory",
+        "start_line": 719
+      },
+      {
+        "end_line": 831,
+        "kind": "function",
+        "name": "directory_summary",
+        "start_line": 792
+      },
+      {
+        "end_line": 879,
+        "kind": "function",
+        "name": "directory_groups",
+        "start_line": 835
+      },
+      {
+        "end_line": 892,
+        "kind": "function",
+        "name": "directory_group",
+        "start_line": 883
+      },
+      {
+        "end_line": 977,
+        "kind": "async_function",
+        "name": "sync_group_members",
+        "start_line": 896
+      },
+      {
+        "end_line": 1033,
+        "kind": "function",
+        "name": "directory_group_members",
+        "start_line": 981
+      },
+      {
+        "end_line": 1115,
+        "kind": "function",
+        "name": "directory_contacts",
+        "start_line": 1037
+      },
+      {
+        "end_line": 1155,
+        "kind": "async_function",
+        "name": "refresh_contact_token",
+        "start_line": 1119
+      },
+      {
+        "end_line": 1172,
+        "kind": "function",
+        "name": "report_type_dict",
+        "start_line": 1158
+      },
+      {
+        "end_line": 1194,
+        "kind": "function",
+        "name": "recipient_scope_dict",
+        "start_line": 1175
+      },
+      {
+        "end_line": 1350,
+        "kind": "function",
+        "name": "configuration_options",
+        "start_line": 1198
+      },
+      {
+        "end_line": 1393,
+        "kind": "function",
+        "name": "report_types",
+        "start_line": 1354
+      },
+      {
+        "end_line": 1434,
+        "kind": "function",
+        "name": "save_report_type",
+        "start_line": 1397
+      },
+      {
+        "end_line": 1463,
+        "kind": "function",
+        "name": "hard_delete_report_type",
+        "start_line": 1438
+      },
+      {
+        "end_line": 1501,
+        "kind": "function",
+        "name": "recipient_scopes",
+        "start_line": 1467
+      },
+      {
+        "end_line": 1555,
+        "kind": "function",
+        "name": "save_recipient_scope",
+        "start_line": 1505
+      },
+      {
+        "end_line": 1599,
+        "kind": "function",
+        "name": "hard_delete_recipient_scope",
+        "start_line": 1559
+      },
+      {
+        "end_line": 1641,
+        "kind": "function",
+        "name": "audience_dict",
+        "start_line": 1602
+      },
+      {
+        "end_line": 1680,
+        "kind": "function",
+        "name": "audiences",
+        "start_line": 1645
+      },
+      {
+        "end_line": 1690,
+        "kind": "function",
+        "name": "audience",
+        "start_line": 1684
+      },
+      {
+        "end_line": 1739,
+        "kind": "function",
+        "name": "save_audience",
+        "start_line": 1694
+      },
+      {
+        "end_line": 1756,
+        "kind": "function",
+        "name": "hard_delete_audience",
+        "start_line": 1743
+      },
+      {
+        "end_line": 1789,
+        "kind": "function",
+        "name": "_validate_group_route",
+        "start_line": 1759
+      },
+      {
+        "end_line": 1821,
+        "kind": "function",
+        "name": "_authorize_directory_group",
+        "start_line": 1792
+      },
+      {
+        "end_line": 1892,
+        "kind": "function",
+        "name": "audience_members",
+        "start_line": 1825
+      },
+      {
+        "end_line": 1958,
+        "kind": "function",
+        "name": "add_audience_member",
+        "start_line": 1896
+      },
+      {
+        "end_line": 2001,
+        "kind": "function",
+        "name": "update_audience_member",
+        "start_line": 1962
+      },
+      {
+        "end_line": 2017,
+        "kind": "function",
+        "name": "remove_audience_member",
+        "start_line": 2005
+      },
+      {
+        "end_line": 2059,
+        "kind": "function",
+        "name": "dispatch_profile_dict",
+        "start_line": 2020
+      },
+      {
+        "end_line": 2100,
+        "kind": "function",
+        "name": "dispatch_profiles",
+        "start_line": 2063
+      },
+      {
+        "end_line": 2211,
+        "kind": "function",
+        "name": "validate_dispatch_profile",
+        "start_line": 2103
+      },
+      {
+        "end_line": 2265,
+        "kind": "function",
+        "name": "save_dispatch_profile",
+        "start_line": 2215
+      },
+      {
+        "end_line": 2488,
+        "kind": "function",
+        "name": "setup_reporting_route",
+        "start_line": 2269
+      },
+      {
+        "end_line": 2506,
+        "kind": "function",
+        "name": "archive_dispatch_profile",
+        "start_line": 2492
+      },
+      {
+        "end_line": 2536,
+        "kind": "function",
+        "name": "hard_delete_dispatch_profile",
+        "start_line": 2510
+      },
+      {
+        "end_line": 2550,
+        "kind": "function",
+        "name": "normalize_target",
+        "start_line": 2539
+      },
+      {
+        "end_line": 2662,
+        "kind": "async_function",
+        "name": "send_test_message",
+        "start_line": 2554
+      },
+      {
+        "end_line": 2678,
+        "kind": "function",
+        "name": "delivery_dict",
+        "start_line": 2665
+      },
+      {
+        "end_line": 2705,
+        "kind": "function",
+        "name": "deliveries",
+        "start_line": 2682
+      },
+      {
+        "end_line": 2770,
+        "kind": "function",
+        "name": "recipients",
+        "start_line": 2709
+      },
+      {
+        "end_line": 2793,
+        "kind": "function",
+        "name": "group_dict",
+        "start_line": 2773
+      },
+      {
+        "end_line": 2807,
+        "kind": "function",
+        "name": "groups",
+        "start_line": 2797
+      },
+      {
+        "end_line": 2862,
+        "kind": "function",
+        "name": "save_group",
+        "start_line": 2811
+      },
+      {
+        "end_line": 2882,
+        "kind": "function",
+        "name": "archive_group",
+        "start_line": 2866
+      },
+      {
+        "end_line": 2895,
+        "kind": "function",
+        "name": "hard_delete_group",
+        "start_line": 2886
+      },
+      {
+        "end_line": 2919,
+        "kind": "function",
+        "name": "template_dict",
+        "start_line": 2898
+      },
+      {
+        "end_line": 2941,
+        "kind": "function",
+        "name": "templates",
+        "start_line": 2923
+      },
+      {
+        "end_line": 3019,
+        "kind": "function",
+        "name": "save_template",
+        "start_line": 2945
+      },
+      {
+        "end_line": 3051,
+        "kind": "function",
+        "name": "hard_delete_template",
+        "start_line": 3023
+      },
+      {
+        "end_line": 3057,
+        "kind": "function",
+        "name": "read_settings",
+        "start_line": 3055
+      },
+      {
+        "end_line": 3077,
+        "kind": "function",
+        "name": "update_settings",
+        "start_line": 3061
+      },
+      {
+        "end_line": 3114,
+        "kind": "function",
+        "name": "activity_log",
+        "start_line": 3081
+      }
+    ]
+  },
+  "identity_repair.py": {
+    "lines": 203,
+    "symbols": [
+      {
+        "end_line": 34,
+        "kind": "class",
+        "name": "IdentityRepairRow",
+        "start_line": 23
+      },
+      {
+        "end_line": 38,
+        "kind": "function",
+        "name": "_clean_jids",
+        "start_line": 37
+      },
+      {
+        "end_line": 59,
+        "kind": "function",
+        "name": "build_contact_identity_index",
+        "start_line": 41
+      },
+      {
+        "end_line": 68,
+        "kind": "function",
+        "name": "message_identity_jids",
+        "start_line": 62
+      },
+      {
+        "end_line": 82,
+        "kind": "function",
+        "name": "resolve_message_contact_id",
+        "start_line": 71
+      },
+      {
+        "end_line": 203,
+        "kind": "function",
+        "name": "repair_inbound_message_identities",
+        "start_line": 85
+      }
+    ]
+  },
+  "inbound_api.py": {
+    "lines": 873,
+    "symbols": [
+      {
+        "end_line": 55,
+        "kind": "class",
+        "name": "AttachmentEvent",
+        "start_line": 48
+      },
+      {
+        "end_line": 73,
+        "kind": "class",
+        "name": "InboundMessageEvent",
+        "start_line": 58
+      },
+      {
+        "end_line": 81,
+        "kind": "class",
+        "name": "InboundFileFilter",
+        "start_line": 76
+      },
+      {
+        "end_line": 85,
+        "kind": "class",
+        "name": "CreateInboundExportRequest",
+        "start_line": 84
+      },
+      {
+        "end_line": 90,
+        "kind": "class",
+        "name": "RequestInboundHistory",
+        "start_line": 88
+      },
+      {
+        "end_line": 109,
+        "kind": "function",
+        "name": "_verify_worker_token",
+        "start_line": 93
+      },
+      {
+        "end_line": 121,
+        "kind": "function",
+        "name": "_resolve_account",
+        "start_line": 112
+      },
+      {
+        "end_line": 142,
+        "kind": "function",
+        "name": "_resolve_contact_id",
+        "start_line": 124
+      },
+      {
+        "end_line": 188,
+        "kind": "function",
+        "name": "_insert_idempotently",
+        "start_line": 145
+      },
+      {
+        "end_line": 233,
+        "kind": "function",
+        "name": "_upsert_inbound_message",
+        "start_line": 191
+      },
+      {
+        "end_line": 266,
+        "kind": "function",
+        "name": "_history_contact_counts",
+        "start_line": 242
+      },
+      {
+        "end_line": 272,
+        "kind": "function",
+        "name": "_utc_naive",
+        "start_line": 269
+      },
+      {
+        "end_line": 300,
+        "kind": "function",
+        "name": "_serialize_history_request",
+        "start_line": 275
+      },
+      {
+        "end_line": 337,
+        "kind": "function",
+        "name": "_reconcile_history_requests",
+        "start_line": 303
+      },
+      {
+        "end_line": 377,
+        "kind": "function",
+        "name": "_record_history_progress",
+        "start_line": 340
+      },
+      {
+        "end_line": 415,
+        "kind": "function",
+        "name": "_upsert_inbound_attachment",
+        "start_line": 380
+      },
+      {
+        "end_line": 480,
+        "kind": "function",
+        "name": "ingest_event",
+        "start_line": 419
+      },
+      {
+        "end_line": 578,
+        "kind": "async_function",
+        "name": "upload_attachment_content",
+        "start_line": 487
+      },
+      {
+        "end_line": 690,
+        "kind": "async_function",
+        "name": "request_inbound_history",
+        "start_line": 582
+      },
+      {
+        "end_line": 706,
+        "kind": "function",
+        "name": "list_inbound_history_requests",
+        "start_line": 694
+      },
+      {
+        "end_line": 719,
+        "kind": "function",
+        "name": "get_inbound_history_request",
+        "start_line": 710
+      },
+      {
+        "end_line": 737,
+        "kind": "function",
+        "name": "preview_inbound_export",
+        "start_line": 723
+      },
+      {
+        "end_line": 789,
+        "kind": "function",
+        "name": "create_inbound_export",
+        "start_line": 741
+      },
+      {
+        "end_line": 817,
+        "kind": "function",
+        "name": "list_inbound_exports",
+        "start_line": 793
+      },
+      {
+        "end_line": 836,
+        "kind": "function",
+        "name": "read_inbound_export",
+        "start_line": 821
+      },
+      {
+        "end_line": 873,
+        "kind": "function",
+        "name": "inbound_status",
+        "start_line": 840
+      }
+    ]
+  },
+  "inbound_media.py": {
+    "lines": 164,
+    "symbols": [
+      {
+        "end_line": 50,
+        "kind": "function",
+        "name": "normalize_mime",
+        "start_line": 49
+      },
+      {
+        "end_line": 60,
+        "kind": "function",
+        "name": "safe_filename",
+        "start_line": 53
+      },
+      {
+        "end_line": 65,
+        "kind": "function",
+        "name": "safe_slug",
+        "start_line": 63
+      },
+      {
+        "end_line": 82,
+        "kind": "function",
+        "name": "classify_attachment_metadata",
+        "start_line": 68
+      },
+      {
+        "end_line": 99,
+        "kind": "function",
+        "name": "_looks_like_csv",
+        "start_line": 85
+      },
+      {
+        "end_line": 164,
+        "kind": "function",
+        "name": "detect_file_type",
+        "start_line": 102
+      }
+    ]
+  },
+  "inbound_service.py": {
+    "lines": 522,
+    "symbols": [
+      {
+        "end_line": 38,
+        "kind": "function",
+        "name": "normalize_utc_naive",
+        "start_line": 33
+      },
+      {
+        "end_line": 48,
+        "kind": "function",
+        "name": "normalize_media_types",
+        "start_line": 41
+      },
+      {
+        "end_line": 55,
+        "kind": "function",
+        "name": "require_contact",
+        "start_line": 51
+      },
+      {
+        "end_line": 76,
+        "kind": "function",
+        "name": "contact_identity_jids",
+        "start_line": 60
+      },
+      {
+        "end_line": 110,
+        "kind": "function",
+        "name": "contact_message_filter",
+        "start_line": 79
+      },
+      {
+        "end_line": 122,
+        "kind": "function",
+        "name": "attachment_matches_category",
+        "start_line": 113
+      },
+      {
+        "end_line": 173,
+        "kind": "function",
+        "name": "find_matching_attachments",
+        "start_line": 125
+      },
+      {
+        "end_line": 189,
+        "kind": "function",
+        "name": "contact_coverage",
+        "start_line": 176
+      },
+      {
+        "end_line": 258,
+        "kind": "function",
+        "name": "build_preview",
+        "start_line": 192
+      },
+      {
+        "end_line": 309,
+        "kind": "function",
+        "name": "create_export_run",
+        "start_line": 261
+      },
+      {
+        "end_line": 347,
+        "kind": "function",
+        "name": "serialize_run",
+        "start_line": 312
+      },
+      {
+        "end_line": 365,
+        "kind": "function",
+        "name": "_export_name",
+        "start_line": 350
+      },
+      {
+        "end_line": 522,
+        "kind": "function",
+        "name": "package_export",
+        "start_line": 368
+      }
+    ]
+  },
+  "inbound_tasks.py": {
+    "lines": 411,
+    "symbols": [
+      {
+        "end_line": 38,
+        "kind": "class",
+        "name": "_AccountSnapshot",
+        "start_line": 36
+      },
+      {
+        "end_line": 45,
+        "kind": "class",
+        "name": "_AttachmentSnapshot",
+        "start_line": 42
+      },
+      {
+        "end_line": 51,
+        "kind": "class",
+        "name": "_MessageSnapshot",
+        "start_line": 49
+      },
+      {
+        "end_line": 58,
+        "kind": "function",
+        "name": "_snapshot_account",
+        "start_line": 54
+      },
+      {
+        "end_line": 68,
+        "kind": "function",
+        "name": "_snapshot_attachment",
+        "start_line": 61
+      },
+      {
+        "end_line": 75,
+        "kind": "function",
+        "name": "_snapshot_message",
+        "start_line": 71
+      },
+      {
+        "end_line": 97,
+        "kind": "async_function",
+        "name": "_open_media_client",
+        "start_line": 78
+      },
+      {
+        "end_line": 127,
+        "kind": "async_function",
+        "name": "_request_media_download",
+        "start_line": 100
+      },
+      {
+        "end_line": 151,
+        "kind": "function",
+        "name": "_load_export_item",
+        "start_line": 130
+      },
+      {
+        "end_line": 411,
+        "kind": "function",
+        "name": "build_inbound_export_job",
+        "start_line": 159
+      }
+    ]
+  },
+  "models.py": {
+    "lines": 798,
+    "symbols": [
+      {
+        "end_line": 35,
+        "kind": "class",
+        "name": "WhatsAppAccount",
+        "start_line": 20
+      },
+      {
+        "end_line": 58,
+        "kind": "class",
+        "name": "WhatsAppDirectoryGroup",
+        "start_line": 38
+      },
+      {
+        "end_line": 85,
+        "kind": "class",
+        "name": "WhatsAppDirectoryContact",
+        "start_line": 61
+      },
+      {
+        "end_line": 105,
+        "kind": "class",
+        "name": "WhatsAppIdentityAlias",
+        "start_line": 88
+      },
+      {
+        "end_line": 133,
+        "kind": "class",
+        "name": "WhatsAppGroupMember",
+        "start_line": 108
+      },
+      {
+        "end_line": 155,
+        "kind": "class",
+        "name": "WhatsAppGroup",
+        "start_line": 136
+      },
+      {
+        "end_line": 169,
+        "kind": "class",
+        "name": "WhatsAppApplication",
+        "start_line": 158
+      },
+      {
+        "end_line": 193,
+        "kind": "class",
+        "name": "WhatsAppReportType",
+        "start_line": 172
+      },
+      {
+        "end_line": 227,
+        "kind": "class",
+        "name": "WhatsAppRecipientScope",
+        "start_line": 196
+      },
+      {
+        "end_line": 250,
+        "kind": "class",
+        "name": "WhatsAppAudience",
+        "start_line": 230
+      },
+      {
+        "end_line": 286,
+        "kind": "class",
+        "name": "WhatsAppAudienceMember",
+        "start_line": 253
+      },
+      {
+        "end_line": 315,
+        "kind": "class",
+        "name": "WhatsAppTemplate",
+        "start_line": 289
+      },
+      {
+        "end_line": 379,
+        "kind": "class",
+        "name": "WhatsAppDispatchProfile",
+        "start_line": 318
+      },
+      {
+        "end_line": 426,
+        "kind": "class",
+        "name": "WhatsAppContactLink",
+        "start_line": 382
+      },
+      {
+        "end_line": 471,
+        "kind": "class",
+        "name": "WhatsAppDispatchPreview",
+        "start_line": 429
+      },
+      {
+        "end_line": 504,
+        "kind": "class",
+        "name": "WhatsAppDispatchPreviewArtifact",
+        "start_line": 474
+      },
+      {
+        "end_line": 555,
+        "kind": "class",
+        "name": "WhatsAppDispatchPreviewDelivery",
+        "start_line": 507
+      },
+      {
+        "end_line": 581,
+        "kind": "class",
+        "name": "WhatsAppDispatchApproval",
+        "start_line": 558
+      },
+      {
+        "end_line": 617,
+        "kind": "class",
+        "name": "WhatsAppDelivery",
+        "start_line": 584
+      },
+      {
+        "end_line": 631,
+        "kind": "class",
+        "name": "WhatsAppActivity",
+        "start_line": 620
+      },
+      {
+        "end_line": 647,
+        "kind": "class",
+        "name": "WhatsAppSettings",
+        "start_line": 634
+      },
+      {
+        "end_line": 671,
+        "kind": "class",
+        "name": "WhatsAppInboundMessage",
+        "start_line": 649
+      },
+      {
+        "end_line": 697,
+        "kind": "class",
+        "name": "WhatsAppInboundAttachment",
+        "start_line": 674
+      },
+      {
+        "end_line": 733,
+        "kind": "class",
+        "name": "WhatsAppInboundHistoryRequest",
+        "start_line": 700
+      },
+      {
+        "end_line": 768,
+        "kind": "class",
+        "name": "WhatsAppInboundExportRun",
+        "start_line": 736
+      },
+      {
+        "end_line": 797,
+        "kind": "class",
+        "name": "WhatsAppInboundExportItem",
+        "start_line": 771
+      }
+    ]
+  },
+  "preview_api.py": {
+    "lines": 1006,
+    "symbols": [
+      {
+        "end_line": 59,
+        "kind": "class",
+        "name": "PreviewInput",
+        "start_line": 57
+      },
+      {
+        "end_line": 64,
+        "kind": "class",
+        "name": "BulkPreviewInput",
+        "start_line": 62
+      },
+      {
+        "end_line": 68,
+        "kind": "class",
+        "name": "PreviewIdsInput",
+        "start_line": 67
+      },
+      {
+        "end_line": 73,
+        "kind": "class",
+        "name": "BulkPreviewApprovalInput",
+        "start_line": 71
+      },
+      {
+        "end_line": 78,
+        "kind": "class",
+        "name": "ContactLinkInput",
+        "start_line": 76
+      },
+      {
+        "end_line": 83,
+        "kind": "class",
+        "name": "PreviewApprovalInput",
+        "start_line": 81
+      },
+      {
+        "end_line": 87,
+        "kind": "function",
+        "name": "_digits",
+        "start_line": 86
+      },
+      {
+        "end_line": 137,
+        "kind": "function",
+        "name": "_delivery_dict",
+        "start_line": 90
+      },
+      {
+        "end_line": 153,
+        "kind": "function",
+        "name": "_artifact_dict",
+        "start_line": 140
+      },
+      {
+        "end_line": 166,
+        "kind": "function",
+        "name": "_with_approval",
+        "start_line": 156
+      },
+      {
+        "end_line": 246,
+        "kind": "function",
+        "name": "preview_options",
+        "start_line": 170
+      },
+      {
+        "end_line": 286,
+        "kind": "function",
+        "name": "create_preview",
+        "start_line": 254
+      },
+      {
+        "end_line": 317,
+        "kind": "function",
+        "name": "create_previews_bulk",
+        "start_line": 290
+      },
+      {
+        "end_line": 377,
+        "kind": "function",
+        "name": "previews",
+        "start_line": 321
+      },
+      {
+        "end_line": 412,
+        "kind": "function",
+        "name": "preview_selection",
+        "start_line": 381
+      },
+      {
+        "end_line": 444,
+        "kind": "function",
+        "name": "preview_detail",
+        "start_line": 416
+      },
+      {
+        "end_line": 592,
+        "kind": "async_function",
+        "name": "approve_preview",
+        "start_line": 452
+      },
+      {
+        "end_line": 632,
+        "kind": "async_function",
+        "name": "approve_previews_bulk",
+        "start_line": 596
+      },
+      {
+        "end_line": 663,
+        "kind": "function",
+        "name": "hard_delete_previews_bulk",
+        "start_line": 636
+      },
+      {
+        "end_line": 687,
+        "kind": "function",
+        "name": "hard_delete_preview",
+        "start_line": 667
+      },
+      {
+        "end_line": 728,
+        "kind": "function",
+        "name": "preview_deliveries",
+        "start_line": 691
+      },
+      {
+        "end_line": 759,
+        "kind": "function",
+        "name": "preview_artifacts",
+        "start_line": 732
+      },
+      {
+        "end_line": 816,
+        "kind": "function",
+        "name": "preview_issues",
+        "start_line": 763
+      },
+      {
+        "end_line": 841,
+        "kind": "function",
+        "name": "download_preview_artifact",
+        "start_line": 820
+      },
+      {
+        "end_line": 868,
+        "kind": "function",
+        "name": "contact_links",
+        "start_line": 845
+      },
+      {
+        "end_line": 945,
+        "kind": "function",
+        "name": "contact_link_targets",
+        "start_line": 872
+      },
+      {
+        "end_line": 990,
+        "kind": "function",
+        "name": "save_contact_link",
+        "start_line": 949
+      },
+      {
+        "end_line": 1006,
+        "kind": "function",
+        "name": "remove_contact_link",
+        "start_line": 994
+      }
+    ]
+  },
+  "preview_service.py": {
+    "lines": 1395,
+    "symbols": [
+      {
+        "end_line": 52,
+        "kind": "class",
+        "name": "PreviewCompileError",
+        "start_line": 51
+      },
+      {
+        "end_line": 61,
+        "kind": "function",
+        "name": "issue",
+        "start_line": 55
+      },
+      {
+        "end_line": 69,
+        "kind": "function",
+        "name": "sha256_file",
+        "start_line": 64
+      },
+      {
+        "end_line": 79,
+        "kind": "function",
+        "name": "_managed_artifact_path",
+        "start_line": 72
+      },
+      {
+        "end_line": 94,
+        "kind": "function",
+        "name": "freeze_artifact",
+        "start_line": 82
+      },
+      {
+        "end_line": 106,
+        "kind": "function",
+        "name": "is_managed_preview_artifact",
+        "start_line": 97
+      },
+      {
+        "end_line": 111,
+        "kind": "function",
+        "name": "_preview_key",
+        "start_line": 109
+      },
+      {
+        "end_line": 123,
+        "kind": "function",
+        "name": "_artifact_role",
+        "start_line": 114
+      },
+      {
+        "end_line": 150,
+        "kind": "function",
+        "name": "_attachment_paths",
+        "start_line": 126
+      },
+      {
+        "end_line": 171,
+        "kind": "function",
+        "name": "_render_message",
+        "start_line": 153
+      },
+      {
+        "end_line": 179,
+        "kind": "function",
+        "name": "_delivery_status",
+        "start_line": 174
+      },
+      {
+        "end_line": 187,
+        "kind": "function",
+        "name": "_canonical_contact_target",
+        "start_line": 182
+      },
+      {
+        "end_line": 207,
+        "kind": "function",
+        "name": "_plan_report_type",
+        "start_line": 190
+      },
+      {
+        "end_line": 218,
+        "kind": "function",
+        "name": "_plan_recipient_channel",
+        "start_line": 210
+      },
+      {
+        "end_line": 256,
+        "kind": "function",
+        "name": "_plan_recipient_scope",
+        "start_line": 221
+      },
+      {
+        "end_line": 262,
+        "kind": "function",
+        "name": "_plan_target",
+        "start_line": 259
+      },
+      {
+        "end_line": 276,
+        "kind": "function",
+        "name": "_plan_route_label",
+        "start_line": 265
+      },
+      {
+        "end_line": 281,
+        "kind": "function",
+        "name": "_same_route_value",
+        "start_line": 279
+      },
+      {
+        "end_line": 299,
+        "kind": "function",
+        "name": "_plan_matches_audience_route",
+        "start_line": 284
+      },
+      {
+        "end_line": 328,
+        "kind": "function",
+        "name": "_retarget_group_plan",
+        "start_line": 302
+      },
+      {
+        "end_line": 356,
+        "kind": "function",
+        "name": "_xlsx_emis_values",
+        "start_line": 331
+      },
+      {
+        "end_line": 379,
+        "kind": "function",
+        "name": "_classify_attachment_wings",
+        "start_line": 359
+      },
+      {
+        "end_line": 392,
+        "kind": "function",
+        "name": "_classify_scoped_emis_wings",
+        "start_line": 382
+      },
+      {
+        "end_line": 1231,
+        "kind": "function",
+        "name": "compile_antidengue_preview",
+        "start_line": 395
+      },
+      {
+        "end_line": 1290,
+        "kind": "function",
+        "name": "preview_is_stale",
+        "start_line": 1234
+      },
+      {
+        "end_line": 1324,
+        "kind": "function",
+        "name": "preview_dict",
+        "start_line": 1293
+      },
+      {
+        "end_line": 1354,
+        "kind": "function",
+        "name": "delete_preview_records",
+        "start_line": 1327
+      },
+      {
+        "end_line": 1365,
+        "kind": "function",
+        "name": "cleanup_unreferenced_preview_files",
+        "start_line": 1357
+      },
+      {
+        "end_line": 1395,
+        "kind": "function",
+        "name": "entity_link_details",
+        "start_line": 1368
+      }
+    ]
+  },
+  "tasks.py": {
+    "lines": 237,
+    "symbols": [
+      {
+        "end_line": 64,
+        "kind": "function",
+        "name": "compile_dispatch_preview_job",
+        "start_line": 39
+      },
+      {
+        "end_line": 196,
+        "kind": "async_function",
+        "name": "_publish_approved_deliveries",
+        "start_line": 67
+      },
+      {
+        "end_line": 237,
+        "kind": "function",
+        "name": "send_approved_preview_job",
+        "start_line": 204
+      }
+    ]
+  }
+}
