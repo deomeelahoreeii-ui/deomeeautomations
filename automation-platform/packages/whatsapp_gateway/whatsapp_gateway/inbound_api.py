@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import hmac
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
 import nats
 from nats.errors import NoRespondersError, TimeoutError as NatsTimeoutError
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
-from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, update
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
@@ -24,7 +19,21 @@ from automation_core.database import get_session
 from automation_core.job_service import create_job, set_task_id
 from automation_core.models import Job, JobType
 from automation_core.time import utcnow
-from whatsapp_gateway.inbound_media import detect_file_type
+from whatsapp_gateway.inbound.accounts import (
+    resolve_account as _resolve_account,
+    resolve_contact_id as _resolve_contact_id,
+)
+from whatsapp_gateway.inbound.authentication import (
+    verify_worker_token as _verify_worker_token,
+)
+from whatsapp_gateway.inbound.media_upload import upload_attachment_content
+from whatsapp_gateway.inbound.schemas import (
+    AttachmentEvent,
+    CreateInboundExportRequest,
+    InboundFileFilter,
+    InboundMessageEvent,
+    RequestInboundHistory,
+)
 from whatsapp_gateway.inbound_service import (
     build_preview,
     contact_message_filter,
@@ -43,103 +52,6 @@ from whatsapp_gateway.models import (
 )
 
 router = APIRouter(prefix="/api/v1/whatsapp/inbound", tags=["whatsapp-inbound"])
-
-
-class AttachmentEvent(BaseModel):
-    mediaKind: str
-    messageKey: str
-    originalFilename: str | None = None
-    mimeType: str | None = None
-    declaredSize: int | None = None
-    mediaSha256: str | None = None
-    caption: str | None = None
-
-
-class InboundMessageEvent(BaseModel):
-    workerId: str
-    messageId: str
-    remoteJid: str
-    participantJid: str | None = None
-    senderJid: str
-    fromMe: bool = False
-    chatScope: str
-    messageTimestamp: datetime
-    pushName: str | None = None
-    text: str | None = None
-    messageType: str
-    ingestionSource: str
-    payloadSha256: str
-    rawPayload: dict[str, Any] = Field(default_factory=dict)
-    attachment: AttachmentEvent | None = None
-
-
-class InboundFileFilter(BaseModel):
-    contact_id: uuid.UUID
-    date_from: datetime | None = None
-    date_to: datetime | None = None
-    chat_scope: str = Field(default="direct", pattern="^(direct|direct_and_groups)$")
-    media_types: list[str] = Field(default_factory=lambda: ["image", "pdf", "spreadsheet"])
-
-
-class CreateInboundExportRequest(InboundFileFilter):
-    requested_by: str = Field(default="web-operator", max_length=100)
-
-
-class RequestInboundHistory(BaseModel):
-    contact_id: uuid.UUID
-    count: int = Field(default=50, ge=1, le=200)
-
-
-def _verify_worker_token(
-    x_whatsapp_worker_token: str | None = Header(default=None),
-    settings: Settings = Depends(get_settings),
-) -> None:
-    expected = settings.whatsapp_inbound_ingest_token
-    if not expected:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="WHATSAPP_INBOUND_INGEST_TOKEN is not configured",
-        )
-    if not x_whatsapp_worker_token or not hmac.compare_digest(
-        x_whatsapp_worker_token, expected
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid worker token",
-        )
-
-
-def _resolve_account(session: Session, worker_key: str) -> WhatsAppAccount:
-    account = session.exec(
-        select(WhatsAppAccount).where(WhatsAppAccount.worker_key == worker_key)
-    ).first()
-    if account is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Unknown WhatsApp worker account: {worker_key}",
-        )
-    return account
-
-
-def _resolve_contact_id(session: Session, account_id, sender_jid: str):
-    contact = session.exec(
-        select(WhatsAppDirectoryContact).where(
-            WhatsAppDirectoryContact.account_id == account_id,
-            or_(
-                WhatsAppDirectoryContact.phone_jid == sender_jid,
-                WhatsAppDirectoryContact.primary_lid_jid == sender_jid,
-            ),
-        )
-    ).first()
-    if contact:
-        return contact.id
-    alias = session.exec(
-        select(WhatsAppIdentityAlias).where(
-            WhatsAppIdentityAlias.account_id == account_id,
-            WhatsAppIdentityAlias.lid_jid == sender_jid,
-        )
-    ).first()
-    return alias.contact_id if alias else None
 
 
 def _insert_idempotently(
@@ -480,102 +392,10 @@ def ingest_event(
     return {"accepted": True, "created": created, "message_id": str(message_id)}
 
 
-@router.post(
+router.post(
     "/attachments/{attachment_id}/content",
     dependencies=[Depends(_verify_worker_token)],
-)
-async def upload_attachment_content(
-    attachment_id: uuid.UUID,
-    request: Request,
-    x_content_sha256: str | None = Header(default=None),
-    x_declared_mime_type: str | None = Header(default=None),
-    x_whatsapp_worker_id: str | None = Header(default=None),
-    session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
-) -> dict[str, Any]:
-    attachment = session.get(WhatsAppInboundAttachment, attachment_id)
-    if attachment is None:
-        raise HTTPException(status_code=404, detail="Inbound attachment not found")
-    message = session.get(WhatsAppInboundMessage, attachment.message_id)
-    if message is None:
-        raise HTTPException(status_code=409, detail="Inbound message is missing")
-    if not x_whatsapp_worker_id:
-        raise HTTPException(status_code=400, detail="X-WhatsApp-Worker-ID is required")
-    if not hmac.compare_digest(x_whatsapp_worker_id, message.worker_key):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="The worker is not authorized for this inbound message",
-        )
-    if not x_content_sha256 or len(x_content_sha256) != 64:
-        raise HTTPException(status_code=400, detail="A valid X-Content-SHA256 header is required")
-
-    root = settings.whatsapp_inbound_media_root / str(attachment.id)
-    root.mkdir(parents=True, exist_ok=True)
-    temporary = root / f"upload-{uuid.uuid4().hex}.part"
-    digest = hashlib.sha256()
-    size = 0
-    try:
-        with temporary.open("wb") as handle:
-            async for chunk in request.stream():
-                if not chunk:
-                    continue
-                size += len(chunk)
-                if size > settings.whatsapp_inbound_media_max_bytes:
-                    raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail=(
-                            "Inbound attachment exceeds the configured maximum of "
-                            f"{settings.whatsapp_inbound_media_max_bytes} bytes"
-                        ),
-                    )
-                digest.update(chunk)
-                handle.write(chunk)
-        if size == 0:
-            raise HTTPException(status_code=400, detail="Worker uploaded an empty file")
-        actual_sha256 = digest.hexdigest()
-        if x_content_sha256 and not hmac.compare_digest(
-            x_content_sha256.lower(), actual_sha256
-        ):
-            raise HTTPException(status_code=409, detail="Inbound media checksum mismatch")
-        try:
-            detected_mime, category, extension = detect_file_type(
-                temporary,
-                declared_mime=x_declared_mime_type or attachment.mime_type,
-                original_filename=attachment.original_filename,
-            )
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail=str(exc),
-            ) from exc
-
-        final_path = root / f"attachment-{attachment.id}{extension}"
-        os.replace(temporary, final_path)
-        previous_path = Path(attachment.stored_path) if attachment.stored_path else None
-        if previous_path and previous_path != final_path and previous_path.is_file():
-            previous_path.unlink(missing_ok=True)
-        attachment.detected_mime_type = detected_mime
-        attachment.media_category = category
-        attachment.safe_extension = extension
-        attachment.actual_size = size
-        attachment.actual_sha256 = actual_sha256
-        attachment.stored_path = str(final_path)
-        attachment.download_status = "archived"
-        attachment.last_error = None
-        attachment.archived_at = utcnow()
-        attachment.updated_at = utcnow()
-        session.add(attachment)
-        session.commit()
-        return {
-            "uploaded": True,
-            "attachment_id": str(attachment.id),
-            "size_bytes": size,
-            "sha256": actual_sha256,
-            "detected_mime_type": detected_mime,
-            "media_category": category,
-        }
-    finally:
-        temporary.unlink(missing_ok=True)
+)(upload_attachment_content)
 
 
 @router.post("/history/request", status_code=status.HTTP_202_ACCEPTED)

@@ -103,7 +103,11 @@ def test_model_inventory_and_movement_map_are_complete() -> None:
         for item in inventory["models.py"]["symbols"]
         if item["kind"] == "class"
     }
-    moved_classes = {key.rsplit(".", 1)[-1] for key in moved}
+    moved_classes = {
+        key.rsplit(".", 1)[-1]
+        for key in moved
+        if key.startswith("whatsapp_gateway.models.")
+    }
 
     assert original_classes == set(EXPECTED_MODELS)
     assert moved_classes == original_classes

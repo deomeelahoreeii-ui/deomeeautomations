@@ -27,3 +27,20 @@ refactored package preserves:
 - public imports used by the repository;
 - Celery task names and queue routes;
 - configured WhatsApp NATS subjects.
+
+## Bundle R2A
+
+Inbound request schemas, worker authentication, account/contact resolution and
+media handling were extracted without changing API paths or payloads.
+
+| Previous symbol or module | Implementation after R2A |
+|---|---|
+| Inbound Pydantic request/event classes in `inbound_api.py` | `inbound/schemas.py` |
+| `_verify_worker_token` | `inbound/authentication.py` |
+| `_resolve_account`, `_resolve_contact_id` | `inbound/accounts.py` |
+| `upload_attachment_content` | `inbound/media_upload.py` |
+| File type detection previously in `inbound_media.py` | `inbound/media_types.py` |
+
+`inbound_api.py` continues to expose the moved classes/functions and registers
+the same routes. `inbound_media.py` remains a compatibility facade, including
+its former private helpers for code that may still import them.
