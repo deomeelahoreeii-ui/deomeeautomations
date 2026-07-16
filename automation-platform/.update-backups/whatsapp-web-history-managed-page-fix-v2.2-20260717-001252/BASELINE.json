@@ -1,0 +1,120 @@
+{
+  "patch_id": "whatsapp-web-history-managed-page-fix-v2.2",
+  "created_at": "2026-07-16",
+  "target_repository": "deomeelahoreeii-ui/deomeeautomations",
+  "baseline_description": "Exact repository state after whatsapp-web-history-visible-profile-fix-v2.1, which the user confirmed is synced to main.",
+  "files": [
+    {
+      "path": "automation-platform/apps/web/src/pages/whatsapp/inbound-files.astro",
+      "state": "modified",
+      "pre_sha256": "5d9021978065d2dd96bc8b6c5dfb6b2468d85be8ceb38d6a8d9fa0d3a15b1529",
+      "post_sha256": "235f875d1fcaa660cf2d1d7f01112f7f232e7422b0d6950c2538b053daa0995c",
+      "reason": "Report the managed one-page visible-profile bridge and expose actionable mode/readiness details."
+    },
+    {
+      "path": "automation-platform/scripts/dev.sh",
+      "state": "modified",
+      "pre_sha256": "1cf4e1ed934cae524cc235a0f4700a6bd5faef85226c94338d35f47c1cb17e3a",
+      "post_sha256": "634e47241c137213f19d7995299415a8fa0754ea9a46f07a8059a9b637915baa",
+      "reason": "Require protocol v3, preflight the prepared profile snapshot, and launch the bridge-owned Brave page."
+    },
+    {
+      "path": "automation-platform/tests/test_whatsapp_web_history_bridge.py",
+      "state": "modified",
+      "pre_sha256": "e38b261e5adb037c4fa82436c06554434c7139894ac0ede0d928bc5141dd9935",
+      "post_sha256": "e9266ba8f441185453807dff29d5f94646e8b0d3576f5875ec09447f45ebe9b7",
+      "reason": "Update the platform contract for protocol v3 and the managed visible-profile mode."
+    },
+    {
+      "path": "automation-platform/tests/test_whatsapp_inbound_history_ui_contract.py",
+      "state": "modified",
+      "pre_sha256": "a10a3ede8d9fb723ecd9ab868d43e5375aae19dc6a6f4a1fb7862bb331898d21",
+      "post_sha256": "39a434fe89c4f4bff18c13d3b15548c8a8464f77b8efaadd06cbc557d914446a",
+      "reason": "Update UI readiness expectations from an attached debug browser to one managed browser page."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/.env.example",
+      "state": "modified",
+      "pre_sha256": "287565d6fd3afbb809a92cc4c29b26c9eac97df0ee8b12450860b0ba89e81e30",
+      "post_sha256": "6897f479e4586a85ca4d08adf43c41177e1bfec7e9e60a772ecb70344b5c2b26",
+      "reason": "Make visible_profile the normal mode and document page recovery and preserved experimental modes."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/README.md",
+      "state": "modified",
+      "pre_sha256": "682a5fe5e2a57578c8f9ebde9511b3998155d8f63701952a21258a6b6ded6f1a",
+      "post_sha256": "e72ceb3e1cdff525c76737a3ee94a8d07f2b333e1d5b0e006fc7a508a58ef9e3",
+      "reason": "Document the one-page architecture, profile snapshot preparation, and detached-frame recovery."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/bridge.js",
+      "state": "modified",
+      "pre_sha256": "43e72cf6251fb8b49aeaacce851cf8a598fb384593807379183f12768dab08ea",
+      "post_sha256": "939db23ef529d1791d89c4a6695520d4d02a8baa32c1bb6cd80ba3418706091a",
+      "reason": "Launch Brave through Puppeteer with the copied profile instead of browserURL/newPage and report page state."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/lib/bridge-service.js",
+      "state": "modified",
+      "pre_sha256": "07168c1e89aebf97625b5f12c7b61becce459959b6f0895774f8307e1030f5a7",
+      "post_sha256": "bce7b536e1ada51f93af3f7a699336d9f2fefe7b7f577ea2e5deb3fdc7458b4a",
+      "reason": "Block browser_url by default and apply page recovery to chat/media operations."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/lib/config.js",
+      "state": "modified",
+      "pre_sha256": "82de135c678883c8fb6b699566c444ad10e1d40115123fb50f4bdd387f9e25ae",
+      "post_sha256": "973bf0aca3f4f430183aaa47c037443382ecb48c561afceb36838449e55fac06",
+      "reason": "Add protocol v3 and visible-profile snapshot/runtime configuration."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/lib/history-loader.js",
+      "state": "modified",
+      "pre_sha256": "c9db17d66e92fce0f33aa25a7c3657a140d4fc4593b4c21d727bad104f30e112",
+      "post_sha256": "68ad12ca83940586aee7528b60d3cb08627d2ef6df3dd8ee31d1f62cadd286b3",
+      "reason": "Recover official pagination, compatibility pagination, hydration, sync, and media operations after transient navigation."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/lib/jid.js",
+      "state": "modified",
+      "pre_sha256": "db966b72a40f42404b7160650cbe35ac330afb3c0072342d04cf5ca8128107b2",
+      "post_sha256": "12328a210e676ded06c84361640ff891b0d533bf40aa2dc52df9e5e2d2fefad8",
+      "reason": "Recover phone/LID, number, direct-chat, and broad-chat lookups after transient page replacement."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/lib/page-session.js",
+      "state": "new",
+      "pre_sha256": null,
+      "post_sha256": "6215a4f184ca10edb32b920cc27c70dcef9cddeff6b074c0c2319d07beef679c",
+      "reason": "Add bounded stale-page detection, WhatsApp page rebinding, reinjection, and transient retries."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/package.json",
+      "state": "modified",
+      "pre_sha256": "ce5c927a194cb5da4b7d615dac5a764e383aaaa5b2a5f6d8b3618df826983694",
+      "post_sha256": "fb788876130df4bf7e965680e8383f97d30efe005183254b6712aecb7f31a0a2",
+      "reason": "Mark bridge version 1.2.0 while retaining the exact whatsapp-web.js 1.34.7 pin."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/scripts/launch-brave-debug.sh",
+      "state": "modified",
+      "pre_sha256": "275b65dcc7b7ac3e5e559d50aa9233827674b9efcba2cca2be66ee48092b1fcb",
+      "post_sha256": "d8f0e26271759f00efc69f940df3b2a71a0669f8fa1afd89dda5a63ab3ad8e9e",
+      "reason": "Prepare a private profile snapshot only; whatsapp-web.js now owns the single browser page."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/test/bridge-service.test.mjs",
+      "state": "modified",
+      "pre_sha256": "4ce814e556ae7dcf160c3d4b29338ea265473b6c1517f065d24cb1e901a709ee",
+      "post_sha256": "11f9adc06dab2907b29a6eca61765e1267fdb3e5c259cce9980bef21ee513389",
+      "reason": "Test protocol v3, visible-profile health, and blocked legacy browser modes."
+    },
+    {
+      "path": "whatsapp-web-history-bridge/test/page-session.test.mjs",
+      "state": "new",
+      "pre_sha256": null,
+      "post_sha256": "99158b2ed61feacbfe2ead4693882611b7ca88188a2e2737d5973db06935dbe9",
+      "reason": "Test detached-frame classification, retry, live-page rebinding, and non-transient error behavior."
+    }
+  ]
+}

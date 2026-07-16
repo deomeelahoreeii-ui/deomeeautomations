@@ -302,7 +302,7 @@ import os
 payload = json.loads(os.environ["HEALTH_JSON"])
 if payload.get("provider") != "wwebjs":
     raise SystemExit(1)
-if int(payload.get("protocolVersion") or 0) < 3:
+if int(payload.get("protocolVersion") or 0) < 2:
     raise SystemExit(1)
 PYBRIDGE
 }
@@ -349,64 +349,29 @@ stop_existing_whatsapp_web_bridge() {
   fail "The incompatible whatsapp-web.js bridge did not stop. Stop PID(s) ${bridge_pids[*]} manually."
 }
 
-check_whatsapp_web_profile_snapshot() {
-  local mode metadata_path
-  mode="$(bridge_env_value WWEBJS_MODE visible_profile)"
-  [[ "$mode" == "visible_profile" ]] || {
+check_whatsapp_web_browser_endpoint() {
+  local mode browser_url
+  mode="$(bridge_env_value WWEBJS_MODE browser_url)"
+  [[ "$mode" == "browser_url" ]] || fail "WWEBJS_MODE=$mode is not permitted for reliable historical retrieval. Set WWEBJS_MODE=browser_url."
+  browser_url="$(bridge_env_value WWEBJS_BROWSER_URL http://127.0.0.1:9222)"
+  command -v curl >/dev/null 2>&1 || fail "curl is required to validate the Brave remote-debugging endpoint."
+  if ! curl --fail --silent --max-time 2 "${browser_url%/}/json/version" >/dev/null 2>&1; then
     cat >&2 <<MSG
 
-ERROR: WWEBJS_MODE=$mode is not permitted for normal historical retrieval.
+ERROR: The visible Brave WhatsApp profile is not available at $browser_url.
 
-The browser_url implementation is preserved, but whatsapp-web.js creates another tab when it attaches,
-which caused the detached-frame failure. Use the managed one-page profile mode:
-  1. Set WWEBJS_MODE=visible_profile in $WWEBJS_DIR/.env
-  2. Close normal Brave once and run:
+Historical retrieval must attach to the private debug snapshot of the SAME Brave profile where the target files are visible.
+  1. Save your work and close every Brave window.
+  2. In another terminal run:
        cd "$WWEBJS_DIR"
        ./scripts/launch-brave-debug.sh
-  3. Start dev.sh again.
-MSG
-    exit 1
-  }
+  3. In that Brave window verify the required WhatsApp chat and files are visible.
+  4. Keep Brave open and run this dev.sh again.
 
-  metadata_path="$(bridge_env_value WWEBJS_VISIBLE_PROFILE_METADATA data/visible-profile.json)"
-  [[ "$metadata_path" == /* ]] || metadata_path="$WWEBJS_DIR/$metadata_path"
-  if [[ ! -f "$metadata_path" ]]; then
-    cat >&2 <<MSG
-
-ERROR: The private visible-profile snapshot has not been prepared.
-
-Close normal Brave once, then run:
-  cd "$WWEBJS_DIR"
-  ./scripts/launch-brave-debug.sh
-
-The script copies the selected Brave profile but does not launch another browser.
-After it completes, run this dev.sh again; whatsapp-web.js will launch and own one Brave page.
+No browser process was killed and the normal browser profile was not modified by dev.sh.
 MSG
     exit 1
   fi
-
-  METADATA_PATH="$metadata_path" "$UV" run python - <<'PYPROFILE'
-import json
-import os
-from pathlib import Path
-
-metadata_path = Path(os.environ["METADATA_PATH"])
-data = json.loads(metadata_path.read_text(encoding="utf-8"))
-root = Path(str(data.get("userDataDir") or "")).expanduser()
-profile = str(data.get("profileDirectory") or "").strip()
-if not root.is_dir() or not profile or not (root / profile).is_dir():
-    raise SystemExit(
-        f"Visible-profile metadata points to a missing snapshot: root={root}, profile={profile!r}"
-    )
-locks = [root / name for name in ("SingletonCookie", "SingletonLock", "SingletonSocket")]
-locks = [path for path in locks if path.exists()]
-if locks:
-    raise SystemExit(
-        "The private snapshot is already open. Stop the previous bridge/managed Brave window first: "
-        + ", ".join(map(str, locks))
-    )
-print(f"Visible-profile snapshot ready: {root / profile}")
-PYPROFILE
 }
 
 print_whatsapp_web_bridge_status() {
@@ -505,7 +470,7 @@ if [[ -z "$configured_bridge_token" || "$configured_bridge_token" == "change-me"
   fail "WWEBJS_PLATFORM_TOKEN is not configured. Set it to the same value as WA_PLATFORM_INGEST_TOKEN in whatsappbot/.env."
 fi
 
-check_whatsapp_web_profile_snapshot
+check_whatsapp_web_browser_endpoint
 
 info "Synchronizing Python dependencies"
 "$UV" sync
@@ -636,13 +601,13 @@ else
 fi
 
 if whatsapp_web_bridge_responder_ready; then
-  echo "An existing whatsapp-web.js history bridge protocol v3 is running; it will be reused."
+  echo "An existing whatsapp-web.js history bridge protocol v2 is running; it will be reused."
 else
   if whatsapp_web_bridge_any_responder; then
     info "Restarting an older or incompatible whatsapp-web.js history bridge"
     stop_existing_whatsapp_web_bridge
   fi
-  info "Starting whatsapp-web.js history bridge protocol v3"
+  info "Starting whatsapp-web.js history bridge protocol v2"
   (
     cd "$WWEBJS_DIR"
     exec "${PNPM[@]}" start
@@ -687,8 +652,8 @@ echo "  CRM sheets:        http://localhost:$WEB_PORT/crm/"
 echo "  CRM PDFs:          http://localhost:$WEB_PORT/crm/pdfs/"
 echo "  Sheet rows to PDF: http://localhost:$WEB_PORT/crm/convert/"
 echo "  Inbound WA files:  http://localhost:$WEB_PORT/whatsapp/inbound-files"
-echo "  History browser:   managed one-page Brave snapshot"
-echo "  Snapshot refresh:  $WWEBJS_DIR/scripts/launch-brave-debug.sh"
+echo "  Brave debug URL:   $(bridge_env_value WWEBJS_BROWSER_URL http://127.0.0.1:9222)"
+echo "  Browser launcher:  $WWEBJS_DIR/scripts/launch-brave-debug.sh"
 echo "  API:               http://localhost:$API_PORT"
 echo "  API docs:          http://localhost:$API_PORT/docs"
 echo

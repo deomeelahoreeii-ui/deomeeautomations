@@ -10,7 +10,6 @@ import { HistoryStateStore } from "./lib/state-store.js";
 import { PlatformClient } from "./lib/platform-client.js";
 import { createBridgeService } from "./lib/bridge-service.js";
 import { formatError } from "./lib/errors.js";
-import { ensureClientPage } from "./lib/page-session.js";
 
 const log = pino({ level: config.logLevel });
 const sc = StringCodec();
@@ -20,8 +19,6 @@ const runtime = {
   error: null,
   webVersion: null,
   browserEndpoint: null,
-  visibleProfile: null,
-  page: null,
 };
 
 function acquireLock() {
@@ -48,38 +45,14 @@ function releaseLock() {
   } catch {}
 }
 
-function commonClientOptions() {
-  return {
+function clientOptions() {
+  const common = {
     authTimeoutMs: 120000,
     qrMaxRetries: 0,
     takeoverOnConflict: false,
     deviceName: "Deomee Automation",
     browserName: "Brave",
   };
-}
-
-function clientOptions() {
-  const common = commonClientOptions();
-  if (config.mode === "visible_profile") {
-    return {
-      ...common,
-      puppeteer: {
-        headless: config.headless,
-        executablePath: config.browserExecutable,
-        userDataDir: config.visibleUserDataDir,
-        defaultViewport: null,
-        args: [
-          `--profile-directory=${config.visibleProfileDirectory}`,
-          "--no-first-run",
-          "--no-default-browser-check",
-          "--disable-session-crashed-bubble",
-          "--disable-vulkan",
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-        ],
-      },
-    };
-  }
   if (config.mode === "browser_url") {
     return {
       ...common,
@@ -99,63 +72,6 @@ function clientOptions() {
     ...common,
     authStrategy: new LocalAuth({ clientId: config.clientId, dataPath: config.authPath }),
     puppeteer,
-  };
-}
-
-async function verifyRuntimePrerequisites() {
-  if (config.mode === "browser_url") {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    timer.unref?.();
-    try {
-      const response = await fetch(`${config.browserUrl.replace(/\/$/, "")}/json/version`, {
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
-      const payload = await response.json();
-      runtime.browserEndpoint = {
-        browser: payload.Browser || null,
-        protocolVersion: payload["Protocol-Version"] || null,
-        webSocketDebuggerUrl: payload.webSocketDebuggerUrl || null,
-      };
-      if (!runtime.browserEndpoint.webSocketDebuggerUrl) {
-        throw new Error("The debugging endpoint did not return webSocketDebuggerUrl");
-      }
-      return;
-    } catch (error) {
-      throw new Error(
-        `Cannot attach to Brave at ${config.browserUrl}. browser_url is retained only for diagnostics and is not the normal history mode. `
-        + formatError(error, "browser_debug_endpoint"),
-      );
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  if (config.mode !== "visible_profile") return;
-  if (!config.browserExecutable || !fs.existsSync(config.browserExecutable)) {
-    throw new Error(`Brave/Chromium executable was not found: ${config.browserExecutable || "not configured"}`);
-  }
-  const profilePath = path.join(config.visibleUserDataDir, config.visibleProfileDirectory);
-  if (!fs.existsSync(profilePath)) {
-    throw new Error(
-      `Visible-profile snapshot is missing: ${profilePath}. Close normal Brave and run `
-      + `whatsapp-web-history-bridge/scripts/launch-brave-debug.sh once, then restart dev.sh.`,
-    );
-  }
-  const singletonFiles = ["SingletonCookie", "SingletonLock", "SingletonSocket"]
-    .map((name) => path.join(config.visibleUserDataDir, name))
-    .filter((candidate) => fs.existsSync(candidate));
-  if (singletonFiles.length) {
-    throw new Error(
-      `The managed visible-profile snapshot appears to be in use (${singletonFiles.join(", ")}). `
-      + `Close the snapshot Brave window or stop the previous bridge before restarting dev.sh.`,
-    );
-  }
-  runtime.visibleProfile = {
-    userDataDir: config.visibleUserDataDir,
-    profileDirectory: config.visibleProfileDirectory,
-    metadataPath: config.visibleProfileMetadataPath,
   };
 }
 
@@ -186,30 +102,12 @@ client.on("authenticated", () => {
   log.info("WhatsApp Web bridge authenticated");
 });
 client.on("ready", async () => {
-  try {
-    const page = await ensureClientPage(client, {
-      timeoutMs: config.pageRecoveryTimeoutMs,
-      requireInjected: true,
-    });
-    runtime.page = page?.state || null;
-    runtime.status = "ready";
-    runtime.authenticated = true;
-    runtime.error = null;
-    runtime.webVersion = await client.getWWebVersion().catch(() => page?.state?.webVersion || null);
-    try { fs.unlinkSync(config.qrPath); } catch {}
-    log.info({
-      workerId: config.workerId,
-      subject: config.subject(),
-      mode: config.mode,
-      webVersion: runtime.webVersion,
-      page: runtime.page,
-      visibleProfile: runtime.visibleProfile,
-    }, "WhatsApp Web history bridge ready");
-  } catch (error) {
-    runtime.status = "failed";
-    runtime.error = formatError(error, "ready_page_validation");
-    log.error({ error: runtime.error, stack: error?.stack || null }, "WhatsApp Web page did not stabilize after ready");
-  }
+  runtime.status = "ready";
+  runtime.authenticated = true;
+  runtime.error = null;
+  runtime.webVersion = await client.getWWebVersion().catch(() => null);
+  try { fs.unlinkSync(config.qrPath); } catch {}
+  log.info({ workerId: config.workerId, subject: config.subject(), mode: config.mode, webVersion: runtime.webVersion }, "WhatsApp Web history bridge ready");
 });
 client.on("auth_failure", (message) => {
   runtime.status = "auth_failure";
@@ -243,18 +141,39 @@ process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 process.once("exit", releaseLock);
 
-log.info({
-  workerId: config.workerId,
-  subject: config.subject(),
-  mode: config.mode,
-  wwebjs: "1.34.7",
-  protocolVersion: config.protocolVersion,
-}, "Starting WhatsApp Web history bridge");
-verifyRuntimePrerequisites()
-  .then(() => {
-    runtime.status = "initializing";
-    return client.initialize();
-  })
+async function verifyBrowserEndpoint() {
+  if (config.mode !== "browser_url") return;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  timer.unref?.();
+  try {
+    const response = await fetch(`${config.browserUrl.replace(/\/$/, "")}/json/version`, {
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    const payload = await response.json();
+    runtime.browserEndpoint = {
+      browser: payload.Browser || null,
+      protocolVersion: payload["Protocol-Version"] || null,
+      webSocketDebuggerUrl: payload.webSocketDebuggerUrl || null,
+    };
+    if (!runtime.browserEndpoint.webSocketDebuggerUrl) {
+      throw new Error("The debugging endpoint did not return webSocketDebuggerUrl");
+    }
+  } catch (error) {
+    throw new Error(
+      `Cannot attach to the visible Brave profile at ${config.browserUrl}. Close all Brave windows, run `
+      + `whatsapp-web-history-bridge/scripts/launch-brave-debug.sh, verify the required WhatsApp chat/files are visible there, then restart dev.sh. `
+      + formatError(error, "browser_debug_endpoint"),
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+log.info({ workerId: config.workerId, subject: config.subject(), mode: config.mode, wwebjs: "1.34.7", protocolVersion: config.protocolVersion }, "Starting WhatsApp Web history bridge");
+verifyBrowserEndpoint()
+  .then(() => client.initialize())
   .catch((error) => {
     runtime.status = "failed";
     runtime.error = formatError(error, "bridge_initialize");

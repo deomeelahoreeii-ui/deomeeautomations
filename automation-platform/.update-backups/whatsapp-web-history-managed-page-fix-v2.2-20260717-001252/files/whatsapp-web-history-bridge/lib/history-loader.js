@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { formatError, phaseError } from "./errors.js";
 import { normalizePlatformJid } from "./jid.js";
-import { withPageRecovery } from "./page-session.js";
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff"]);
 const SHEET_EXTENSIONS = new Set([".xls", ".xlsx", ".xlsm", ".csv", ".ods"]);
@@ -77,7 +76,7 @@ async function withTimeout(promise, timeoutMs, label) {
   }
 }
 
-async function hydrateMessageIds(client, ids, pageRecoveryTimeoutMs) {
+async function hydrateMessageIds(client, ids) {
   const output = new Array(ids.length);
   const concurrency = Math.min(12, Math.max(1, ids.length));
   let cursor = 0;
@@ -85,29 +84,21 @@ async function hydrateMessageIds(client, ids, pageRecoveryTimeoutMs) {
     while (cursor < ids.length) {
       const index = cursor;
       cursor += 1;
-      output[index] = await withPageRecovery(
-        client,
-        `message_hydration:${ids[index]}`,
-        () => client.getMessageById(ids[index]),
-        { pageTimeoutMs: pageRecoveryTimeoutMs },
-      );
+      output[index] = await client.getMessageById(ids[index]);
     }
   }
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
   return output.filter(Boolean);
 }
 
-async function fetchWithCompatibilityLoader(client, chat, limit, timeoutMs, pageRecoveryTimeoutMs) {
+async function fetchWithCompatibilityLoader(client, chat, limit, timeoutMs) {
   const chatId = String(chat?.id?._serialized || "");
   if (!chatId) throw new Error("Resolved WhatsApp Web chat has no serialized id");
   if (!client?.pupPage?.evaluate || typeof client.getMessageById !== "function") {
     throw new Error("WhatsApp Web compatibility loader is unavailable because the browser page is not attached");
   }
 
-  const result = await withTimeout(withPageRecovery(
-    client,
-    `compatibility_page:${chatId}`,
-    () => client.pupPage.evaluate(
+  const result = await withTimeout(client.pupPage.evaluate(
     async (targetChatId, targetLimit) => {
       const errorText = (error) => {
         if (error == null) return "Unknown browser error";
@@ -218,8 +209,6 @@ async function fetchWithCompatibilityLoader(client, chat, limit, timeoutMs, page
     },
     chatId,
     limit,
-  ),
-    { pageTimeoutMs: pageRecoveryTimeoutMs },
   ), timeoutMs, "WhatsApp Web compatibility history loader");
 
   if (!result?.ok) {
@@ -227,24 +216,19 @@ async function fetchWithCompatibilityLoader(client, chat, limit, timeoutMs, page
     throw new Error(`${result?.error || "WhatsApp Web browser loader failed"}${diagnostics}`);
   }
   const messages = await withTimeout(
-    hydrateMessageIds(client, [...new Set(result.ids || [])], pageRecoveryTimeoutMs),
+    hydrateMessageIds(client, [...new Set(result.ids || [])]),
     timeoutMs,
     "WhatsApp Web message hydration",
   );
   return { messages, diagnostics: result.diagnostics };
 }
 
-async function fetchHistoryPage(client, chat, limit, timeoutMs, pageRecoveryTimeoutMs) {
+async function fetchHistoryPage(client, chat, limit, timeoutMs) {
   let officialMessages = [];
   let officialError = null;
   try {
     officialMessages = await withTimeout(
-      withPageRecovery(
-        client,
-        `official_fetch_page:${limit}`,
-        () => chat.fetchMessages({ limit, fromMe: false }),
-        { pageTimeoutMs: pageRecoveryTimeoutMs },
-      ),
+      chat.fetchMessages({ limit, fromMe: false }),
       timeoutMs,
       `whatsapp-web.js fetchMessages(limit=${limit})`,
     );
@@ -261,7 +245,7 @@ async function fetchHistoryPage(client, chat, limit, timeoutMs, pageRecoveryTime
   }
 
   try {
-    const compatible = await fetchWithCompatibilityLoader(client, chat, limit, timeoutMs, pageRecoveryTimeoutMs);
+    const compatible = await fetchWithCompatibilityLoader(client, chat, limit, timeoutMs);
     const messages = compatible.messages.length >= officialMessages.length ? compatible.messages : officialMessages;
     return {
       messages,
@@ -301,7 +285,6 @@ export async function fetchOlderMessages(client, chat, {
   syncHistory = true,
   syncHistoryTimeoutMs = 30000,
   syncSettleMs = 3500,
-  pageRecoveryTimeoutMs = 30000,
 } = {}) {
   const wanted = Math.max(1, Number(count) || 50);
   const beforeMs = beforeTimestamp ? Date.parse(beforeTimestamp) : Number.NaN;
@@ -311,12 +294,7 @@ export async function fetchOlderMessages(client, chat, {
   if (syncHistory && typeof chat?.syncHistory === "function") {
     try {
       diagnostics.sync = await withTimeout(
-        withPageRecovery(
-          client,
-          "sync_history_page",
-          () => chat.syncHistory(),
-          { pageTimeoutMs: pageRecoveryTimeoutMs },
-        ),
+        chat.syncHistory(),
         syncHistoryTimeoutMs,
         "whatsapp-web.js syncHistory",
       );
@@ -333,7 +311,7 @@ export async function fetchOlderMessages(client, chat, {
   while (true) {
     let page;
     try {
-      page = await fetchHistoryPage(client, chat, limit, attemptTimeoutMs, pageRecoveryTimeoutMs);
+      page = await fetchHistoryPage(client, chat, limit, attemptTimeoutMs);
     } catch (error) {
       throw phaseError("history_fetch", error);
     }

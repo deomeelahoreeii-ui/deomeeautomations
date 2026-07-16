@@ -1,5 +1,4 @@
 import { formatError } from "./errors.js";
-import { withPageRecovery } from "./page-session.js";
 
 export function phoneDigits(value) {
   const local = String(value || "").split("@")[0];
@@ -57,11 +56,7 @@ export async function resolveDirectChat(client, remoteJids) {
 
   if (typeof client.getContactLidAndPhone === "function" && candidates.length) {
     try {
-      const mappings = await withPageRecovery(
-        client,
-        "contact_lid_phone_page",
-        () => client.getContactLidAndPhone([...candidates]),
-      );
+      const mappings = await client.getContactLidAndPhone([...candidates]);
       diagnostics.mappings = mappings || [];
       appendMappingCandidates(candidates, mappings);
     } catch (error) {
@@ -71,11 +66,7 @@ export async function resolveDirectChat(client, remoteJids) {
 
   for (const number of digits) {
     try {
-      const id = await withPageRecovery(
-        client,
-        `number_lookup_page:${number}`,
-        () => client.getNumberId(number),
-      );
+      const id = await client.getNumberId(number);
       const serialized = normalizeWwebId(id?._serialized || id?.id?._serialized || id);
       if (serialized) candidates.unshift(serialized);
     } catch (error) {
@@ -87,11 +78,7 @@ export async function resolveDirectChat(client, remoteJids) {
   diagnostics.candidates = uniqueCandidates;
   for (const candidate of uniqueCandidates) {
     try {
-      const chat = await withPageRecovery(
-        client,
-        `get_chat_page:${candidate}`,
-        () => client.getChatById(candidate),
-      );
+      const chat = await client.getChatById(candidate);
       if (chat && !chat.isGroup) {
         diagnostics.matchedBy = "getChatById";
         diagnostics.matchedChatId = String(chat?.id?._serialized || candidate);
@@ -104,11 +91,7 @@ export async function resolveDirectChat(client, remoteJids) {
 
   let chats;
   try {
-    chats = await withPageRecovery(
-      client,
-      "get_chats_page",
-      () => client.getChats(),
-    );
+    chats = await client.getChats();
   } catch (error) {
     throw new Error(`WhatsApp Web could not list chats. ${formatError(error, "get_chats")}`);
   }

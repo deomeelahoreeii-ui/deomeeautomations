@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
@@ -24,14 +23,6 @@ function resolveFromRoot(value) {
   return path.resolve(ROOT, value);
 }
 
-function resolveUserPath(value) {
-  const text = String(value || "").trim();
-  if (!text) return "";
-  if (text === "~") return os.homedir();
-  if (text.startsWith("~/")) return path.join(os.homedir(), text.slice(2));
-  return path.resolve(text);
-}
-
 function defaultBrowserExecutable() {
   const candidates = [
     "/usr/bin/brave",
@@ -44,50 +35,24 @@ function defaultBrowserExecutable() {
   return candidates.find((candidate) => fs.existsSync(candidate)) || "";
 }
 
-function readVisibleProfileMetadata() {
-  const metadataPath = resolveFromRoot(process.env.WWEBJS_VISIBLE_PROFILE_METADATA || "data/visible-profile.json");
-  try {
-    const data = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
-    return { metadataPath, data };
-  } catch {
-    return { metadataPath, data: {} };
-  }
-}
-
-const visibleMetadata = readVisibleProfileMetadata();
-const mode = String(process.env.WWEBJS_MODE || "visible_profile").trim().toLowerCase();
-if (!["local_auth", "browser_url", "visible_profile"].includes(mode)) {
-  throw new Error("WWEBJS_MODE must be local_auth, browser_url, or visible_profile");
+const mode = String(process.env.WWEBJS_MODE || "browser_url").trim().toLowerCase();
+if (!["local_auth", "browser_url"].includes(mode)) {
+  throw new Error("WWEBJS_MODE must be local_auth or browser_url");
 }
 
 const workerId = String(process.env.WWEBJS_WORKER_ID || process.env.WA_WORKER_ID || "default").trim();
 if (!workerId) throw new Error("WWEBJS_WORKER_ID cannot be empty");
 
-const visibleUserDataDir = resolveUserPath(
-  process.env.WWEBJS_VISIBLE_USER_DATA_DIR
-  || visibleMetadata.data.userDataDir
-  || path.join(os.homedir(), ".local/share/deomee-wwebjs-brave-visible"),
-);
-const visibleProfileDirectory = String(
-  process.env.WWEBJS_VISIBLE_PROFILE_DIRECTORY
-  || visibleMetadata.data.profileDirectory
-  || "Default",
-).trim();
-
 export const config = Object.freeze({
-  protocolVersion: 3,
+  protocolVersion: 2,
   workerId,
   natsUrl: process.env.NATS_URL || "nats://127.0.0.1:4222",
   historySubject: process.env.WWEBJS_HISTORY_SUBJECT || "whatsapp.web.inbound.history",
   mode,
   allowLocalAuthHistory: parseBoolean("WWEBJS_ALLOW_LOCAL_AUTH_HISTORY", false),
-  allowBrowserUrlHistory: parseBoolean("WWEBJS_ALLOW_BROWSER_URL_HISTORY", false),
   browserUrl: String(process.env.WWEBJS_BROWSER_URL || "http://127.0.0.1:9222").trim(),
   browserExecutable: String(process.env.WWEBJS_BROWSER_EXECUTABLE || defaultBrowserExecutable()).trim(),
   headless: parseBoolean("WWEBJS_HEADLESS", false),
-  visibleUserDataDir,
-  visibleProfileDirectory,
-  visibleProfileMetadataPath: visibleMetadata.metadataPath,
   authPath: resolveFromRoot(process.env.WWEBJS_AUTH_PATH || "data/auth"),
   qrPath: resolveFromRoot(process.env.WWEBJS_QR_PATH || "data/login-qr.png"),
   statePath: resolveFromRoot(process.env.WWEBJS_STATE_PATH || "data/history-state.json"),
@@ -97,7 +62,6 @@ export const config = Object.freeze({
   maxMessagesScanned: parseInteger("WWEBJS_MAX_MESSAGES_SCANNED", 5000, { min: 100, max: 50000 }),
   requestTimeoutMs: parseInteger("WWEBJS_REQUEST_TIMEOUT_MS", 600000, { min: 30000, max: 3600000 }),
   fetchAttemptTimeoutMs: parseInteger("WWEBJS_FETCH_ATTEMPT_TIMEOUT_MS", 120000, { min: 5000, max: 600000 }),
-  pageRecoveryTimeoutMs: parseInteger("WWEBJS_PAGE_RECOVERY_TIMEOUT_MS", 30000, { min: 1000, max: 180000 }),
   syncHistory: parseBoolean("WWEBJS_SYNC_HISTORY", true),
   syncHistoryTimeoutMs: parseInteger("WWEBJS_SYNC_HISTORY_TIMEOUT_MS", 30000, { min: 1000, max: 180000 }),
   syncSettleMs: parseInteger("WWEBJS_SYNC_SETTLE_MS", 3500, { min: 0, max: 30000 }),

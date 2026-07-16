@@ -1,25 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PORT="${WWEBJS_DEBUG_PORT:-9222}"
-BROWSER_URL="http://127.0.0.1:${PORT}"
-BRAVE="${WWEBJS_BROWSER_EXECUTABLE:-}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+BRIDGE_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 SOURCE_USER_DATA_DIR="${WWEBJS_BRAVE_SOURCE_USER_DATA_DIR:-$HOME/.config/BraveSoftware/Brave-Browser}"
-DEBUG_USER_DATA_DIR="${WWEBJS_BRAVE_DEBUG_USER_DATA_DIR:-$HOME/.local/share/deomee-wwebjs-brave-visible}"
-PROFILE_DIRECTORY="${WWEBJS_BRAVE_PROFILE_DIRECTORY:-}"
+SNAPSHOT_USER_DATA_DIR="${WWEBJS_VISIBLE_USER_DATA_DIR:-${WWEBJS_BRAVE_DEBUG_USER_DATA_DIR:-$HOME/.local/share/deomee-wwebjs-brave-visible}}"
+PROFILE_DIRECTORY="${WWEBJS_VISIBLE_PROFILE_DIRECTORY:-${WWEBJS_BRAVE_PROFILE_DIRECTORY:-}}"
+METADATA_PATH="${WWEBJS_VISIBLE_PROFILE_METADATA:-$BRIDGE_ROOT/data/visible-profile.json}"
 REFRESH_SNAPSHOT="${WWEBJS_REFRESH_PROFILE_SNAPSHOT:-true}"
-
-if [[ -z "$BRAVE" ]]; then
-  for candidate in /usr/bin/brave /usr/bin/brave-browser; do
-    if [[ -x "$candidate" ]]; then BRAVE="$candidate"; break; fi
-  done
-fi
-[[ -x "$BRAVE" ]] || { echo "Brave executable was not found." >&2; exit 1; }
-
-if command -v curl >/dev/null 2>&1 && curl --fail --silent --max-time 2 "$BROWSER_URL/json/version" >/dev/null 2>&1; then
-  echo "Brave remote debugging is already available at $BROWSER_URL"
-  exit 0
-fi
+SKIP_RUNNING_CHECK="${WWEBJS_TEST_SKIP_RUNNING_BRAVE_CHECK:-false}"
 
 [[ -d "$SOURCE_USER_DATA_DIR" ]] || {
   echo "Brave source profile directory was not found: $SOURCE_USER_DATA_DIR" >&2
@@ -44,10 +33,7 @@ PROFILE_DIRECTORY="${PROFILE_DIRECTORY:-Default}"
 }
 
 running_brave_pids() {
-  local process_dir=""
-  local process_pid=""
-  local process_exe=""
-  local process_name=""
+  local process_dir="" process_pid="" process_exe="" process_name=""
   for process_dir in /proc/[0-9]*; do
     [[ -e "$process_dir" ]] || continue
     process_pid="${process_dir##*/}"
@@ -61,12 +47,13 @@ running_brave_pids() {
   done
 }
 
-mapfile -t BRAVE_PIDS < <(running_brave_pids)
-if ((${#BRAVE_PIDS[@]} > 0)); then
-  cat >&2 <<MSG
-Brave is already running without the required debugging endpoint (PID(s): ${BRAVE_PIDS[*]}).
+if [[ "$SKIP_RUNNING_CHECK" != "true" ]]; then
+  mapfile -t BRAVE_PIDS < <(running_brave_pids)
+  if ((${#BRAVE_PIDS[@]} > 0)); then
+    cat >&2 <<MSG
+Brave is currently running (PID(s): ${BRAVE_PIDS[*]}).
 
-To make a consistent local snapshot of the SAME profile where the WhatsApp files are visible:
+To copy a consistent snapshot of the SAME profile where the WhatsApp files are visible:
   1. Save your work and close every Brave window.
   2. Confirm no Brave executable remains:
        ps -fp ${BRAVE_PIDS[*]}
@@ -74,16 +61,17 @@ To make a consistent local snapshot of the SAME profile where the WhatsApp files
 
 The script will not kill Brave and will not modify your normal Brave profile.
 MSG
-  exit 2
+    exit 2
+  fi
 fi
 
-mkdir -p "$DEBUG_USER_DATA_DIR"
-chmod 700 "$DEBUG_USER_DATA_DIR"
+mkdir -p "$SNAPSHOT_USER_DATA_DIR" "$(dirname -- "$METADATA_PATH")"
+chmod 700 "$SNAPSHOT_USER_DATA_DIR"
 
 if [[ "$REFRESH_SNAPSHOT" == "true" ]]; then
-  echo "Refreshing a private debugging snapshot from the visible Brave profile..."
+  echo "Refreshing the private WhatsApp history snapshot from the visible Brave profile..."
   echo "Source:      $SOURCE_USER_DATA_DIR/$PROFILE_DIRECTORY"
-  echo "Destination: $DEBUG_USER_DATA_DIR/$PROFILE_DIRECTORY"
+  echo "Destination: $SNAPSHOT_USER_DATA_DIR/$PROFILE_DIRECTORY"
   if command -v rsync >/dev/null 2>&1; then
     rsync -a --delete --delete-excluded \
       --exclude='Cache/' \
@@ -94,31 +82,44 @@ if [[ "$REFRESH_SNAPSHOT" == "true" ]]; then
       --exclude='ShaderCache/' \
       --exclude='Crashpad/' \
       "$SOURCE_USER_DATA_DIR/$PROFILE_DIRECTORY/" \
-      "$DEBUG_USER_DATA_DIR/$PROFILE_DIRECTORY/"
-    [[ -f "$SOURCE_USER_DATA_DIR/Local State" ]] && rsync -a "$SOURCE_USER_DATA_DIR/Local State" "$DEBUG_USER_DATA_DIR/Local State"
+      "$SNAPSHOT_USER_DATA_DIR/$PROFILE_DIRECTORY/"
+    [[ -f "$SOURCE_USER_DATA_DIR/Local State" ]] && rsync -a "$SOURCE_USER_DATA_DIR/Local State" "$SNAPSHOT_USER_DATA_DIR/Local State"
   else
     echo "rsync is unavailable; copying the profile with cp. This can take longer."
-    rm -rf "$DEBUG_USER_DATA_DIR/$PROFILE_DIRECTORY"
-    cp -a "$SOURCE_USER_DATA_DIR/$PROFILE_DIRECTORY" "$DEBUG_USER_DATA_DIR/$PROFILE_DIRECTORY"
-    [[ -f "$SOURCE_USER_DATA_DIR/Local State" ]] && cp -a "$SOURCE_USER_DATA_DIR/Local State" "$DEBUG_USER_DATA_DIR/Local State"
+    rm -rf "$SNAPSHOT_USER_DATA_DIR/$PROFILE_DIRECTORY"
+    cp -a "$SOURCE_USER_DATA_DIR/$PROFILE_DIRECTORY" "$SNAPSHOT_USER_DATA_DIR/$PROFILE_DIRECTORY"
+    [[ -f "$SOURCE_USER_DATA_DIR/Local State" ]] && cp -a "$SOURCE_USER_DATA_DIR/Local State" "$SNAPSHOT_USER_DATA_DIR/Local State"
   fi
 fi
 
 rm -f \
-  "$DEBUG_USER_DATA_DIR/SingletonCookie" \
-  "$DEBUG_USER_DATA_DIR/SingletonLock" \
-  "$DEBUG_USER_DATA_DIR/SingletonSocket"
+  "$SNAPSHOT_USER_DATA_DIR/SingletonCookie" \
+  "$SNAPSHOT_USER_DATA_DIR/SingletonLock" \
+  "$SNAPSHOT_USER_DATA_DIR/SingletonSocket"
 
-echo "Launching the private Brave snapshot with remote debugging at $BROWSER_URL"
-echo "Profile: $PROFILE_DIRECTORY"
-echo "Keep this Brave process open while using WhatsApp history retrieval."
+python3 - "$METADATA_PATH" "$SOURCE_USER_DATA_DIR" "$SNAPSHOT_USER_DATA_DIR" "$PROFILE_DIRECTORY" <<'PY'
+import json, pathlib, sys
+from datetime import datetime, timezone
+path = pathlib.Path(sys.argv[1])
+payload = {
+    "schemaVersion": 1,
+    "sourceUserDataDir": sys.argv[2],
+    "userDataDir": sys.argv[3],
+    "profileDirectory": sys.argv[4],
+    "preparedAt": datetime.now(timezone.utc).isoformat(),
+}
+path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+PY
+chmod 600 "$METADATA_PATH"
 
-exec "$BRAVE" \
-  --remote-debugging-port="$PORT" \
-  --remote-debugging-address=127.0.0.1 \
-  --remote-allow-origins="*" \
-  --user-data-dir="$DEBUG_USER_DATA_DIR" \
-  --profile-directory="$PROFILE_DIRECTORY" \
-  --no-first-run \
-  --no-default-browser-check \
-  --new-window https://web.whatsapp.com/
+cat <<MSG
+
+Visible-profile snapshot prepared successfully.
+Profile:  $PROFILE_DIRECTORY
+Snapshot: $SNAPSHOT_USER_DATA_DIR
+Metadata: $METADATA_PATH
+
+Do not launch this snapshot manually. Start automation-platform/scripts/dev.sh.
+whatsapp-web.js will launch and own exactly one Brave WhatsApp Web page from this snapshot,
+which avoids the duplicate-tab detached-frame failure.
+MSG

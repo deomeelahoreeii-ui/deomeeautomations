@@ -35,11 +35,9 @@ function config(overrides = {}) {
     syncSettleMs: 0,
     qrPath: "/tmp/qr.png",
     browserUrl: "http://127.0.0.1:9222",
-    mode: "visible_profile",
+    mode: "browser_url",
     allowLocalAuthHistory: false,
-    allowBrowserUrlHistory: false,
-    pageRecoveryTimeoutMs: 1000,
-    protocolVersion: 3,
+    protocolVersion: 2,
     ...overrides,
   };
 }
@@ -52,7 +50,7 @@ function service(overrides = {}) {
     platform: overrides.platform || {},
     log: overrides.log || { info() {}, error() {}, warn() {} },
     sc,
-    runtime: overrides.runtime || { status: "ready", authenticated: true, error: null, visibleProfile: { profileDirectory: "Profile 1" } },
+    runtime: overrides.runtime || { status: "ready", authenticated: true, error: null, browserEndpoint: { browser: "Brave" } },
   });
 }
 
@@ -68,19 +66,18 @@ test("local_auth is explicitly blocked because it is not the visible browser pro
   const instance = service({ config: { mode: "local_auth", allowLocalAuthHistory: false } });
   await assert.rejects(
     () => instance.requestHistory({ workerId: "default", requestId: "r1", remoteJids: ["923360249999@s.whatsapp.net"], count: 10 }),
-    /separate linked-device session.*launch-brave-debug\.sh/s,
+    /separate linked-device browser session.*launch-brave-debug\.sh/s,
   );
 });
 
-test("health exposes protocol 3 and the managed visible profile", () => {
+test("health exposes protocol 2 and whether historical retrieval is actually ready", () => {
   const instance = service();
   const health = instance.health();
-  assert.equal(health.protocolVersion, 3);
+  assert.equal(health.protocolVersion, 2);
   assert.equal(health.ready, true);
   assert.equal(health.historyReady, true);
-  assert.equal(health.mode, "visible_profile");
-  assert.equal(health.browserUrl, null);
-  assert.equal(health.visibleProfile.profileDirectory, "Profile 1");
+  assert.equal(health.mode, "browser_url");
+  assert.equal(health.browserUrl, "http://127.0.0.1:9222");
 });
 
 test("health keeps LocalAuth alive but marks it unusable for history", () => {
@@ -89,20 +86,6 @@ test("health keeps LocalAuth alive but marks it unusable for history", () => {
   assert.equal(health.ready, true);
   assert.equal(health.historyReady, false);
   assert.match(health.warning, /separate linked-device/);
-});
-
-
-
-test("browser_url is preserved but blocked for normal history", async () => {
-  const instance = service({ config: { mode: "browser_url", allowBrowserUrlHistory: false } });
-  const health = instance.health();
-  assert.equal(health.ready, true);
-  assert.equal(health.historyReady, false);
-  assert.match(health.warning, /creates another tab.*visible tab frame/s);
-  await assert.rejects(
-    () => instance.requestHistory({ workerId: "default", requestId: "r-browser", remoteJids: ["923360249999@s.whatsapp.net"], count: 10 }),
-    /WWEBJS_MODE=browser_url.*creates another tab/s,
-  );
 });
 
 test("a timed-out request cannot be resurrected by late WhatsApp Web results", async () => {

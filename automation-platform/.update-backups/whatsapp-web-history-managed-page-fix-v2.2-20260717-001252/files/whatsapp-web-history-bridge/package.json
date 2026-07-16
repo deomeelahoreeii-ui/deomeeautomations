@@ -1,13 +1,13 @@
 {
   "name": "deomee-whatsapp-web-history-bridge",
-  "version": "1.2.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Historical WhatsApp file bridge backed by the official WhatsApp Web client through whatsapp-web.js",
   "type": "module",
   "main": "bridge.js",
   "scripts": {
     "start": "node bridge.js",
-    "check": "node --check bridge.js && node --check lib/config.js && node --check lib/errors.js && node --check lib/state-store.js && node --check lib/page-session.js && node --check lib/jid.js && node --check lib/history-loader.js && node --check lib/platform-client.js && node --check lib/bridge-service.js",
+    "check": "node --check bridge.js && node --check lib/config.js && node --check lib/errors.js && node --check lib/state-store.js && node --check lib/jid.js && node --check lib/history-loader.js && node --check lib/platform-client.js && node --check lib/bridge-service.js",
     "test": "node --test test/*.test.mjs"
   },
   "engines": {

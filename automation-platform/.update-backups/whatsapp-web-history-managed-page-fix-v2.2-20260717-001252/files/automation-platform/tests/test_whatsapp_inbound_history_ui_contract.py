@@ -37,9 +37,7 @@ def test_history_ui_explains_terminal_no_result_state() -> None:
     assert 'if (["succeeded", "no_results"].includes(item.status)) await scanFiles();' in source
 
 
-def test_history_ui_requires_the_managed_visible_profile_bridge() -> None:
+def test_history_ui_requires_the_visible_browser_bridge() -> None:
     source = PAGE.read_text(encoding="utf-8")
-    assert 'state.textContent = bridgeReady ? "Managed browser ready"' in source
+    assert 'state.textContent = bridgeReady ? "Visible browser ready"' in source
     assert 'if (!bridgeReady) throw new Error("The WhatsApp Web history bridge is not ready.")' in source
-    assert "whatsapp-web.js owns one Brave page" in source
-    assert "Wrong browser mode" in source

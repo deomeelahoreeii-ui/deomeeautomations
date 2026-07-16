@@ -1,6 +1,5 @@
 import { formatError } from "./errors.js";
 import { resolveDirectChat } from "./jid.js";
-import { withPageRecovery } from "./page-session.js";
 import {
   fetchOlderMessages,
   isSupportedMedia,
@@ -24,36 +23,22 @@ function responseItem(item) {
   };
 }
 
-function historyModeBlocked(config) {
-  if (config.mode === "local_auth") return config.allowLocalAuthHistory !== true;
-  if (config.mode === "browser_url") return config.allowBrowserUrlHistory !== true;
-  return config.mode !== "visible_profile";
+function localAuthHistoryBlocked(config) {
+  return config.mode === "local_auth" && config.allowLocalAuthHistory !== true;
 }
 
-function historyModeInstruction(config) {
-  if (config.mode === "local_auth") {
-    return `Historical retrieval is blocked in WWEBJS_MODE=local_auth because it is a separate linked-device session. `
-      + `Close normal Brave, run whatsapp-web-history-bridge/scripts/launch-brave-debug.sh to refresh the private snapshot, `
-      + `set WWEBJS_MODE=visible_profile, then restart dev.sh. The LocalAuth data and Baileys implementation remain preserved.`;
-  }
-  if (config.mode === "browser_url") {
-    return `Historical retrieval is blocked in WWEBJS_MODE=browser_url because whatsapp-web.js creates another tab when attaching, `
-      + `which can invalidate the visible tab frame. Use WWEBJS_MODE=visible_profile so whatsapp-web.js launches and owns one Brave page. `
-      + `The browser_url implementation remains available only when WWEBJS_ALLOW_BROWSER_URL_HISTORY=true is explicitly set.`;
-  }
-  return `Historical retrieval requires WWEBJS_MODE=visible_profile.`;
+function localAuthInstruction(config) {
+  return `Historical retrieval is blocked in WWEBJS_MODE=local_auth because that is a separate linked-device browser session. `
+    + `Use the Brave profile where the files are visibly available: close Brave, run whatsapp-web-history-bridge/scripts/launch-brave-debug.sh, `
+    + `set WWEBJS_MODE=browser_url and WWEBJS_BROWSER_URL=${config.browserUrl || "http://127.0.0.1:9222"}, then restart dev.sh. `
+    + `The LocalAuth data and Baileys implementation remain preserved.`;
 }
 
 export function createBridgeService({ config, client, store, platform, log, sc, runtime }) {
   async function prepareMedia(message) {
     const metadata = rawMediaMetadata(message);
     if (!message?.hasMedia || !isSupportedMedia(metadata)) return { metadata: null, buffer: null };
-    const media = await withPageRecovery(
-      client,
-      "media_download_page",
-      () => message.downloadMedia(),
-      { pageTimeoutMs: config.pageRecoveryTimeoutMs },
-    );
+    const media = await message.downloadMedia();
     if (!media) return { metadata, buffer: null };
     const normalized = {
       mimetype: media.mimetype || metadata.mimetype,
@@ -86,7 +71,6 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
         syncHistory: config.syncHistory !== false,
         syncHistoryTimeoutMs: config.syncHistoryTimeoutMs || 30000,
         syncSettleMs: config.syncSettleMs ?? 3500,
-        pageRecoveryTimeoutMs: config.pageRecoveryTimeoutMs || 30000,
       });
       const messages = loaded.messages;
       store.update(item.requestId, {
@@ -165,7 +149,7 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
     if (request.workerId && request.workerId !== config.workerId) {
       throw new Error(`Request targets worker ${request.workerId}, not ${config.workerId}`);
     }
-    if (historyModeBlocked(config)) throw new Error(historyModeInstruction(config));
+    if (localAuthHistoryBlocked(config)) throw new Error(localAuthInstruction(config));
     if (runtime.status !== "ready") {
       const detail = runtime.status === "qr"
         ? `WhatsApp Web bridge needs pairing; scan ${config.qrPath}`
@@ -194,26 +178,16 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
     const attachmentId = String(request.attachmentId || "").trim();
     const messageId = String(request.messageId || "").trim();
     if (!attachmentId || !messageId) throw new Error("attachmentId and messageId are required");
-    const message = await withPageRecovery(
-      client,
-      "attachment_message_reload",
-      () => client.getMessageById(messageId),
-      { pageTimeoutMs: config.pageRecoveryTimeoutMs },
-    );
+    const message = await client.getMessageById(messageId);
     if (!message) throw new Error("WhatsApp Web could not reload the requested historical message");
-    const media = await withPageRecovery(
-      client,
-      "attachment_media_download",
-      () => message.downloadMedia(),
-      { pageTimeoutMs: config.pageRecoveryTimeoutMs },
-    );
+    const media = await message.downloadMedia();
     const buffer = mediaToBuffer(media, config.mediaMaxBytes);
     const uploaded = await platform.uploadAttachment(attachmentId, buffer, media?.mimetype || request.declaredMimeType || null);
     return { uploaded: true, workerId: config.workerId, provider: "wwebjs", ...uploaded };
   }
 
   function health() {
-    const blocked = historyModeBlocked(config);
+    const blocked = localAuthHistoryBlocked(config);
     return {
       accepted: true,
       provider: "wwebjs",
@@ -225,13 +199,11 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
       ready: runtime.status === "ready",
       historyReady: runtime.status === "ready" && !blocked,
       authenticated: Boolean(runtime.authenticated),
-      error: runtime.error || (blocked ? historyModeInstruction(config) : null),
-      warning: blocked ? historyModeInstruction(config) : null,
+      error: runtime.error || (blocked ? localAuthInstruction(config) : null),
+      warning: blocked ? localAuthInstruction(config) : null,
       qrPath: runtime.status === "qr" ? config.qrPath : null,
       webVersion: runtime.webVersion || null,
       browserEndpoint: runtime.browserEndpoint || null,
-      visibleProfile: runtime.visibleProfile || null,
-      page: runtime.page || null,
       activeRequest: store.active()?.requestId || null,
     };
   }

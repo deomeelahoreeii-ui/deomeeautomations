@@ -1,59 +1,59 @@
-# WhatsApp Web History Bridge
+# WhatsApp Web history bridge
 
-This service handles **historical** WhatsApp messages and files with exactly pinned `whatsapp-web.js` 1.34.7. The existing Baileys worker remains responsible for live inbound capture and outbound delivery.
+This service retrieves historical files from the same local Brave profile in which they are already visible, then sends their metadata and bytes to the Automation Platform.
 
-## Required mode: the visible Brave profile
+## Normal architecture
 
-Historical retrieval defaults to `WWEBJS_MODE=browser_url`. The launcher makes a private local snapshot of the Brave profile in which the target chat and files are already visible, then opens that snapshot with loopback-only remote debugging. A separate `LocalAuth` linked-device session is not treated as equivalent and is blocked for historical requests by default.
+`WWEBJS_MODE=visible_profile` is the supported history mode.
 
-One-time startup:
+1. Close normal Brave once.
+2. Run `./scripts/launch-brave-debug.sh`.
+3. The script copies the selected Brave profile to a private runtime snapshot and exits. Despite its legacy filename, it no longer launches a debug browser.
+4. Start `automation-platform/scripts/dev.sh`.
+5. `whatsapp-web.js` 1.34.7 launches and owns exactly one Brave page using that snapshot.
 
-1. Save your work and close every Brave window.
-2. Create and start the private debug snapshot of that same profile:
+This replaces the earlier `browser_url` design. In whatsapp-web.js 1.34.7, browser URL attachment connects to the browser and then calls `browser.newPage()`. That produced a second WhatsApp Web tab beside the visible tab and allowed WhatsApp navigation to invalidate the frame used by `getChats()`.
 
-   ```bash
-   cd whatsapp-web-history-bridge
-   ./scripts/launch-brave-debug.sh
-   ```
+## Detached-frame recovery
 
-3. In that Brave window, open WhatsApp Web and verify the required chat/files are visible.
-4. Keep that Brave process open.
-5. In another terminal, start `automation-platform/scripts/dev.sh`.
+Protocol v3 also protects operations that can race with a WhatsApp Web navigation:
 
-The launcher reads Brave's last-used profile from `~/.config/BraveSoftware/Brave-Browser/Local State`, copies it only after Brave is closed, excludes disposable caches, and leaves the normal profile untouched. The private snapshot is stored under `~/.local/share/deomee-wwebjs-brave-visible`. Override the profile when needed:
+- contact/LID mapping;
+- number and chat lookup;
+- broad chat listing;
+- `syncHistory()`;
+- official `fetchMessages()`;
+- compatibility pagination;
+- message hydration;
+- media download.
+
+Only known Puppeteer navigation failures are retried. Ordinary application errors are returned immediately. If the current page closes, the bridge rebinds to the live WhatsApp Web page owned by its browser.
+
+## Preparing or refreshing the snapshot
 
 ```bash
-WWEBJS_BRAVE_PROFILE_DIRECTORY="Profile 1" ./scripts/launch-brave-debug.sh
+cd /home/ahmad/code/deomeeautomations/whatsapp-web-history-bridge
+./scripts/launch-brave-debug.sh
 ```
 
-To reuse the existing private snapshot without refreshing it from the normal profile:
+The profile is auto-detected from Brave's `Local State`. Override it when necessary:
 
 ```bash
-WWEBJS_REFRESH_PROFILE_SNAPSHOT=false ./scripts/launch-brave-debug.sh
+WWEBJS_VISIBLE_PROFILE_DIRECTORY="Profile 1" ./scripts/launch-brave-debug.sh
 ```
 
-## Loader strategy
-
-The bridge first asks the official `Chat.syncHistory()` API to refresh the selected chat. It then uses `Chat.fetchMessages()`. If WhatsApp Web changes its internal earlier-message function and the official call throws an opaque minified error, the bridge runs a compatibility loader inside the attached page. That loader tries both known `loadEarlierMsgs` signatures, observes the actual chat store, reloads messages by stable ID, and records detailed diagnostics.
-
-Failures now include their phase, error type, stack excerpt, chat candidates, loader exports and attempted signatures instead of only `r` or another one-character browser exception.
-
-## Responsibilities
-
-- Resolve the selected direct chat, including phone-number and LID mappings.
-- Load earlier messages from the attached WhatsApp Web browser profile.
-- Ingest normalized history into Automation Platform.
-- Immediately archive supported images, PDFs and spreadsheets.
-- Retry a historical media download later when an export asks for it.
-- Report durable request lifecycle and diagnostics over NATS.
+The script writes `data/visible-profile.json`. Authentication data and browser storage remain local and are not included in patch bundles.
 
 ## Preserved implementations
 
-The LocalAuth data directory is not deleted. To experiment with it, explicitly set both:
+- `browser_url` remains in source for diagnostics but history is blocked unless `WWEBJS_ALLOW_BROWSER_URL_HISTORY=true` is deliberately set.
+- `local_auth` remains available for experiments but is blocked for normal historical retrieval.
+- The existing Baileys implementation and `whatsappbot/archive/baileys-history-v2/` remain unchanged.
 
-```env
-WWEBJS_MODE=local_auth
-WWEBJS_ALLOW_LOCAL_AUTH_HISTORY=true
+## Commands
+
+```bash
+npm run check
+npm test
+npm start
 ```
-
-The original Baileys history implementation remains in `whatsappbot` and is snapshotted under `whatsappbot/archive/baileys-history-v2/`. Set `WHATSAPP_INBOUND_HISTORY_PROVIDER=baileys` in `automation-platform/.env` to route history requests back to it.

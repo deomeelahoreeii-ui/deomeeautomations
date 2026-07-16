@@ -90,7 +90,7 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
         <span class="badge" id="inbound-bridge-state">Bridge not checked</span>
         <small id="inbound-bridge-detail">Select a contact to check the WhatsApp Web history bridge.</small>
       </div>
-      <small class="inbound-history-help">The bridge launches one managed Brave page from a private snapshot of the profile where the files are visible. Close normal Brave and run whatsapp-web-history-bridge/scripts/launch-brave-debug.sh only when the snapshot must be created or refreshed, then start dev.sh.</small>
+      <small class="inbound-history-help">The bridge attaches to a private snapshot of the same Brave profile where the files are visible. Start Brave with whatsapp-web-history-bridge/scripts/launch-brave-debug.sh before dev.sh.</small>
 
       <div class="inbound-primary-actions">
         <button class="btn btn-primary" id="scan-inbound-files" type="button">Scan available files</button>
@@ -329,15 +329,17 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
       }
       bridgeStatus = result.data as any;
       bridgeReady = Boolean(bridgeStatus.historyReady ?? bridgeStatus.ready);
-      state.textContent = bridgeReady ? "Managed browser ready" : String(bridgeStatus.status || "Bridge unavailable");
+      state.textContent = bridgeReady ? "Visible browser ready" : String(bridgeStatus.status || "Bridge unavailable");
       if (bridgeReady) {
-        const profile = bridgeStatus.visibleProfile?.profileDirectory ? ` (${bridgeStatus.visibleProfile.profileDirectory})` : "";
-        detail.textContent = `whatsapp-web.js owns one Brave page from the private visible-profile snapshot${profile}${bridgeStatus.webVersion ? ` · Web ${bridgeStatus.webVersion}` : ""}.`;
-      } else if (bridgeStatus.ready && ["local_auth", "browser_url"].includes(bridgeStatus.mode)) {
-        state.textContent = "Wrong browser mode";
-        detail.textContent = bridgeStatus.warning || bridgeStatus.error || "Use visible_profile mode so the bridge owns one page from the copied Brave profile.";
+        const endpoint = bridgeStatus.browserUrl ? ` through ${bridgeStatus.browserUrl}` : "";
+        detail.textContent = `Attached to the visible-profile Brave snapshot${endpoint}${bridgeStatus.webVersion ? ` (Web ${bridgeStatus.webVersion})` : ""}.`;
+      } else if (bridgeStatus.ready && bridgeStatus.mode === "local_auth") {
+        state.textContent = "Wrong browser session";
+        detail.textContent = bridgeStatus.warning || bridgeStatus.error || "LocalAuth is a separate session. Attach the Brave profile where the files are visible.";
       } else if (bridgeStatus.status === "qr") {
-        detail.textContent = `The copied profile is not authenticated. Scan: ${bridgeStatus.qrPath || "whatsapp-web-history-bridge/data/login-qr.png"}`;
+        detail.textContent = bridgeStatus.mode === "browser_url"
+          ? "Open WhatsApp Web in the debug-enabled Brave profile and complete login there."
+          : `Pair the bridge by scanning: ${bridgeStatus.qrPath || "whatsapp-web-history-bridge/data/login-qr.png"}`;
       } else {
         detail.textContent = bridgeStatus.message || bridgeStatus.error || "The WhatsApp Web history bridge is not ready.";
       }
