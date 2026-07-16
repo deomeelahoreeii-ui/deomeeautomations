@@ -23,6 +23,7 @@ class _AttachmentSnapshot:
 class _MessageSnapshot:
     remote_jid: str
     message_id: str
+    ingestion_source: str
 
 
 def _snapshot_account(account: WhatsAppAccount) -> _AccountSnapshot:
@@ -46,4 +47,5 @@ def _snapshot_message(message: WhatsAppInboundMessage) -> _MessageSnapshot:
     return _MessageSnapshot(
         remote_jid=message.remote_jid,
         message_id=message.message_id,
+        ingestion_source=message.ingestion_source,
     )

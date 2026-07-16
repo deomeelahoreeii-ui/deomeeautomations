@@ -20,6 +20,7 @@ HISTORY_ACTIVE_STATUSES = {"requested", "accepted", "syncing"}
 HISTORY_QUIET_SECONDS = 8
 HISTORY_NO_RESULT_SECONDS = 45
 HISTORY_HARD_TIMEOUT_SECONDS = 180
+WEB_HISTORY_HARD_TIMEOUT_SECONDS = 600
 
 
 def history_contact_counts(
@@ -51,6 +52,28 @@ def history_contact_counts(
     return int(message_count or 0), int(attachment_count or 0)
 
 
+def history_contact_anchor(
+    session: Session,
+    *,
+    contact_id: uuid.UUID,
+) -> WhatsAppInboundMessage | None:
+    contact = session.get(WhatsAppDirectoryContact, contact_id)
+    if contact is None:
+        return None
+    return session.exec(
+        select(WhatsAppInboundMessage)
+        .where(
+            contact_message_filter(session, contact),
+            WhatsAppInboundMessage.from_me.is_(False),
+            WhatsAppInboundMessage.chat_scope == "direct",
+        )
+        .order_by(
+            WhatsAppInboundMessage.message_timestamp.asc(),
+            WhatsAppInboundMessage.message_id.asc(),
+        )
+    ).first()
+
+
 def utc_naive(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value
@@ -67,6 +90,7 @@ def serialize_history_request(
         "account_id": str(item.account_id),
         "contact_id": str(item.contact_id),
         "worker_key": item.worker_key,
+        "provider": item.provider,
         "requested_count": item.requested_count,
         "remote_jid": item.remote_jid,
         "anchor_message_id": item.anchor_message_id,
@@ -107,7 +131,13 @@ def reconcile_history_requests(
             item.last_activity_at or item.accepted_at or item.requested_at
         )
         quiet = (now - quiet_since).total_seconds()
-        if item.messages_received > 0 and quiet >= HISTORY_QUIET_SECONDS:
+        if item.provider == "wwebjs":
+            if age < WEB_HISTORY_HARD_TIMEOUT_SECONDS:
+                continue
+            item.status = "timed_out"
+            item.finished_at = now
+            item.error = item.error or "WhatsApp Web bridge did not finish the history request in time"
+        elif item.messages_received > 0 and quiet >= HISTORY_QUIET_SECONDS:
             item.status = "succeeded"
             item.finished_at = now
         elif item.messages_received == 0 and age >= HISTORY_NO_RESULT_SECONDS:
@@ -141,10 +171,10 @@ def record_history_progress(
 ) -> None:
     if not created_message or contact_id is None:
         return
-    if ingestion_source not in {"history_sync", "offline_sync"}:
+    if ingestion_source not in {"history_sync", "offline_sync", "web_history"}:
         return
 
-    cutoff = utc_naive(utcnow()) - timedelta(minutes=10)
+    cutoff = utc_naive(utcnow()) - timedelta(minutes=20)
     request = session.exec(
         select(WhatsAppInboundHistoryRequest)
         .where(

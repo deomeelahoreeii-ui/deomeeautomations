@@ -10,7 +10,7 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
   <button class="btn btn-sm" id="refresh-page" slot="actions">↻ Refresh</button>
 
   <div class="notice inbound-coverage-notice">
-    Exports are complete for messages captured by this worker. Older WhatsApp history may be partial, and expired media is reported rather than silently omitted.
+    Live messages remain captured by the Baileys worker. Historical backfill now uses the official WhatsApp Web client through whatsapp-web.js.
   </div>
 
   <section class="inbound-files-grid">
@@ -84,9 +84,13 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
             <option value="200">200</option>
           </select>
         </label>
-        <button class="btn" id="request-inbound-history" type="button" disabled>Request older history</button>
+        <button class="btn" id="request-inbound-history" type="button" disabled>Fetch via WhatsApp Web</button>
       </div>
-      <small class="inbound-history-help">Uses the oldest captured direct message as an anchor. WhatsApp may return fewer messages or none if history is unavailable.</small>
+      <div class="inbound-bridge-status" id="inbound-bridge-status">
+        <span class="badge" id="inbound-bridge-state">Bridge not checked</span>
+        <small id="inbound-bridge-detail">Select a contact to check the WhatsApp Web history bridge.</small>
+      </div>
+      <small class="inbound-history-help">The bridge loads earlier messages from WhatsApp Web. On first use, scan the QR image shown by the development script.</small>
 
       <div class="inbound-primary-actions">
         <button class="btn btn-primary" id="scan-inbound-files" type="button">Scan available files</button>
@@ -211,9 +215,11 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
     let currentHistoryRequestId = "";
     let historyRequestPollingStartedAt = 0;
     let historyRequestCache: any[] = [];
+    let bridgeReady = false;
+    let bridgeStatus: any = null;
     let searchTimer: number | undefined;
     const HISTORY_POLL_INTERVAL_MS = 5000;
-    const HISTORY_POLL_MAX_MS = 190000;
+    const HISTORY_POLL_MAX_MS = 610000;
 
     function escapeHtml(value: unknown) {
       return String(value ?? "")
@@ -277,9 +283,10 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
       contactResults.hidden = true;
       latestPreview = null;
       buildButton.disabled = true;
-      historyButton.disabled = false;
-      setStatus("Contact selected. Scan captured files or request older history.");
-      void loadHistoryRequests();
+      bridgeReady = false;
+      historyButton.disabled = true;
+      setStatus("Contact selected. Checking the WhatsApp Web history bridge…");
+      void Promise.all([loadBridgeStatus(), loadHistoryRequests()]);
     }
 
     function clearContact() {
@@ -294,10 +301,46 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
       historyScanButton.disabled = true;
       currentHistoryRequestId = "";
       historyRequestCache = [];
+      bridgeReady = false;
+      bridgeStatus = null;
+      el<HTMLElement>("inbound-bridge-state").textContent = "Bridge not checked";
+      el<HTMLElement>("inbound-bridge-detail").textContent = "Select a contact to check the WhatsApp Web history bridge.";
       stopHistoryRequestPolling();
       historyRequestItems.innerHTML = '<tr><td colspan="5" class="empty-cell">No contact selected.</td></tr>';
       el<HTMLElement>("inbound-history-state").textContent = "No request";
       contactSearch.focus();
+    }
+
+
+    async function loadBridgeStatus() {
+      if (!contactId.value) return;
+      const state = el<HTMLElement>("inbound-bridge-state");
+      const detail = el<HTMLElement>("inbound-bridge-detail");
+      state.textContent = "Checking bridge";
+      detail.textContent = "Contacting the whatsapp-web.js history service…";
+      const result = await actions.whatsapp.inboundHistoryBridgeStatus({ contactId: contactId.value });
+      if (result.error) {
+        bridgeReady = false;
+        bridgeStatus = null;
+        state.textContent = "Bridge error";
+        detail.textContent = result.error.message;
+        historyButton.disabled = true;
+        return;
+      }
+      bridgeStatus = result.data as any;
+      bridgeReady = Boolean(bridgeStatus.ready);
+      state.textContent = bridgeReady ? "WhatsApp Web ready" : String(bridgeStatus.status || "Bridge unavailable");
+      if (bridgeReady) {
+        detail.textContent = `whatsapp-web.js is connected${bridgeStatus.webVersion ? ` to Web ${bridgeStatus.webVersion}` : ""}.`;
+      } else if (bridgeStatus.status === "qr") {
+        detail.textContent = `Pair the bridge by scanning: ${bridgeStatus.qrPath || "whatsapp-web-history-bridge/data/login-qr.png"}`;
+      } else {
+        detail.textContent = bridgeStatus.message || bridgeStatus.error || "The WhatsApp Web history bridge is not ready.";
+      }
+      const active = Boolean(historyRequestCache[0]?.active);
+      historyButton.disabled = active || !bridgeReady;
+      if (!active) historyButton.textContent = bridgeReady ? "Fetch via WhatsApp Web" : "WhatsApp Web bridge unavailable";
+      if (bridgeReady) setStatus("WhatsApp Web history bridge is ready. Scan captured files or fetch older messages.", "success");
     }
 
     function selectedMediaTypes() {
@@ -384,8 +427,8 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
       if (!latest) {
         currentHistoryRequestId = "";
         stopHistoryRequestPolling();
-        historyButton.disabled = !contactId.value;
-        historyButton.textContent = "Request older history";
+        historyButton.disabled = !contactId.value || !bridgeReady;
+        historyButton.textContent = bridgeReady ? "Fetch via WhatsApp Web" : "WhatsApp Web bridge unavailable";
         historyScanButton.disabled = true;
         el<HTMLElement>("inbound-history-state").textContent = "No request";
         return;
@@ -397,16 +440,16 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
       el<HTMLElement>("history-metric-attachments").textContent = String(latest.attachments_discovered || 0);
       el<HTMLElement>("history-metric-activity").textContent = formatDate(latest.last_activity_at || latest.accepted_at || latest.requested_at);
       el<HTMLElement>("inbound-history-summary").textContent = latest.error || (latest.active
-        ? "The worker accepted this request. WhatsApp history delivery is asynchronous and the request will stop automatically if WhatsApp returns nothing."
+        ? "The WhatsApp Web bridge is loading and ingesting earlier messages. This can take several minutes for a long chat."
         : latest.status === "succeeded"
-          ? "WhatsApp delivered older messages. Scan results to review newly discovered files."
+          ? "WhatsApp Web delivered earlier messages. Scan results to review newly discovered files."
           : latest.status === "no_results"
-            ? "WhatsApp accepted the request but returned no older messages to this linked worker session. Full-history capture is enabled for future synchronization."
+            ? "WhatsApp Web reached the available boundary without finding messages older than the current capture anchor."
             : latest.status === "timed_out"
-              ? "WhatsApp did not complete the history request. You can retry after confirming the worker is connected."
+              ? "The WhatsApp Web bridge did not complete the request in time. Check its browser connection and retry."
               : "This request is complete and remains in the audit history.");
-      historyButton.disabled = Boolean(latest.active);
-      historyButton.textContent = latest.active ? "History request active" : "Retry older history";
+      historyButton.disabled = Boolean(latest.active) || !bridgeReady;
+      historyButton.textContent = latest.active ? "WhatsApp Web fetch active" : (bridgeReady ? "Fetch more older messages" : "WhatsApp Web bridge unavailable");
       historyScanButton.disabled = false;
       if (latest.active && schedulePolling) startHistoryRequestPolling();
       if (!latest.active) stopHistoryRequestPolling();
@@ -436,8 +479,8 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
       }
       if (historyRequestPollingStartedAt && Date.now() - historyRequestPollingStartedAt > HISTORY_POLL_MAX_MS) {
         stopHistoryRequestPolling();
-        historyButton.disabled = false;
-        historyButton.textContent = "Refresh or retry history";
+        historyButton.disabled = !bridgeReady;
+        historyButton.textContent = bridgeReady ? "Refresh or retry WhatsApp Web history" : "WhatsApp Web bridge unavailable";
         el<HTMLElement>("inbound-history-summary").textContent = "Live polling stopped after the maximum observation window. Refresh once to read the worker's final status.";
         return;
       }
@@ -469,12 +512,13 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
         historyButton.disabled = true;
         scanButton.disabled = true;
         const count = Number(el<HTMLSelectElement>("inbound-history-count").value || 50);
-        setStatus(`Requesting up to ${count} older WhatsApp messages…`);
+        if (!bridgeReady) throw new Error("The WhatsApp Web history bridge is not ready.");
+        setStatus(`Loading up to ${count} earlier messages through WhatsApp Web…`);
         const result = await actions.whatsapp.requestInboundHistory({ contact_id: contactId.value, count });
         if (result.error) throw new Error(result.error.message);
         const data = result.data as any;
         currentHistoryRequestId = data.id;
-        setStatus(`History request accepted from ${formatDate(data.anchor_timestamp)}. Live progress is shown below.`, "success");
+        setStatus(`WhatsApp Web history request accepted${data.anchor_timestamp ? ` before ${formatDate(data.anchor_timestamp)}` : " for the latest available history"}. Live progress is shown below.`, "success");
         await loadHistoryRequests();
         startHistoryRequestPolling(true);
       } catch (error: any) {
@@ -576,7 +620,7 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
     historyScanButton.addEventListener("click", () => void scanFiles());
     buildButton.addEventListener("click", () => void buildExport());
     el<HTMLButtonElement>("refresh-inbound-history").addEventListener("click", () => void loadHistory());
-    el<HTMLButtonElement>("refresh-page").addEventListener("click", () => { void loadHistory(); if (contactId.value) void loadHistoryRequests(); if (currentJobId) void pollJob(); });
+    el<HTMLButtonElement>("refresh-page").addEventListener("click", () => { void loadHistory(); if (contactId.value) { void loadBridgeStatus(); void loadHistoryRequests(); } if (currentJobId) void pollJob(); });
     historyItems.addEventListener("click", (event) => {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-open-export]");
       if (!button) return;

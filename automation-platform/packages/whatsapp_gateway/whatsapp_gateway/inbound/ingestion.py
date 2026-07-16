@@ -84,9 +84,10 @@ def ingest_event(
         now=now,
     )
 
+    attachment_id = None
     mapped_attachment = attachment_values(event, now)
     if mapped_attachment is not None:
-        upsert_inbound_attachment(
+        attachment_id = upsert_inbound_attachment(
             session,
             message_id=message_id,
             mapped=mapped_attachment,
@@ -102,4 +103,9 @@ def ingest_event(
         ingestion_source=event.ingestionSource,
     )
     session.commit()
-    return {"accepted": True, "created": created, "message_id": str(message_id)}
+    return {
+        "accepted": True,
+        "created": created,
+        "message_id": str(message_id),
+        "attachment_id": str(attachment_id) if attachment_id else None,
+    }

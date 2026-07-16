@@ -85,6 +85,7 @@ class WhatsAppInboundHistoryRequest(SQLModel, table=True):
         foreign_key="whatsapp_directory_contacts.id", index=True
     )
     worker_key: str = Field(index=True)
+    provider: str = Field(default="baileys", index=True)
     requested_count: int = 50
     remote_jid: str | None = Field(default=None, index=True)
     anchor_message_id: str | None = Field(default=None, index=True)

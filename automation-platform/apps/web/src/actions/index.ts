@@ -310,6 +310,13 @@ export const server = {
     inboundStatus: defineAction({
       handler: () => api("/api/v1/whatsapp/inbound/status"),
     }),
+    inboundHistoryBridgeStatus: defineAction({
+      input: z.object({ contactId: z.string().uuid() }),
+      handler: ({ contactId }) => {
+        const params = new URLSearchParams({ contact_id: contactId });
+        return api(`/api/v1/whatsapp/inbound/history/bridge/status?${params}`);
+      },
+    }),
     requestInboundHistory: defineAction({
       input: z.object({
         contact_id: z.string().uuid(),

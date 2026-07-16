@@ -21,3 +21,10 @@ def test_dev_stack_restarts_workers_older_than_history_protocol_v2() -> None:
     assert 'int(history.get("protocolVersion") or 0) < 2' in source
     assert 'history.get("syncFullHistory") is not True' in source
     assert "without bounded history protocol v2" in source
+
+
+def test_dev_stack_starts_whatsapp_web_history_bridge() -> None:
+    source = DEV_SCRIPT.read_text(encoding="utf-8")
+    assert "whatsapp-web-history-bridge" in source
+    assert "whatsapp_web_bridge_responder_ready" in source
+    assert "Starting whatsapp-web.js history bridge" in source

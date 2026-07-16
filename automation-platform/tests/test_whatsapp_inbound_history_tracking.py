@@ -88,6 +88,7 @@ def make_app(tmp_path, monkeypatch, *, worker_status: str = "accepted"):
         artifact_root=tmp_path / "artifacts",
         whatsapp_inbound_ingest_token="test-secret",
         whatsapp_inbound_history_timeout_seconds=2,
+        whatsapp_inbound_history_provider="baileys",
     )
 
     def session_override():

@@ -16,6 +16,7 @@ from whatsapp_gateway.inbound.export_api import (
 )
 from whatsapp_gateway.inbound.history import (
     get_inbound_history_request,
+    history_bridge_status,
     list_inbound_history_requests,
     request_inbound_history,
 )
@@ -52,6 +53,7 @@ router.post(
     "/attachments/{attachment_id}/content",
     dependencies=[Depends(_verify_worker_token)],
 )(upload_attachment_content)
+router.get("/history/bridge/status")(history_bridge_status)
 router.post("/history/request", status_code=status.HTTP_202_ACCEPTED)(request_inbound_history)
 router.get("/history/requests")(list_inbound_history_requests)
 router.get("/history/requests/{request_id}")(get_inbound_history_request)
@@ -69,7 +71,7 @@ __all__ = [
     "_record_history_progress", "_resolve_account", "_resolve_contact_id",
     "_serialize_history_request", "_upsert_inbound_attachment", "_upsert_inbound_message",
     "_utc_naive", "_verify_worker_token", "create_inbound_export",
-    "get_inbound_history_request", "inbound_status", "ingest_event",
+    "get_inbound_history_request", "history_bridge_status", "inbound_status", "ingest_event",
     "list_inbound_exports", "list_inbound_history_requests", "nats",
     "preview_inbound_export", "read_inbound_export", "request_inbound_history",
     "router", "upload_attachment_content",

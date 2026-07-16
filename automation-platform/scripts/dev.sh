@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 WEB_DIR="$ROOT/apps/web"
 WHATSAPP_DIR="$(cd -- "$ROOT/../whatsappbot" 2>/dev/null && pwd || true)"
+WWEBJS_DIR="$(cd -- "$ROOT/../whatsapp-web-history-bridge" 2>/dev/null && pwd || true)"
 UV="${UV:-/home/ahmad/.local/bin/uv}"
 NODE_BIN="${NODE_BIN:-/home/ahmad/.nvm/versions/node/v24.15.0/bin}"
 API_PORT="${API_PORT:-8020}"
@@ -246,6 +247,86 @@ stop_existing_whatsapp_worker() {
 }
 
 
+
+bridge_env_value() {
+  local key="$1"
+  local fallback="$2"
+  local value=""
+  if [[ -f "$WWEBJS_DIR/.env" ]]; then
+    value="$(grep -E "^${key}=" "$WWEBJS_DIR/.env" | tail -1 | cut -d= -f2- || true)"
+  fi
+  printf '%s' "${value:-$fallback}"
+}
+
+whatsapp_web_bridge_health_json() {
+  local bridge_worker bridge_subject
+  bridge_worker="$(bridge_env_value WWEBJS_WORKER_ID default)"
+  bridge_subject="$(bridge_env_value WWEBJS_HISTORY_SUBJECT whatsapp.web.inbound.history)"
+  BRIDGE_WORKER="$bridge_worker" BRIDGE_SUBJECT="$bridge_subject" "$UV" run python - <<'PYBRIDGE'
+import asyncio
+import json
+import os
+import nats
+from automation_core.config import get_settings
+
+async def main():
+    settings = get_settings()
+    client = await nats.connect(
+        settings.whatsapp_nats_url,
+        connect_timeout=1,
+        max_reconnect_attempts=0,
+    )
+    try:
+        response = await client.request(
+            f"{os.environ['BRIDGE_SUBJECT']}.{os.environ['BRIDGE_WORKER']}",
+            json.dumps({
+                "action": "bridge_health",
+                "workerId": os.environ["BRIDGE_WORKER"],
+            }).encode("utf-8"),
+            timeout=2,
+        )
+        print(response.data.decode("utf-8"))
+    finally:
+        await client.close()
+
+asyncio.run(main())
+PYBRIDGE
+}
+
+whatsapp_web_bridge_responder_ready() {
+  local health_json=""
+  health_json="$(whatsapp_web_bridge_health_json 2>/dev/null)" || return 1
+  HEALTH_JSON="$health_json" "$UV" run python - <<'PYBRIDGE' >/dev/null 2>&1
+import json
+import os
+payload = json.loads(os.environ["HEALTH_JSON"])
+if payload.get("provider") != "wwebjs":
+    raise SystemExit(1)
+if int(payload.get("protocolVersion") or 0) < 1:
+    raise SystemExit(1)
+PYBRIDGE
+}
+
+print_whatsapp_web_bridge_status() {
+  local health_json=""
+  health_json="$(whatsapp_web_bridge_health_json 2>/dev/null)" || return 1
+  HEALTH_JSON="$health_json" "$UV" run python - <<'PYBRIDGE'
+import json
+import os
+payload = json.loads(os.environ["HEALTH_JSON"])
+status = payload.get("status") or "unknown"
+print(
+    "WhatsApp Web history bridge: "
+    f"status={status}, mode={payload.get('mode')}, "
+    f"protocol={payload.get('protocolVersion')}, web={payload.get('webVersion') or 'pending'}"
+)
+if status == "qr":
+    print(f"Pairing required. Scan QR image: {payload.get('qrPath')}")
+elif not payload.get("ready"):
+    print(f"Bridge is running but not ready: {payload.get('error') or status}")
+PYBRIDGE
+}
+
 print_whatsapp_inbound_status() {
   local health_json=""
   health_json="$(whatsapp_worker_health_json 2>/dev/null)" || return 1
@@ -273,6 +354,8 @@ info "Checking project prerequisites"
 [[ -f "$WEB_DIR/package.json" ]] || fail "apps/web/package.json was not found"
 [[ -n "$WHATSAPP_DIR" && -f "$WHATSAPP_DIR/package.json" ]] \
   || fail "../whatsappbot/package.json was not found"
+[[ -n "$WWEBJS_DIR" && -f "$WWEBJS_DIR/package.json" ]] \
+  || fail "../whatsapp-web-history-bridge/package.json was not found"
 
 if [[ ! -x "$UV" ]] && command -v uv >/dev/null 2>&1; then
   UV="$(command -v uv)"
@@ -292,6 +375,32 @@ if [[ ! -f .env ]]; then
   [[ -f .env.example ]] || fail ".env and .env.example are both missing"
   cp .env.example .env
   echo "Created .env from .env.example. Add your local credentials before using integrations."
+fi
+
+
+bridge_env_created=false
+if [[ ! -f "$WWEBJS_DIR/.env" ]]; then
+  cp "$WWEBJS_DIR/.env.example" "$WWEBJS_DIR/.env"
+  bridge_env_created=true
+fi
+platform_token="$(grep -E '^WHATSAPP_INBOUND_INGEST_TOKEN=' .env | tail -1 | cut -d= -f2- || true)"
+worker_token="$(grep -E '^WA_PLATFORM_INGEST_TOKEN=' "$WHATSAPP_DIR/.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+worker_id="$(grep -E '^WA_WORKER_ID=' "$WHATSAPP_DIR/.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+bridge_token="${worker_token:-$platform_token}"
+configured_bridge_token="$(bridge_env_value WWEBJS_PLATFORM_TOKEN '')"
+configured_bridge_worker="$(bridge_env_value WWEBJS_WORKER_ID default)"
+if [[ -n "$bridge_token" && ( -z "$configured_bridge_token" || "$configured_bridge_token" == "change-me" || "$configured_bridge_token" == "replace-with-the-same-long-random-secret" ) ]]; then
+  sed -i "s|^WWEBJS_PLATFORM_TOKEN=.*$|WWEBJS_PLATFORM_TOKEN=$bridge_token|" "$WWEBJS_DIR/.env"
+fi
+if [[ -n "$worker_id" && "$worker_id" != "$configured_bridge_worker" && "$configured_bridge_worker" == "default" ]]; then
+  sed -i "s|^WWEBJS_WORKER_ID=.*$|WWEBJS_WORKER_ID=$worker_id|" "$WWEBJS_DIR/.env"
+fi
+if [[ "$bridge_env_created" == true ]]; then
+  echo "Created whatsapp-web-history-bridge/.env and copied the existing worker id/token when available."
+fi
+configured_bridge_token="$(bridge_env_value WWEBJS_PLATFORM_TOKEN '')"
+if [[ -z "$configured_bridge_token" || "$configured_bridge_token" == "change-me" || "$configured_bridge_token" == "replace-with-the-same-long-random-secret" ]]; then
+  fail "WWEBJS_PLATFORM_TOKEN is not configured. Set it to the same value as WA_PLATFORM_INGEST_TOKEN in whatsappbot/.env."
 fi
 
 info "Synchronizing Python dependencies"
@@ -335,6 +444,17 @@ fi
 (
   cd "$WHATSAPP_DIR"
   "${PNPM[@]}" install --frozen-lockfile --prefer-offline
+)
+
+
+info "Synchronizing WhatsApp Web history bridge dependencies"
+(
+  cd "$WWEBJS_DIR"
+  if [[ -f pnpm-lock.yaml ]]; then
+    PUPPETEER_SKIP_DOWNLOAD=true "${PNPM[@]}" install --frozen-lockfile --prefer-offline
+  else
+    PUPPETEER_SKIP_DOWNLOAD=true "${PNPM[@]}" install --prefer-offline
+  fi
 )
 info "Checking Docker RabbitMQ"
 COMPOSE_FILE="$ROOT/compose.yaml"
@@ -411,6 +531,17 @@ else
   pids+=("$!")
 fi
 
+if whatsapp_web_bridge_responder_ready; then
+  echo "An existing whatsapp-web.js history bridge protocol v1 is running; it will be reused."
+else
+  info "Starting whatsapp-web.js history bridge"
+  (
+    cd "$WWEBJS_DIR"
+    exec "${PNPM[@]}" start
+  ) &
+  pids+=("$!")
+fi
+
 info "Starting Astro web application"
 (
   cd "$WEB_DIR"
@@ -432,6 +563,14 @@ if ! whatsapp_worker_inbound_ready; then
   fail "The WhatsApp worker became reachable, but inbound history protocol v2 is not ready."
 fi
 print_whatsapp_inbound_status
+for _ in {1..30}; do
+  whatsapp_web_bridge_responder_ready && break
+  sleep 1
+done
+if ! whatsapp_web_bridge_responder_ready; then
+  fail "The whatsapp-web.js history bridge did not register its NATS responder."
+fi
+print_whatsapp_web_bridge_status
 
 echo
 echo "Automation Platform is ready:"
@@ -440,6 +579,7 @@ echo "  CRM sheets:        http://localhost:$WEB_PORT/crm/"
 echo "  CRM PDFs:          http://localhost:$WEB_PORT/crm/pdfs/"
 echo "  Sheet rows to PDF: http://localhost:$WEB_PORT/crm/convert/"
 echo "  Inbound WA files:  http://localhost:$WEB_PORT/whatsapp/inbound-files"
+echo "  Web history QR:    $WWEBJS_DIR/data/login-qr.png (only when pairing is required)"
 echo "  API:               http://localhost:$API_PORT"
 echo "  API docs:          http://localhost:$API_PORT/docs"
 echo

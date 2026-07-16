@@ -52,7 +52,12 @@ async def refresh_history_request_from_worker(
     if item.status not in {"requested", "accepted", "syncing"}:
         return False
 
-    subject = f"{settings.whatsapp_inbound_history_subject}.{item.worker_key}"
+    subject_base = (
+        settings.whatsapp_web_history_subject
+        if item.provider == "wwebjs"
+        else settings.whatsapp_inbound_history_subject
+    )
+    subject = f"{subject_base}.{item.worker_key}"
     payload = {
         "action": "history_status",
         "requestId": item.request_id,
@@ -90,6 +95,14 @@ async def refresh_history_request_from_worker(
         if item.last_activity_at != worker_updated_at:
             item.last_activity_at = worker_updated_at
             changed = True
+    worker_messages = int(result.get("messagesReceived") or 0)
+    worker_attachments = int(result.get("attachmentsDiscovered") or 0)
+    if worker_messages > item.messages_received:
+        item.messages_received = worker_messages
+        changed = True
+    if worker_attachments > item.attachments_discovered:
+        item.attachments_discovered = worker_attachments
+        changed = True
     error = str(result.get("error") or "").strip() or None
     if item.error != error:
         item.error = error

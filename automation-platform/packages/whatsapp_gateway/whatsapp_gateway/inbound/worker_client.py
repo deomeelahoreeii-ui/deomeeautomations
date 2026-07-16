@@ -52,8 +52,13 @@ async def _request_media_download(
         "originalFilename": attachment.original_filename,
         "declaredMimeType": attachment.mime_type,
     }
+    subject_base = (
+        settings.whatsapp_web_history_subject
+        if message.ingestion_source == "web_history"
+        else settings.whatsapp_inbound_media_subject
+    )
     response = await client.request(
-        f"{settings.whatsapp_inbound_media_subject}.{account.worker_key}",
+        f"{subject_base}.{account.worker_key}",
         json.dumps(payload).encode("utf-8"),
         timeout=settings.whatsapp_inbound_media_timeout_seconds,
     )
