@@ -28,23 +28,8 @@ class FakeNatsMessage:
 
 
 class FakeNatsClient:
-    def __init__(self, status: str = "accepted") -> None:
-        self.status = status
-
     async def request(self, _subject, payload, timeout):
         request = json.loads(payload.decode("utf-8"))
-        if request.get("action") == "history_status":
-            return FakeNatsMessage(
-                {
-                    "accepted": self.status != "failed",
-                    "requestId": request["requestId"],
-                    "workerId": "default",
-                    "status": self.status,
-                    "active": self.status in {"requested", "accepted", "syncing"},
-                    "error": None,
-                    "updatedAt": "2026-07-16 20:40:31",
-                }
-            )
         return FakeNatsMessage(
             {
                 "accepted": True,
@@ -55,7 +40,6 @@ class FakeNatsClient:
                 "requestedCount": request["count"],
                 "anchorMessageId": "anchor-message",
                 "anchorTimestamp": "2026-07-15T20:00:00.000Z",
-                "status": "accepted",
             }
         )
 
@@ -63,7 +47,7 @@ class FakeNatsClient:
         return None
 
 
-def make_app(tmp_path, monkeypatch, *, worker_status: str = "accepted"):
+def make_app(tmp_path, monkeypatch):
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -98,7 +82,7 @@ def make_app(tmp_path, monkeypatch, *, worker_status: str = "accepted"):
     app.dependency_overrides[get_settings] = lambda: settings
     monkeypatch.setattr(
         "whatsapp_gateway.inbound_api.nats.connect",
-        lambda *_args, **_kwargs: _async_value(FakeNatsClient(worker_status)),
+        lambda *_args, **_kwargs: _async_value(FakeNatsClient()),
     )
     return engine, contact_id
 
@@ -196,88 +180,5 @@ def test_history_ingest_updates_progress_and_quiet_request_completes(
             assert status.status_code == 200
             assert status.json()["status"] == "succeeded"
             assert status.json()["active"] is False
-    finally:
-        app.dependency_overrides.clear()
-
-
-
-def test_worker_terminal_status_stops_an_accepted_request(tmp_path, monkeypatch) -> None:
-    _engine, contact_id = make_app(tmp_path, monkeypatch, worker_status="no_results")
-    try:
-        with TestClient(app) as client:
-            created = client.post(
-                "/api/v1/whatsapp/inbound/history/request",
-                json={"contact_id": str(contact_id), "count": 50},
-            )
-            assert created.status_code == 202, created.text
-            request_id = created.json()["id"]
-
-            status = client.get(
-                f"/api/v1/whatsapp/inbound/history/requests/{request_id}"
-            )
-            assert status.status_code == 200, status.text
-            payload = status.json()
-            assert payload["status"] == "no_results"
-            assert payload["active"] is False
-            assert payload["finished_at"] is not None
-    finally:
-        app.dependency_overrides.clear()
-
-
-def test_late_history_ingest_reopens_succeeded_audit(tmp_path, monkeypatch) -> None:
-    engine, contact_id = make_app(tmp_path, monkeypatch)
-    try:
-        with TestClient(app) as client:
-            created = client.post(
-                "/api/v1/whatsapp/inbound/history/request",
-                json={"contact_id": str(contact_id), "count": 50},
-            )
-            assert created.status_code == 202, created.text
-            request_id = created.json()["id"]
-            with Session(engine) as session:
-                audit = session.get(WhatsAppInboundHistoryRequest, uuid.UUID(request_id))
-                assert audit is not None
-                audit.status = "succeeded"
-                audit.finished_at = utcnow()
-                session.add(audit)
-                session.commit()
-
-            event = {
-                "workerId": "default",
-                "messageId": "late-history-message",
-                "remoteJid": "923360249999@s.whatsapp.net",
-                "participantJid": None,
-                "senderJid": "923360249999@s.whatsapp.net",
-                "fromMe": False,
-                "chatScope": "direct",
-                "messageTimestamp": "2026-07-15T18:00:00Z",
-                "pushName": "Faheem",
-                "text": None,
-                "messageType": "documentMessage",
-                "ingestionSource": "history_sync",
-                "payloadSha256": "2" * 64,
-                "rawPayload": {},
-                "attachment": {
-                    "mediaKind": "document",
-                    "messageKey": "documentMessage",
-                    "originalFilename": "late.pdf",
-                    "mimeType": "application/pdf",
-                    "declaredSize": 321,
-                },
-            }
-            ingested = client.post(
-                "/api/v1/whatsapp/inbound/events",
-                json=event,
-                headers={"x-whatsapp-worker-token": "test-secret"},
-            )
-            assert ingested.status_code == 200, ingested.text
-
-            with Session(engine) as session:
-                audit = session.get(WhatsAppInboundHistoryRequest, uuid.UUID(request_id))
-                assert audit is not None
-                assert audit.status == "syncing"
-                assert audit.finished_at is None
-                assert audit.messages_received == 1
-                assert audit.attachments_discovered == 1
     finally:
         app.dependency_overrides.clear()

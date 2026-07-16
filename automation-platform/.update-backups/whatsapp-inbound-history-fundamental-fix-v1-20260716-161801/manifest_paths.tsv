@@ -1,0 +1,16 @@
+modified	whatsappbot/lib/inbound-history.js
+modified	whatsappbot/lib/inbound-message-store.js
+modified	whatsappbot/lib/inbound-capture.js
+modified	whatsappbot/lib/config.js
+modified	whatsappbot/.env.example
+modified	whatsappbot/worker.js
+modified	whatsappbot/package.json
+new	whatsappbot/test/inbound-history-lifecycle.test.mjs
+modified	automation-platform/packages/whatsapp_gateway/whatsapp_gateway/inbound/history.py
+new	automation-platform/packages/whatsapp_gateway/whatsapp_gateway/inbound/history_worker_status.py
+modified	automation-platform/packages/whatsapp_gateway/whatsapp_gateway/inbound/history_tracking.py
+modified	automation-platform/apps/web/src/pages/whatsapp/inbound-files.astro
+modified	automation-platform/scripts/dev.sh
+modified	automation-platform/tests/test_whatsapp_inbound_history_tracking.py
+new	automation-platform/tests/test_whatsapp_inbound_history_ui_contract.py
+new	automation-platform/tests/test_whatsapp_inbound_history_runtime_contract.py

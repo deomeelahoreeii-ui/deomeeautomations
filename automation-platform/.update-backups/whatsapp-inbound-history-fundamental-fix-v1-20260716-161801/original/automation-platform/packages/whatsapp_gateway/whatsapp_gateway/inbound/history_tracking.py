@@ -152,14 +152,7 @@ def record_history_progress(
             WhatsAppInboundHistoryRequest.contact_id == contact_id,
             WhatsAppInboundHistoryRequest.requested_at >= cutoff,
             WhatsAppInboundHistoryRequest.status.in_(
-                [
-                    "requested",
-                    "accepted",
-                    "syncing",
-                    "succeeded",
-                    "no_results",
-                    "timed_out",
-                ]
+                ["requested", "accepted", "syncing", "no_results", "timed_out"]
             ),
         )
         .order_by(WhatsAppInboundHistoryRequest.requested_at.desc())

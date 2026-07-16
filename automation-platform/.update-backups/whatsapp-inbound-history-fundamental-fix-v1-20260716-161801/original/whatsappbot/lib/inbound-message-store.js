@@ -3,15 +3,6 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const SCHEMA_VERSION = 2;
-const ACTIVE_HISTORY_STATUSES = new Set(["requested", "accepted", "syncing"]);
-
-function sqliteUtcMs(value) {
-  if (!value) return Number.NaN;
-  const text = String(value).trim();
-  const normalized = text.includes("T") ? text : text.replace(" ", "T");
-  return Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(normalized) ? normalized : `${normalized}Z`);
-}
-
 
 function json(value) {
   return JSON.stringify(value ?? null);
@@ -202,109 +193,17 @@ export class InboundMessageStore {
   }
 
   recordHistoryRequest({ requestId, remoteJid, count, anchorMessageId, anchorTimestamp, operationId }) {
-    const status = operationId ? "accepted" : "requested";
     this.db.prepare(`
       INSERT INTO inbound_history_requests (
         request_id, remote_jid, requested_count, anchor_message_id,
         anchor_timestamp, operation_id, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, 'requested')
       ON CONFLICT(request_id) DO UPDATE SET
-        remote_jid=excluded.remote_jid,
-        requested_count=excluded.requested_count,
-        anchor_message_id=excluded.anchor_message_id,
-        anchor_timestamp=excluded.anchor_timestamp,
         operation_id=excluded.operation_id,
-        status=CASE
-          WHEN inbound_history_requests.status='syncing' THEN 'syncing'
-          ELSE excluded.status
-        END,
+        status='requested',
         last_error=NULL,
-        updated_at=CASE
-          WHEN inbound_history_requests.status='syncing' THEN inbound_history_requests.updated_at
-          ELSE CURRENT_TIMESTAMP
-        END
-    `).run(requestId, remoteJid, count, anchorMessageId, anchorTimestamp, operationId || null, status);
-  }
-
-  getHistoryRequest(requestId) {
-    return this.db.prepare(`
-      SELECT request_id, remote_jid, requested_count, anchor_message_id,
-             anchor_timestamp, operation_id, status, last_error,
-             requested_at, updated_at
-      FROM inbound_history_requests
-      WHERE request_id=?
-    `).get(requestId) || null;
-  }
-
-  reconcileHistoryRequest(requestId, { quietMs = 8000, noResultMs = 45000, hardTimeoutMs = 180000, nowMs = Date.now() } = {}) {
-    const row = this.getHistoryRequest(requestId);
-    if (!row || !ACTIVE_HISTORY_STATUSES.has(row.status)) return row;
-    const requestedMs = sqliteUtcMs(row.requested_at);
-    const updatedMs = sqliteUtcMs(row.updated_at);
-    const ageMs = Number.isFinite(requestedMs) ? Math.max(0, nowMs - requestedMs) : 0;
-    const quietForMs = Number.isFinite(updatedMs) ? Math.max(0, nowMs - updatedMs) : 0;
-    let status = row.status;
-    let error = row.last_error;
-    if (hardTimeoutMs > 0 && ageMs >= hardTimeoutMs) {
-      status = "timed_out";
-      error = error || "WhatsApp did not finish the history request in time";
-    } else if (row.status === "syncing" && quietForMs >= quietMs) {
-      status = "succeeded";
-      error = null;
-    } else if (row.status !== "syncing" && noResultMs > 0 && ageMs >= noResultMs) {
-      status = "no_results";
-      error = null;
-    }
-    if (status !== row.status || error !== row.last_error) {
-      this.db.prepare(`
-        UPDATE inbound_history_requests
-        SET status=?, last_error=?, updated_at=CURRENT_TIMESTAMP
-        WHERE request_id=?
-      `).run(status, error, requestId);
-      return this.getHistoryRequest(requestId);
-    }
-    return row;
-  }
-
-  reconcileHistoryRequests(options = {}) {
-    const rows = this.db.prepare(`
-      SELECT request_id FROM inbound_history_requests
-      WHERE status IN ('requested', 'accepted', 'syncing')
-    `).all();
-    return rows.map((row) => this.reconcileHistoryRequest(row.request_id, options));
-  }
-
-  activeHistoryRequest(options = {}) {
-    this.reconcileHistoryRequests(options);
-    return this.db.prepare(`
-      SELECT request_id, remote_jid, requested_count, anchor_message_id,
-             anchor_timestamp, operation_id, status, last_error,
-             requested_at, updated_at
-      FROM inbound_history_requests
-      WHERE status IN ('requested', 'accepted', 'syncing')
-      ORDER BY requested_at DESC, id DESC
-      LIMIT 1
-    `).get() || null;
-  }
-
-  markActiveHistoryForJids(remoteJids, { complete = false } = {}) {
-    const candidates = [...new Set((remoteJids || []).map((value) => String(value || "").trim()).filter(Boolean))];
-    if (!candidates.length) return null;
-    const placeholders = candidates.map(() => "?").join(",");
-    const row = this.db.prepare(`
-      SELECT request_id FROM inbound_history_requests
-      WHERE status IN ('requested', 'accepted', 'syncing')
-        AND remote_jid IN (${placeholders})
-      ORDER BY requested_at DESC, id DESC
-      LIMIT 1
-    `).get(...candidates);
-    if (!row) return null;
-    this.db.prepare(`
-      UPDATE inbound_history_requests
-      SET status=?, last_error=NULL, updated_at=CURRENT_TIMESTAMP
-      WHERE request_id=?
-    `).run(complete ? "succeeded" : "syncing", row.request_id);
-    return this.getHistoryRequest(row.request_id);
+        updated_at=CURRENT_TIMESTAMP
+    `).run(requestId, remoteJid, count, anchorMessageId, anchorTimestamp, operationId || null);
   }
 
   markHistoryRequestFailed(requestId, error) {

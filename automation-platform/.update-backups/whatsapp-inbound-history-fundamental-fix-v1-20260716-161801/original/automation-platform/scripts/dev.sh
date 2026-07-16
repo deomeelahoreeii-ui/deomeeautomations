@@ -142,16 +142,11 @@ import sqlite3
 
 payload = json.loads(os.environ["HEALTH_JSON"])
 inbound = payload.get("inboundCapture") or {}
-history = payload.get("inboundHistory") or {}
 if not payload.get("ready"):
     raise SystemExit(1)
 if not inbound.get("enabled"):
     raise SystemExit(1)
 if int(inbound.get("schemaVersion") or 0) < 2:
-    raise SystemExit(1)
-if int(history.get("protocolVersion") or 0) < 2:
-    raise SystemExit(1)
-if history.get("syncFullHistory") is not True:
     raise SystemExit(1)
 store_path = Path(str(inbound.get("filePath") or ""))
 if not store_path.is_file():
@@ -393,9 +388,9 @@ info "Starting one Celery worker for AntiDengue, CRM, and WhatsApp exports"
 pids+=("$!")
 
 if whatsapp_worker_inbound_ready; then
-  echo "An existing WhatsApp worker with bounded history protocol v2 is ready; it will be reused."
+  echo "An existing Bundle 3A WhatsApp worker is ready; it will be reused."
 elif whatsapp_worker_ready; then
-  info "Restarting older WhatsApp worker without bounded history protocol v2"
+  info "Restarting older WhatsApp worker without on-demand history support"
   stop_existing_whatsapp_worker
   (
     cd "$WHATSAPP_DIR"
@@ -429,7 +424,7 @@ done
 if ! whatsapp_worker_inbound_ready; then
   echo "Latest WhatsApp worker health payload:" >&2
   whatsapp_worker_health_json >&2 || true
-  fail "The WhatsApp worker became reachable, but inbound history protocol v2 is not ready."
+  fail "The WhatsApp worker became reachable, but Bundle 3A inbound capture/history support is not ready."
 fi
 print_whatsapp_inbound_status
 

@@ -20,7 +20,6 @@ from whatsapp_gateway.inbound.history_tracking import (
     reconcile_history_requests as _reconcile_history_requests,
     serialize_history_request as _serialize_history_request,
 )
-from whatsapp_gateway.inbound.history_worker_status import refresh_history_request_from_worker
 from whatsapp_gateway.inbound.schemas import RequestInboundHistory
 from whatsapp_gateway.models import (
     WhatsAppAccount,
@@ -160,15 +159,13 @@ def list_inbound_history_requests(
 
 
 @router.get("/history/requests/{request_id}")
-async def get_inbound_history_request(
+def get_inbound_history_request(
     request_id: uuid.UUID,
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     item = session.get(WhatsAppInboundHistoryRequest, request_id)
     if item is None:
         raise HTTPException(status_code=404, detail="History request not found")
-    await refresh_history_request_from_worker(session, item=item, settings=settings)
     _reconcile_history_requests(session, contact_id=item.contact_id)
     session.refresh(item)
     return _serialize_history_request(item)

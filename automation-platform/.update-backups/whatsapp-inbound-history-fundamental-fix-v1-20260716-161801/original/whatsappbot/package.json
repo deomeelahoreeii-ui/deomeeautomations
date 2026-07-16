@@ -9,7 +9,7 @@
     "test": "node --check worker.js",
     "tokens": "node scripts/check-tctokens.mjs",
     "worker": "node worker.js",
-    "test:inbound": "node --test test/inbound-foundation.test.mjs test/inbound-history-lifecycle.test.mjs"
+    "test:inbound": "node --test test/inbound-foundation.test.mjs"
   },
   "keywords": [],
   "author": "",

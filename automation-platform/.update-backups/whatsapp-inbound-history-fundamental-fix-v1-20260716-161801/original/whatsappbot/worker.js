@@ -35,7 +35,7 @@ import { createLogger } from "./lib/logger.js";
 import { InboundMessageStore } from "./lib/inbound-message-store.js";
 import { createInboundCapture } from "./lib/inbound-capture.js";
 import { createInboundMediaResponder } from "./lib/inbound-media.js";
-import { createInboundHistoryResponder, inboundHistorySocketOptions } from "./lib/inbound-history.js";
+import { createInboundHistoryResponder } from "./lib/inbound-history.js";
 
 const log = createLogger("worker");
 const sc = StringCodec();
@@ -718,13 +718,6 @@ function workerHealthPayload() {
     identityStore: identityStore.stats(),
     targetPolicy: config.directJidPolicy,
     inboundCapture: inboundCapture?.stats() || { enabled: false },
-    inboundHistory: {
-      protocolVersion: 2,
-      syncFullHistory: config.inboundSyncFullHistory,
-      quietMs: config.inboundHistoryQuietMs,
-      noResultMs: config.inboundHistoryNoResultMs,
-      hardTimeoutMs: config.inboundHistoryHardTimeoutMs,
-    },
   };
 }
 
@@ -1832,8 +1825,6 @@ async function startWorker() {
     log.info("Starting WhatsApp worker", {
       authDir: config.authDir,
       natsUrl: config.natsUrl,
-      inboundCapture: config.enableInboundCapture,
-      inboundSyncFullHistory: config.inboundSyncFullHistory,
     });
 
     const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
@@ -1845,7 +1836,6 @@ async function startWorker() {
       logger: pino({ level: config.logLevel === "debug" ? "debug" : "silent" }),
       version: latestVersion?.version,
       browser: configuredBrowserIdentity(),
-      ...inboundHistorySocketOptions(config),
       getMessage: async (key) => inboundCapture?.getMessage(key)?.message,
     });
 
@@ -1862,20 +1852,13 @@ async function startWorker() {
     });
 
     sock.ev.on("messages.upsert", (event) => {
-      const isRequestedHistory = Boolean(
-        inboundHistoryResponder?.handleMessagesUpsert(event),
-      );
-      inboundCapture?.handleMessagesUpsert(
-        event,
-        isRequestedHistory ? { source: "history_sync" } : undefined,
-      );
+      inboundCapture?.handleMessagesUpsert(event);
       if (groupDiscovery) {
         groupDiscovery.handleMessagesUpsert(sock, event);
       }
     });
 
     sock.ev.on("messaging-history.set", (event) => {
-      inboundHistoryResponder?.handleMessagingHistorySet(event);
       inboundCapture?.handleMessagingHistorySet(event);
     });
 

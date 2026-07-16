@@ -1,0 +1,12 @@
+whatsappbot/lib/inbound-history.js
+whatsappbot/lib/inbound-message-store.js
+whatsappbot/lib/inbound-capture.js
+whatsappbot/lib/config.js
+whatsappbot/.env.example
+whatsappbot/worker.js
+whatsappbot/package.json
+automation-platform/packages/whatsapp_gateway/whatsapp_gateway/inbound/history.py
+automation-platform/packages/whatsapp_gateway/whatsapp_gateway/inbound/history_tracking.py
+automation-platform/apps/web/src/pages/whatsapp/inbound-files.astro
+automation-platform/scripts/dev.sh
+automation-platform/tests/test_whatsapp_inbound_history_tracking.py

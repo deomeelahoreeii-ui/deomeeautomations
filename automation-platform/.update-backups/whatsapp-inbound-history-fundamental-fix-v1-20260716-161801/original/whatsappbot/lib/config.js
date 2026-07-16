@@ -97,10 +97,6 @@ export const config = {
   inboundMediaSubject: process.env.WA_INBOUND_MEDIA_SUBJECT || "whatsapp.worker.inbound.media",
   inboundHistorySubject: process.env.WA_INBOUND_HISTORY_SUBJECT || "whatsapp.worker.inbound.history",
   inboundHistoryMaxCount: parseInteger("WA_INBOUND_HISTORY_MAX_COUNT", 200),
-  inboundHistoryQuietMs: parseInteger("WA_INBOUND_HISTORY_QUIET_MS", 8000),
-  inboundHistoryNoResultMs: parseInteger("WA_INBOUND_HISTORY_NO_RESULT_MS", 45000),
-  inboundHistoryHardTimeoutMs: parseInteger("WA_INBOUND_HISTORY_HARD_TIMEOUT_MS", 180000),
-  inboundSyncFullHistory: parseBoolean("WA_INBOUND_SYNC_FULL_HISTORY", true),
   inboundMediaMaxBytes: parseInteger("WA_INBOUND_MEDIA_MAX_BYTES", 75 * 1024 * 1024),
   inboundMediaUploadTimeoutMs: parseInteger("WA_INBOUND_MEDIA_UPLOAD_TIMEOUT_MS", 180000),
   groupsFile:

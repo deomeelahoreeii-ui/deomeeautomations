@@ -209,11 +209,7 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
     let pollTimer: number | undefined;
     let historyRequestPollTimer: number | undefined;
     let currentHistoryRequestId = "";
-    let historyRequestPollingStartedAt = 0;
-    let historyRequestCache: any[] = [];
     let searchTimer: number | undefined;
-    const HISTORY_POLL_INTERVAL_MS = 5000;
-    const HISTORY_POLL_MAX_MS = 190000;
 
     function escapeHtml(value: unknown) {
       return String(value ?? "")
@@ -241,12 +237,6 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
     function setStatus(message: string, kind: "" | "error" | "success" = "") {
       formStatus.textContent = message;
       formStatus.className = `inbound-form-status ${kind}`;
-    }
-
-    function stopHistoryRequestPolling() {
-      if (historyRequestPollTimer) window.clearTimeout(historyRequestPollTimer);
-      historyRequestPollTimer = undefined;
-      historyRequestPollingStartedAt = 0;
     }
 
     async function searchContacts() {
@@ -293,8 +283,8 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
       historyButton.disabled = true;
       historyScanButton.disabled = true;
       currentHistoryRequestId = "";
-      historyRequestCache = [];
-      stopHistoryRequestPolling();
+      if (historyRequestPollTimer) window.clearInterval(historyRequestPollTimer);
+      historyRequestPollTimer = undefined;
       historyRequestItems.innerHTML = '<tr><td colspan="5" class="empty-cell">No contact selected.</td></tr>';
       el<HTMLElement>("inbound-history-state").textContent = "No request";
       contactSearch.focus();
@@ -375,15 +365,13 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
       }
     }
 
-    function renderHistoryRequests(items: any[], schedulePolling = true) {
-      historyRequestCache = items;
+    function renderHistoryRequests(items: any[]) {
       const latest = items[0];
       historyRequestItems.innerHTML = items.length
         ? items.map((item: any) => `<tr><td>${escapeHtml(formatDate(item.requested_at))}<small>${escapeHtml(String(item.requested_count))} requested</small></td><td>${escapeHtml(formatDate(item.anchor_timestamp))}<small>${escapeHtml(item.remote_jid || "Waiting for worker")}</small></td><td>${escapeHtml(String(item.messages_received || 0))} messages<small>${escapeHtml(String(item.attachments_discovered || 0))} files</small></td><td><span class="badge">${escapeHtml(item.status)}</span></td><td>${escapeHtml(item.error || (item.active ? "Waiting for WhatsApp" : "Completed"))}</td></tr>`).join("")
         : '<tr><td colspan="5" class="empty-cell">No history requests for this contact.</td></tr>';
       if (!latest) {
         currentHistoryRequestId = "";
-        stopHistoryRequestPolling();
         historyButton.disabled = !contactId.value;
         historyButton.textContent = "Request older history";
         historyScanButton.disabled = true;
@@ -397,19 +385,16 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
       el<HTMLElement>("history-metric-attachments").textContent = String(latest.attachments_discovered || 0);
       el<HTMLElement>("history-metric-activity").textContent = formatDate(latest.last_activity_at || latest.accepted_at || latest.requested_at);
       el<HTMLElement>("inbound-history-summary").textContent = latest.error || (latest.active
-        ? "The worker accepted this request. WhatsApp history delivery is asynchronous and the request will stop automatically if WhatsApp returns nothing."
+        ? "The worker accepted this request. New history events will update these counters automatically."
         : latest.status === "succeeded"
           ? "WhatsApp delivered older messages. Scan results to review newly discovered files."
           : latest.status === "no_results"
-            ? "WhatsApp accepted the request but returned no older messages to this linked worker session. Full-history capture is enabled for future synchronization."
-            : latest.status === "timed_out"
-              ? "WhatsApp did not complete the history request. You can retry after confirming the worker is connected."
-              : "This request is complete and remains in the audit history.");
+            ? "WhatsApp returned no new messages before the observation window closed. You may retry later."
+            : "This request is complete and remains in the audit history.");
       historyButton.disabled = Boolean(latest.active);
       historyButton.textContent = latest.active ? "History request active" : "Retry older history";
       historyScanButton.disabled = false;
-      if (latest.active && schedulePolling) startHistoryRequestPolling();
-      if (!latest.active) stopHistoryRequestPolling();
+      if (latest.active) startHistoryRequestPolling();
     }
 
     async function loadHistoryRequests() {
@@ -422,45 +407,22 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
       renderHistoryRequests((result.data as any).items || []);
     }
 
-    function scheduleHistoryRequestPoll(delayMs = HISTORY_POLL_INTERVAL_MS) {
-      if (historyRequestPollTimer) window.clearTimeout(historyRequestPollTimer);
-      historyRequestPollTimer = window.setTimeout(() => void pollHistoryRequest(), delayMs);
-    }
-
     async function pollHistoryRequest() {
-      historyRequestPollTimer = undefined;
       if (!currentHistoryRequestId) return;
-      if (document.hidden) {
-        scheduleHistoryRequestPoll(HISTORY_POLL_INTERVAL_MS * 2);
-        return;
-      }
-      if (historyRequestPollingStartedAt && Date.now() - historyRequestPollingStartedAt > HISTORY_POLL_MAX_MS) {
-        stopHistoryRequestPolling();
-        historyButton.disabled = false;
-        historyButton.textContent = "Refresh or retry history";
-        el<HTMLElement>("inbound-history-summary").textContent = "Live polling stopped after the maximum observation window. Refresh once to read the worker's final status.";
-        return;
-      }
       const result = await actions.whatsapp.inboundHistoryRequest({ id: currentHistoryRequestId });
-      if (result.error) {
-        scheduleHistoryRequestPoll();
-        return;
-      }
+      if (result.error) return;
       const item = result.data as any;
-      const remaining = historyRequestCache.filter((entry: any) => entry.id !== item.id);
-      renderHistoryRequests([item, ...remaining], false);
-      if (item.active) {
-        scheduleHistoryRequestPoll();
-        return;
-      }
-      stopHistoryRequestPolling();
       await loadHistoryRequests();
-      if (["succeeded", "no_results"].includes(item.status)) await scanFiles();
+      if (!item.active) {
+        if (historyRequestPollTimer) window.clearInterval(historyRequestPollTimer);
+        historyRequestPollTimer = undefined;
+        if (["succeeded", "no_results"].includes(item.status)) await scanFiles();
+      }
     }
 
-    function startHistoryRequestPolling(reset = false) {
-      if (reset || !historyRequestPollingStartedAt) historyRequestPollingStartedAt = Date.now();
-      if (!historyRequestPollTimer) scheduleHistoryRequestPoll(250);
+    function startHistoryRequestPolling() {
+      if (historyRequestPollTimer) return;
+      historyRequestPollTimer = window.setInterval(() => void pollHistoryRequest(), 2000);
     }
 
     async function requestOlderHistory() {
@@ -476,7 +438,7 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
         currentHistoryRequestId = data.id;
         setStatus(`History request accepted from ${formatDate(data.anchor_timestamp)}. Live progress is shown below.`, "success");
         await loadHistoryRequests();
-        startHistoryRequestPolling(true);
+        startHistoryRequestPolling();
       } catch (error: any) {
         setStatus(error.message || String(error), "error");
         await loadHistoryRequests();
@@ -588,12 +550,6 @@ import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
     document.addEventListener("click", (event) => {
       if (!(event.target as HTMLElement).closest(".inbound-contact-picker")) contactResults.hidden = true;
     });
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden && currentHistoryRequestId && historyRequestCache[0]?.active) {
-        startHistoryRequestPolling();
-      }
-    });
-    window.addEventListener("beforeunload", stopHistoryRequestPolling);
     void loadHistory();
   </script>
 </WhatsAppLayout>

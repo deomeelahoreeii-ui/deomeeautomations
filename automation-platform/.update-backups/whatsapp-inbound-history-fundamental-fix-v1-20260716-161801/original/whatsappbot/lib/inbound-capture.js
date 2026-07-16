@@ -43,12 +43,7 @@ export function createInboundCapture({ config, store, log }) {
   function stop() { if (timer) clearInterval(timer); timer = null; }
 
   return {
-    handleMessagesUpsert(event, { source = null } = {}) {
-      return capture(
-        event?.messages || [],
-        source || (event?.type === "append" ? "offline_sync" : "live"),
-      );
-    },
+    handleMessagesUpsert(event) { return capture(event?.messages || [], event?.type === "append" ? "offline_sync" : "live"); },
     handleMessagingHistorySet(event) { return capture(event?.messages || [], "history_sync"); },
     getMessage(key) { return store.getMessage(String(key?.remoteJid || ""), String(key?.id || "")); },
     stats() { return { enabled: config.enableInboundCapture, ...store.stats() }; },
