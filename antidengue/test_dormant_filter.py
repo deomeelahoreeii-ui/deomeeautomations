@@ -1,6 +1,8 @@
-import pandas as pd
+import asyncio
 import sqlite3
 from pathlib import Path
+
+import pandas as pd
 
 import main
 from main import (
@@ -38,6 +40,29 @@ def test_filter_uses_total_activities_when_tpv_column_is_missing():
     assert diagnostics["filter_applied"] is True
     assert diagnostics["filter_strategy"] == "Total Activities"
     assert diagnostics["missing_activity_columns"] == ["TPV Activities"]
+    assert diagnostics["invalid_total_activity_rows"] == 0
+    assert diagnostics["dormant_activity_conflict_rows"] == 0
+
+
+def test_filter_records_total_and_detail_activity_conflicts():
+    raw_df = pd.DataFrame(
+        {
+            "Username": [
+                "35210001.lahore.sed(Contradictory)",
+                "35210002.lahore.sed(Unknown Total)",
+            ],
+            "Simple Activities": ["1", "0"],
+            "Patient Activities": ["0", "0"],
+            "Vector Surveillance Activities": ["0", "0"],
+            "Larvae Case Response": ["0", "0"],
+            "Total Activities": ["0", "not-a-number"],
+        }
+    )
+
+    _, diagnostics = _filter_dormant_report_rows(raw_df)
+
+    assert diagnostics["invalid_total_activity_rows"] == 1
+    assert diagnostics["dormant_activity_conflict_rows"] == 1
 
 
 def test_filter_falls_back_to_available_detail_columns_when_total_is_missing():
@@ -175,7 +200,168 @@ def test_quality_gate_treats_mapping_as_warning_when_officer_delivery_is_disable
     assert result["passed"] is True
     assert result["errors"] == []
     assert result["officer_delivery_quality_enforced"] is False
-    assert any("informational" in warning for warning in result["warnings"])
+    assert not any("Officer mapping" in warning for warning in result["warnings"])
+    assert result["officer_mapping_check_applicable"] is False
+
+
+def test_quality_gate_treats_missing_tpv_as_optional_when_total_is_available(
+    tmp_path, monkeypatch
+):
+    master_path = tmp_path / "master.xlsx"
+    pd.DataFrame({"School EMIS": ["1", "2"], "School Name": ["A", "B"]}).to_excel(
+        master_path, index=False
+    )
+    monkeypatch.setattr(main, "MASTER_FILE", master_path)
+    monkeypatch.setattr(main, "REPORT_SOURCE", "unfiltered")
+    monkeypatch.setattr(main, "POCKETBASE_ENABLED", False)
+
+    result = _quality_gate(
+        final_df=pd.DataFrame({"School EMIS": ["1"], "School Name": ["A"]}),
+        extraction_diagnostics={
+            "filter_applied": True,
+            "filter_strategy": "Total Activities",
+            "available_activity_columns": [
+                "Simple Activities",
+                "Patient Activities",
+                "Vector Surveillance Activities",
+                "Larvae Case Response",
+                "Total Activities",
+            ],
+            "missing_activity_columns": ["TPV Activities"],
+            "exported_emis_values": ["1", "2"],
+            "dormant_emis_values": ["1"],
+        },
+        unmatched_df=pd.DataFrame(),
+        invalid_contacts_df=pd.DataFrame(),
+        enforce_officer_delivery_quality=False,
+        observed_at=main.datetime.datetime(2026, 7, 18, 9, 0),
+    )
+
+    assert result["passed"] is True
+    assert result["activity_schema_mode"] == "total_activities"
+    assert result["optional_missing_activity_columns"] == ["TPV Activities"]
+    assert not any("schema" in warning.lower() for warning in result["warnings"])
+
+
+def test_quality_gate_reconciles_export_and_defers_high_dormancy_before_cutoff(
+    tmp_path, monkeypatch
+):
+    master_path = tmp_path / "master.xlsx"
+    pd.DataFrame(
+        {"School EMIS": ["1", "2", "3", "4"], "School Name": list("ABCD")}
+    ).to_excel(master_path, index=False)
+    monkeypatch.setattr(main, "MASTER_FILE", master_path)
+    monkeypatch.setattr(main, "REPORT_SOURCE", "unfiltered")
+    monkeypatch.setattr(main, "POCKETBASE_ENABLED", False)
+    monkeypatch.setattr(main, "QUALITY_MIN_EXPORT_COVERAGE", 0.70)
+
+    result = _quality_gate(
+        final_df=pd.DataFrame(
+            {"School EMIS": ["1", "2", "3"], "School Name": list("ABC")}
+        ),
+        extraction_diagnostics={
+            "filter_applied": True,
+            "filter_strategy": "Total Activities",
+            "available_activity_columns": ["Total Activities"],
+            "missing_activity_columns": list(main.DETAILED_ACTIVITY_COLUMNS),
+            "exported_emis_values": ["1", "2", "3", "999"],
+            "dormant_emis_values": ["1", "2", "3", "999"],
+        },
+        unmatched_df=pd.DataFrame(),
+        invalid_contacts_df=pd.DataFrame(),
+        enforce_officer_delivery_quality=False,
+        observed_at=main.datetime.datetime(2026, 7, 18, 3, 16),
+    )
+
+    assert result["reconciled_export_school_count"] == 3
+    assert result["export_coverage_ratio"] == 0.75
+    assert result["dormancy_ratio"] == 1.0
+    assert result["unknown_export_emis_sample"] == ["999"]
+    assert result["master_missing_from_export_emis_sample"] == ["4"]
+    assert result["dormancy_rate_check_applicable"] is False
+    assert not any(issue["code"] == "high_dormancy_rate" for issue in result["issues"])
+
+
+def test_quality_gate_blocks_partial_detail_schema_without_total(
+    tmp_path, monkeypatch
+):
+    master_path = tmp_path / "master.xlsx"
+    pd.DataFrame({"School EMIS": ["1"], "School Name": ["A"]}).to_excel(
+        master_path, index=False
+    )
+    monkeypatch.setattr(main, "MASTER_FILE", master_path)
+    monkeypatch.setattr(main, "REPORT_SOURCE", "unfiltered")
+    monkeypatch.setattr(main, "POCKETBASE_ENABLED", False)
+
+    result = _quality_gate(
+        final_df=pd.DataFrame({"School EMIS": ["1"], "School Name": ["A"]}),
+        extraction_diagnostics={
+            "filter_applied": True,
+            "filter_strategy": "available_detail_activity_columns",
+            "available_activity_columns": ["Simple Activities"],
+            "missing_activity_columns": [
+                "Patient Activities",
+                "Vector Surveillance Activities",
+                "Larvae Case Response",
+                "TPV Activities",
+                "Total Activities",
+            ],
+            "exported_emis_values": ["1"],
+            "dormant_emis_values": ["1"],
+        },
+        unmatched_df=pd.DataFrame(),
+        invalid_contacts_df=pd.DataFrame(),
+        enforce_officer_delivery_quality=False,
+        observed_at=main.datetime.datetime(2026, 7, 18, 9, 0),
+    )
+
+    assert result["passed"] is False
+    assert result["activity_schema_mode"] == "partial_detail_columns"
+    assert any(
+        issue["code"] == "unreliable_activity_schema"
+        for issue in result["issues"]
+    )
+
+
+def test_quality_gate_blocks_contradictory_total_activity(tmp_path, monkeypatch):
+    master_path = tmp_path / "master.xlsx"
+    pd.DataFrame({"School EMIS": ["1"], "School Name": ["A"]}).to_excel(
+        master_path, index=False
+    )
+    monkeypatch.setattr(main, "MASTER_FILE", master_path)
+    monkeypatch.setattr(main, "REPORT_SOURCE", "unfiltered")
+    monkeypatch.setattr(main, "POCKETBASE_ENABLED", False)
+
+    result = _quality_gate(
+        final_df=pd.DataFrame({"School EMIS": ["1"], "School Name": ["A"]}),
+        extraction_diagnostics={
+            "filter_applied": True,
+            "filter_strategy": "Total Activities",
+            "available_activity_columns": [
+                "Simple Activities",
+                "Total Activities",
+            ],
+            "missing_activity_columns": [
+                "Patient Activities",
+                "Vector Surveillance Activities",
+                "Larvae Case Response",
+                "TPV Activities",
+            ],
+            "dormant_activity_conflict_rows": 1,
+            "exported_emis_values": ["1"],
+            "dormant_emis_values": ["1"],
+        },
+        unmatched_df=pd.DataFrame(),
+        invalid_contacts_df=pd.DataFrame(),
+        enforce_officer_delivery_quality=False,
+        observed_at=main.datetime.datetime(2026, 7, 18, 3, 0),
+    )
+
+    assert result["passed"] is False
+    assert any(
+        issue["code"] == "contradictory_activity_totals"
+        for issue in result["issues"]
+    )
 
 
 def test_officer_delivery_quality_is_only_enforced_for_live_direct_delivery():
@@ -918,3 +1104,41 @@ def test_stale_duplicate_portal_export_is_not_marked_completed():
     }
 
     assert main._derive_pocketbase_run_status(summary) == "failed"
+
+
+def test_jetstream_publish_retry_reuses_message_id(monkeypatch):
+    class FakeJetStream:
+        def __init__(self):
+            self.calls = []
+
+        async def publish(self, subject, payload, headers):
+            self.calls.append((subject, payload, headers))
+            if len(self.calls) == 1:
+                raise RuntimeError("temporary publish failure")
+
+    jetstream = FakeJetStream()
+    monkeypatch.setattr(main, "NATS_PUBLISH_ATTEMPTS", 3)
+    monkeypatch.setattr(main, "NATS_PUBLISH_RETRY_DELAY_SECONDS", 0)
+
+    asyncio.run(
+        main._publish_jetstream_payload(
+            jetstream,
+            {"job_id": "job-123", "text": "AntiDengue update"},
+        )
+    )
+
+    assert len(jetstream.calls) == 2
+    assert jetstream.calls[0][2] == {"Nats-Msg-Id": "job-123"}
+    assert jetstream.calls[1][2] == {"Nats-Msg-Id": "job-123"}
+    assert jetstream.calls[0][1] == jetstream.calls[1][1]
+
+
+def test_antidengue_runtime_has_no_prefect_dependency():
+    project_root = Path(main.__file__).resolve().parent
+    runtime_source = "\n".join(
+        (project_root / name).read_text(encoding="utf-8")
+        for name in ("main.py", "scraper.py", "pyproject.toml")
+    ).lower()
+
+    assert "prefect" not in runtime_source
+    assert not hasattr(main.process_file_flow, "fn")

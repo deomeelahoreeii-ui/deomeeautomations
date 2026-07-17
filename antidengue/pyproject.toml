@@ -42,7 +42,6 @@ dependencies = [
     "playwright>=1.58.0",
     "plotly==6.6.0",
     "pluggy==1.6.0",
-    "prefect>=3.6.26",
     "pygments==2.20.0",
     "pyparsing==3.3.2",
     "pytest==9.0.3",

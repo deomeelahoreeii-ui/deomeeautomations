@@ -76,6 +76,8 @@ Important variables:
 - `UNFILTERED_TARGET_URL`
 - `NATS_URL`
 - `NATS_SUBJECT`
+- `NATS_PUBLISH_ATTEMPTS`
+- `NATS_PUBLISH_RETRY_DELAY_SECONDS`
 - `WHATSAPP_RECIPIENTS_FILE`
 - `OFFICERS_LIST_FILE`
 - `POCKETBASE_ENABLED`
@@ -89,8 +91,10 @@ Important variables:
 - `WA_HEALTH_TIMEOUT_SECONDS`
 - `WA_HEALTH_WAIT_SECONDS`
 - `WA_DELIVERY_TIMEOUT_SECONDS`
-- `QUALITY_MAX_MASTER_COVERAGE`
+- `QUALITY_MAX_DORMANCY_RATIO`
 - `QUALITY_MAX_UNMAPPED_RATIO`
+- `QUALITY_MIN_EXPORT_COVERAGE`
+- `QUALITY_DORMANCY_WARNING_AFTER_HOUR`
 - `PORTAL_DUPLICATE_RAW_POLICY`
 
 Dynamic officer delivery rules:
@@ -105,8 +109,9 @@ Report source rules:
 - `REPORT_SOURCE=filtered` downloads the portal-filtered dormant report
 - `REPORT_SOURCE` may also be set to a full URL when you need a one-off report link
 - local dormant filtering uses `Total Activities = 0` when that column exists
-- if `Total Activities` is missing, local dormant filtering falls back to rows where all available detailed activity columns are `0`: `Simple Activities`, `Patient Activities`, `Vector Surveillance Activities`, `Larvae Case Response`, `TPV Activities`
-- if the portal changes the export schema and an expected activity column is missing, the run logs a schema-drift warning and records which filter strategy was used
+- if `Total Activities` is missing, local dormant filtering is accepted only when all detailed activity columns exist and are `0`: `Simple Activities`, `Patient Activities`, `Vector Surveillance Activities`, `Larvae Case Response`, `TPV Activities`
+- when `Total Activities` is present it is authoritative; missing detail capabilities such as `TPV Activities` are recorded without creating an actionable warning
+- if `Total Activities` is absent, every configured detailed activity column must be present before an unfiltered report can be classified safely
 - if no activity columns exist, the report is treated as already filtered; use that shape only with `REPORT_SOURCE=filtered`
 - `PORTAL_DUPLICATE_RAW_POLICY=block_send` is the default. When a portal run downloads the exact same raw file hash as an earlier portal run, the pipeline still writes the Excel/evidence/summary files, but blocks WhatsApp dispatch so old counts are not resent under a fresh timestamp. Use `warn` to send with a warning, or `allow` to ignore the duplicate check.
 
@@ -129,14 +134,26 @@ python main.py manual-unfiltered --dry-run
 
 Dry-run mode still generates Excel reports, officer audits, activity evidence, and `run_summary.json`, but it does not queue WhatsApp messages or archive the raw file.
 
+## Runtime Ownership
+
+The AntiDengue script is a plain Python report executor. The automation platform
+owns schedules, durable task publication, retries, execution history, previews,
+approval, and delivery through PostgreSQL and Celery. No Prefect server,
+deployment, work pool, or ephemeral orchestration process is required.
+
+JetStream publication retries use the payload job ID as `Nats-Msg-Id`, so an
+ambiguous acknowledgement can be retried without creating a second logical
+WhatsApp job.
+
 ## Data Quality Gate
 
 Before WhatsApp delivery, the pipeline checks:
 
 - whether local dormant filtering was applied for unfiltered reports
-- whether expected activity columns are missing
-- whether the inactive count suspiciously covers almost the full master list
-- whether officer mapping coverage is below the configured threshold
+- whether the export has a reliable activity schema
+- portal/master EMIS reconciliation and export coverage
+- whether the reconciled dormant rate is suspiciously high after the configured morning cutoff
+- officer mapping coverage only when individual officer delivery can actually run
 - whether too many officer contact rows have invalid mobile numbers
 - whether the WhatsApp worker is connected and answering `NATS_HEALTH_SUBJECT`
 

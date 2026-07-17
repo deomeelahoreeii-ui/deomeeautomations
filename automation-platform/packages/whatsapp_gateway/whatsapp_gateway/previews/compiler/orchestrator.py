@@ -165,6 +165,18 @@ def _merge_profile_previews(
     primary.audience_name = "Multiple audiences"
     primary.report_type_name = "Multiple reports"
     primary.wing_name = "Multiple wings"
+    # Run-level quality issues are copied into every per-profile preview. Keep
+    # one canonical copy when those previews are combined, while preserving
+    # genuinely different profile-specific issue payloads.
+    deduplicated_batch_issues: list[dict] = []
+    seen_batch_issues: set[str] = set()
+    for batch_issue in batch_issues:
+        identity = json.dumps(batch_issue, sort_keys=True, ensure_ascii=False, default=str)
+        if identity in seen_batch_issues:
+            continue
+        seen_batch_issues.add(identity)
+        deduplicated_batch_issues.append(batch_issue)
+    batch_issues = deduplicated_batch_issues
     primary.issues = batch_issues
     primary.delivery_count = len(retained)
     primary.ready_count = sum(item.status == "ready" for item in retained)

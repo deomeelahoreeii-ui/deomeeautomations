@@ -133,3 +133,34 @@ def test_multi_profile_merge_deduplicates_exact_routes_and_blocks_conflicts() ->
         assert all(any(issue["code"] == "conflicting_profile_payloads" for issue in item.issues) for item in deliveries)
         assert merged.blocked_count == 2
         assert merged.configuration_snapshot["profile_count"] == 2
+
+
+def test_multi_profile_merge_keeps_one_copy_of_source_quality_issue() -> None:
+    engine = memory_engine()
+    with Session(engine) as session:
+        first, second = seed_profiles(session)
+        job = Job(
+            type=JobType.antidengue_report.value,
+            title="Dry run",
+            status=JobStatus.succeeded.value,
+            parameters={"dry_run": True},
+        )
+        session.add(job)
+        session.flush()
+        one = make_preview(session, job, first)
+        two = make_preview(session, job, second)
+        source_issue = {
+            "code": "high_dormancy_rate",
+            "severity": "warning",
+            "message": "Dormant rate is unusually high.",
+        }
+        one.issues = [source_issue]
+        two.issues = [source_issue]
+        session.add(one)
+        session.add(two)
+        session.commit()
+
+        merged = _merge_profile_previews(session, [one, two])
+
+        assert merged.issues == [source_issue]
+        assert merged.warning_count == 1

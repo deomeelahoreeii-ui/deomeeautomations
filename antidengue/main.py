@@ -22,7 +22,6 @@ from nats.errors import NoRespondersError, TimeoutError as NatsTimeoutError
 from nats.js.errors import NotFoundError
 from openpyxl.styles import Alignment, Border, Font, Side
 from openpyxl.utils import get_column_letter
-from prefect import flow, get_run_logger, task
 
 # Import your custom scraper task
 from scraper import scrape_portal_data
@@ -40,10 +39,16 @@ def _resolve_project_path(value: str | Path) -> Path:
 
 
 def _get_logger():
-    try:
-        return get_run_logger()
-    except Exception:
-        return logging.getLogger(__name__)
+    return logging.getLogger("antidengue")
+
+
+def _configure_cli_logging() -> None:
+    """Emit subprocess logs for Celery's streamed-command collector."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        stream=sys.stdout,
+    )
 
 
 OUTPUT_DIR = BASE_DIR / "output-files"
@@ -72,6 +77,10 @@ NATS_URL = os.getenv("NATS_URL", "nats://localhost:4222")
 NATS_SUBJECT = os.getenv("NATS_SUBJECT", "whatsapp.pending")
 NATS_STREAM = os.getenv("NATS_STREAM", "pending_stream")
 NATS_HEALTH_SUBJECT = os.getenv("NATS_HEALTH_SUBJECT", "whatsapp.worker.health")
+NATS_PUBLISH_ATTEMPTS = max(1, int(os.getenv("NATS_PUBLISH_ATTEMPTS", "3")))
+NATS_PUBLISH_RETRY_DELAY_SECONDS = max(
+    0.0, float(os.getenv("NATS_PUBLISH_RETRY_DELAY_SECONDS", "2"))
+)
 DEFAULT_SEND_DELAY_MS = int(os.getenv("WA_SEND_DELAY_MS", "1500"))
 GENERATE_SCREENSHOT = os.getenv("GENERATE_SCREENSHOT", "false").strip().lower() in {
     "1",
@@ -105,8 +114,19 @@ DETAILED_ACTIVITY_COLUMNS = [
     for column in UNFILTERED_DORMANT_ACTIVITY_COLUMNS
     if column != TOTAL_ACTIVITY_COLUMN
 ]
-QUALITY_MAX_MASTER_COVERAGE = float(os.getenv("QUALITY_MAX_MASTER_COVERAGE", "0.98"))
+QUALITY_MAX_DORMANCY_RATIO = float(
+    os.getenv(
+        "QUALITY_MAX_DORMANCY_RATIO",
+        os.getenv("QUALITY_MAX_MASTER_COVERAGE", "0.98"),
+    )
+)
+# Compatibility for callers and old summaries that used the ambiguous name.
+QUALITY_MAX_MASTER_COVERAGE = QUALITY_MAX_DORMANCY_RATIO
 QUALITY_MAX_UNMAPPED_RATIO = float(os.getenv("QUALITY_MAX_UNMAPPED_RATIO", "0.10"))
+QUALITY_MIN_EXPORT_COVERAGE = float(os.getenv("QUALITY_MIN_EXPORT_COVERAGE", "0.98"))
+QUALITY_DORMANCY_WARNING_AFTER_HOUR = int(
+    os.getenv("QUALITY_DORMANCY_WARNING_AFTER_HOUR", "8")
+)
 PORTAL_DUPLICATE_RAW_POLICY = (
     os.getenv("PORTAL_DUPLICATE_RAW_POLICY", "block_send")
     .strip()
@@ -763,11 +783,19 @@ def _validate_runtime_config() -> None:
         formatted = ", ".join(str(path) for path in missing_files)
         raise FileNotFoundError(f"Required configuration file(s) missing: {formatted}")
 
-    if not 0 < QUALITY_MAX_MASTER_COVERAGE <= 1:
-        raise ValueError("QUALITY_MAX_MASTER_COVERAGE must be > 0 and <= 1.")
+    if not 0 < QUALITY_MAX_DORMANCY_RATIO <= 1:
+        raise ValueError("QUALITY_MAX_DORMANCY_RATIO must be > 0 and <= 1.")
 
     if not 0 <= QUALITY_MAX_UNMAPPED_RATIO <= 1:
         raise ValueError("QUALITY_MAX_UNMAPPED_RATIO must be between 0 and 1.")
+
+    if not 0 < QUALITY_MIN_EXPORT_COVERAGE <= 1:
+        raise ValueError("QUALITY_MIN_EXPORT_COVERAGE must be > 0 and <= 1.")
+
+    if not 0 <= QUALITY_DORMANCY_WARNING_AFTER_HOUR <= 23:
+        raise ValueError(
+            "QUALITY_DORMANCY_WARNING_AFTER_HOUR must be between 0 and 23."
+        )
 
     if REPORT_SOURCE not in {"unfiltered", "all", "filtered", "dormant"} and not (
         REPORT_SOURCE.startswith("http://") or REPORT_SOURCE.startswith("https://")
@@ -1694,7 +1722,7 @@ def build_group_route_payloads(
                         route_index=row_number,
                         base_excel_path=generated_excel_path,
                     )
-                    load_excel_report.fn(
+                    load_excel_report(
                         scoped_df,
                         final_excel_path,
                         _build_route_excel_title(
@@ -2014,6 +2042,7 @@ def _filter_dormant_report_rows(
             user_df[total_column].astype(str).str.strip().replace("", pd.NA),
             errors="coerce",
         )
+        diagnostics["invalid_total_activity_rows"] = int(total_values.isna().sum())
         filtered_df = user_df[total_values.eq(0)].copy()
         diagnostics.update(
             {
@@ -2029,12 +2058,15 @@ def _filter_dormant_report_rows(
             diagnostics["zero_rows_across_available_detail_columns"] = (
                 detailed_zero_count
             )
+            diagnostics["dormant_activity_conflict_rows"] = int(
+                (total_values.eq(0) & detailed_values.gt(0).any(axis=1)).sum()
+            )
 
         if logger and missing_columns:
-            logger.warning(
-                "Activity schema drift detected. Missing columns: "
-                f"{', '.join(missing_columns)}. Used '{TOTAL_ACTIVITY_COLUMN}' "
-                "to filter dormant rows."
+            logger.info(
+                "Optional activity detail columns are unavailable: "
+                f"{', '.join(missing_columns)}. Used authoritative "
+                f"'{TOTAL_ACTIVITY_COLUMN}' to filter dormant rows."
             )
 
         return filtered_df, diagnostics
@@ -2218,7 +2250,7 @@ def _build_activity_evidence(
 
 
 # ==========================================
-# 2. PREFECT TASKS (Data Engineering)
+# 2. DATA ENGINEERING PIPELINE FUNCTIONS
 # ==========================================
 def _extract_raw_data_with_diagnostics(
     file_path: Path, logger=None
@@ -2232,6 +2264,16 @@ def _extract_raw_data_with_diagnostics(
 
     user_df.columns = user_df.columns.str.strip()
     raw_columns = list(user_df.columns)
+    if "Username" not in user_df.columns:
+        raise KeyError("Could not find 'Username' column!")
+    exported_emis_values = sorted(
+        user_df["Username"]
+        .astype(str)
+        .str.extract(r"^(\d+)", expand=False)
+        .dropna()
+        .unique()
+        .tolist()
+    )
     filtered_user_df, filter_diagnostics = _filter_dormant_report_rows(user_df, logger)
     logger.info(
         "Dormant filter result: "
@@ -2240,11 +2282,15 @@ def _extract_raw_data_with_diagnostics(
         f"using {filter_diagnostics['filter_strategy']}."
     )
 
-    if "Username" not in filtered_user_df.columns:
-        raise KeyError("Could not find 'Username' column!")
-
     filtered_user_df["Extracted_EMIS"] = (
         filtered_user_df["Username"].astype(str).str.extract(r"^(\d+)", expand=False)
+    )
+    dormant_emis_values = sorted(
+        {
+            normalized
+            for normalized in filtered_user_df["Extracted_EMIS"].map(_normalize_emis)
+            if normalized
+        }
     )
 
     diagnostics = {
@@ -2253,18 +2299,20 @@ def _extract_raw_data_with_diagnostics(
         "source_file_size_bytes": file_path.stat().st_size,
         "source_file_sha256": _file_sha256(file_path),
         "raw_columns": raw_columns,
+        # Working sets for reconciliation. Only aggregate counts and bounded
+        # samples are copied into run_summary.json by the quality gate.
+        "exported_emis_values": exported_emis_values,
+        "dormant_emis_values": dormant_emis_values,
         **filter_diagnostics,
     }
     return filtered_user_df[["Extracted_EMIS"]].copy(), filtered_user_df, diagnostics
 
 
-@task(name="Extract: Read Raw Data")
 def extract_raw_data(file_path: Path) -> pd.DataFrame:
     user_df_clean, _, _ = _extract_raw_data_with_diagnostics(file_path)
     return user_df_clean
 
 
-@task(name="Transform: Merge, Sort & Reset Serials")
 def transform_data(user_df_clean: pd.DataFrame) -> pd.DataFrame:
     logger = _get_logger()
     master_df = _read_master_dataframe()
@@ -2309,7 +2357,6 @@ def transform_data(user_df_clean: pd.DataFrame) -> pd.DataFrame:
     return final_df
 
 
-@task(name="Load: Generate Formatted Excel")
 def load_excel_report(final_df: pd.DataFrame, output_path: Path, title_text: str):
     logger = _get_logger()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2356,7 +2403,6 @@ def load_excel_report(final_df: pd.DataFrame, output_path: Path, title_text: str
             worksheet.column_dimensions[column_letter].width = max_length + 2
 
 
-@task(name="Load: Generate High-Res Screenshot")
 def load_screenshot(final_df: pd.DataFrame, image_path: Path, title_text: str):
     import dataframe_image as dfi
 
@@ -2396,7 +2442,6 @@ def load_screenshot(final_df: pd.DataFrame, image_path: Path, title_text: str):
     dfi.export(styled_df, str(image_path), max_rows=-1, dpi=300)
 
 
-@task(name="Load: Generate Officer Mapping Audit")
 def load_officer_mapping_audit(
     final_df: pd.DataFrame, output_path: Path, title_text: str
 ):
@@ -2443,7 +2488,6 @@ def load_officer_mapping_audit(
     )
 
 
-@task(name="Load: Generate Officer Delivery Audit")
 def load_officer_delivery_audit(audit_rows: list[dict], output_path: Path):
     logger = _get_logger()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2500,7 +2544,6 @@ def load_officer_delivery_audit(audit_rows: list[dict], output_path: Path):
     logger.info(f"Officer delivery audit saved to {output_path}.")
 
 
-@task(name="Load: Generate Activity Evidence Audit")
 def load_activity_evidence_report(
     final_df: pd.DataFrame, filtered_user_df: pd.DataFrame, output_path: Path
 ):
@@ -2797,6 +2840,33 @@ async def _collect_delivery_statuses(
     }
 
 
+async def _publish_jetstream_payload(js, payload: dict) -> None:
+    """Publish once logically, retrying safely with JetStream deduplication."""
+    encoded_payload = json.dumps(payload).encode("utf-8")
+    message_id = str(payload.get("job_id") or "").strip()
+    if not message_id:
+        message_id = hashlib.sha256(encoded_payload).hexdigest()
+    for attempt in range(1, NATS_PUBLISH_ATTEMPTS + 1):
+        try:
+            await js.publish(
+                NATS_SUBJECT,
+                encoded_payload,
+                headers={"Nats-Msg-Id": message_id},
+            )
+            return
+        except Exception:
+            if attempt >= NATS_PUBLISH_ATTEMPTS:
+                raise
+            _get_logger().warning(
+                "JetStream publish failed for job %s on attempt %s/%s; "
+                "retrying with the same idempotency key.",
+                message_id,
+                attempt,
+                NATS_PUBLISH_ATTEMPTS,
+            )
+            await asyncio.sleep(NATS_PUBLISH_RETRY_DELAY_SECONDS)
+
+
 async def _publish_to_nats(payloads: list[dict], *, wait_for_delivery: bool):
     """Async helper to connect and publish to JetStream."""
     nc = await nats.connect(NATS_URL)
@@ -2836,7 +2906,7 @@ async def _publish_to_nats(payloads: list[dict], *, wait_for_delivery: bool):
             await js.add_stream(stream_config)
 
         for payload in payloads:
-            await js.publish(NATS_SUBJECT, json.dumps(payload).encode("utf-8"))
+            await _publish_jetstream_payload(js, payload)
 
         await nc.flush()
 
@@ -2884,7 +2954,6 @@ def _format_privacy_token_preflight(operation_result: list) -> str:
     return ""
 
 
-@task(name="Notify: Push to NATS Queue", retries=3, retry_delay_seconds=10)
 def send_whatsapp_alert(
     final_df: pd.DataFrame,
     excel_path: Path,
@@ -3253,7 +3322,6 @@ def send_whatsapp_alert(
     }
 
 
-@task(name="Cleanup: Archive Raw File")
 def archive_raw_file(file_path: Path):
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     archive_path = ARCHIVE_DIR / file_path.name
@@ -3290,12 +3358,50 @@ def _quality_gate(
     unmatched_df: pd.DataFrame,
     invalid_contacts_df: pd.DataFrame,
     enforce_officer_delivery_quality: bool = True,
+    observed_at: datetime.datetime | None = None,
 ) -> dict:
     master_df = _read_master_dataframe()
-    master_count = len(master_df)
+    master_emis_column = _find_column(master_df, "School EMIS")
+    master_emis = {
+        normalized
+        for normalized in (
+            master_df[master_emis_column].map(_normalize_emis)
+            if master_emis_column is not None
+            else []
+        )
+        if normalized
+    }
+    master_count = len(master_emis) if master_emis else len(master_df)
     final_count = len(final_df)
     unmapped_count = len(unmatched_df)
     invalid_contact_count = len(invalid_contacts_df)
+    exported_emis = set(extraction_diagnostics.get("exported_emis_values") or [])
+    dormant_emis = set(extraction_diagnostics.get("dormant_emis_values") or [])
+    if not dormant_emis:
+        final_emis_column = _find_column(final_df, "School EMIS")
+        if final_emis_column is not None:
+            dormant_emis = {
+                normalized
+                for normalized in final_df[final_emis_column].map(_normalize_emis)
+                if normalized
+            }
+    if not exported_emis:
+        # Backward compatibility for direct callers that predate source
+        # reconciliation. Dormant rows are the only safe available proxy.
+        exported_emis = set(dormant_emis)
+
+    reconciled_export_emis = exported_emis & master_emis if master_emis else exported_emis
+    unknown_export_emis = exported_emis - master_emis if master_emis else set()
+    master_missing_from_export = master_emis - exported_emis if exported_emis else set()
+    reconciled_dormant_emis = dormant_emis & master_emis if master_emis else dormant_emis
+    export_coverage_ratio = (
+        len(reconciled_export_emis) / master_count if master_count else 0
+    )
+    dormancy_ratio = (
+        len(reconciled_dormant_emis) / len(reconciled_export_emis)
+        if reconciled_export_emis
+        else 0
+    )
     coverage_ratio = final_count / master_count if master_count else 0
     unmapped_ratio = unmapped_count / final_count if final_count else 0
     invalid_contact_ratio = (
@@ -3304,6 +3410,19 @@ def _quality_gate(
 
     errors: list[str] = []
     warnings: list[str] = []
+    issues: list[dict] = []
+
+    def add_issue(code: str, severity: str, message: str, **context) -> None:
+        (errors if severity == "blocked" else warnings).append(message)
+        issues.append(
+            {
+                "code": code,
+                "severity": severity,
+                "message": message,
+                **context,
+            }
+        )
+
     filter_applied = bool(extraction_diagnostics.get("filter_applied"))
     filter_strategy = extraction_diagnostics.get("filter_strategy")
     missing_activity_columns = (
@@ -3313,75 +3432,164 @@ def _quality_gate(
         extraction_diagnostics.get("available_activity_columns") or []
     )
 
-    if missing_activity_columns:
-        warnings.append(
-            "Portal export schema is missing expected activity columns: "
-            + ", ".join(missing_activity_columns)
+    total_activity_available = TOTAL_ACTIVITY_COLUMN in available_activity_columns
+    available_detail_columns = [
+        column
+        for column in DETAILED_ACTIVITY_COLUMNS
+        if column in available_activity_columns
+    ]
+    schema_mode = (
+        "total_activities"
+        if total_activity_available
+        else "complete_detail_columns"
+        if len(available_detail_columns) == len(DETAILED_ACTIVITY_COLUMNS)
+        else "partial_detail_columns"
+        if available_detail_columns
+        else "no_activity_columns"
+    )
+    invalid_total_activity_rows = int(
+        extraction_diagnostics.get("invalid_total_activity_rows") or 0
+    )
+    dormant_activity_conflict_rows = int(
+        extraction_diagnostics.get("dormant_activity_conflict_rows") or 0
+    )
+
+    # Detailed fields such as TPV are optional capabilities when the portal
+    # provides its authoritative Total Activities value.
+    if REPORT_SOURCE in {"unfiltered", "all"} and schema_mode == "partial_detail_columns":
+        add_issue(
+            "unreliable_activity_schema",
+            "blocked",
+            "The unfiltered portal export has no Total Activities column and only "
+            "a partial set of detailed activity columns; dormant status cannot be "
+            "determined safely.",
+            missing_columns=missing_activity_columns,
+        )
+
+    if total_activity_available and invalid_total_activity_rows:
+        add_issue(
+            "invalid_total_activity_values",
+            "blocked",
+            f"Total Activities is blank or non-numeric for "
+            f"{invalid_total_activity_rows} portal row(s); dormant status cannot be "
+            "determined safely.",
+            affected_rows=invalid_total_activity_rows,
+        )
+
+    if total_activity_available and dormant_activity_conflict_rows:
+        add_issue(
+            "contradictory_activity_totals",
+            "blocked",
+            f"{dormant_activity_conflict_rows} portal row(s) have Total Activities "
+            "equal to zero but a positive detailed activity value.",
+            affected_rows=dormant_activity_conflict_rows,
         )
 
     if REPORT_SOURCE in {"unfiltered", "all"} and not filter_applied:
-        errors.append(
-            "REPORT_SOURCE is unfiltered, but no local dormant filter was applied."
+        add_issue(
+            "dormant_filter_not_applied",
+            "blocked",
+            "REPORT_SOURCE is unfiltered, but no local dormant filter was applied.",
         )
 
     if REPORT_SOURCE in {"unfiltered", "all"} and not available_activity_columns:
-        errors.append(
-            "Unfiltered report has no activity columns; refusing to send WhatsApp alerts."
+        add_issue(
+            "activity_columns_missing",
+            "blocked",
+            "Unfiltered report has no activity columns; refusing to send WhatsApp alerts.",
         )
 
     if final_count == master_count and not filter_applied:
-        errors.append(
-            "Inactive school count equals the full master list and no local filter was applied."
+        add_issue(
+            "full_master_without_filter",
+            "blocked",
+            "Inactive school count equals the full master list and no local filter was applied.",
         )
-    elif coverage_ratio >= QUALITY_MAX_MASTER_COVERAGE:
+    elif (
+        dormancy_ratio >= QUALITY_MAX_DORMANCY_RATIO
+        and (observed_at or datetime.datetime.now()).hour
+        >= QUALITY_DORMANCY_WARNING_AFTER_HOUR
+    ):
         message = (
-            f"Inactive school count covers {coverage_ratio:.1%} of the master list "
-            f"({final_count}/{master_count})."
+            f"Dormant rate is {dormancy_ratio:.1%} of reconciled portal schools "
+            f"({len(reconciled_dormant_emis)}/{len(reconciled_export_emis)}); "
+            f"portal export coverage is {export_coverage_ratio:.1%} "
+            f"({len(reconciled_export_emis)}/{master_count})."
         )
         if filter_strategy == "already_filtered":
-            errors.append(message)
+            add_issue("high_dormancy_rate", "blocked", message)
         else:
-            warnings.append(message)
+            add_issue("high_dormancy_rate", "warning", message)
 
-    if final_count and unmapped_ratio > QUALITY_MAX_UNMAPPED_RATIO:
+    if exported_emis and export_coverage_ratio < QUALITY_MIN_EXPORT_COVERAGE:
+        add_issue(
+            "low_portal_export_coverage",
+            "warning",
+            f"Portal export covers only {export_coverage_ratio:.1%} of the master list "
+            f"({len(reconciled_export_emis)}/{master_count}).",
+            master_missing_sample=sorted(master_missing_from_export)[:20],
+            unknown_export_sample=sorted(unknown_export_emis)[:20],
+        )
+
+    if (
+        enforce_officer_delivery_quality
+        and final_count
+        and unmapped_ratio > QUALITY_MAX_UNMAPPED_RATIO
+    ):
         message = (
             f"Officer mapping coverage is too low: {unmapped_count} unmapped of "
             f"{final_count} inactive schools ({unmapped_ratio:.1%})."
         )
-        if enforce_officer_delivery_quality:
-            errors.append(message)
-        else:
-            warnings.append(
-                f"{message} Officer mapping is informational because individual "
-                "officer delivery is not active for this run."
-            )
+        add_issue("officer_mapping_incomplete", "blocked", message)
 
-    if final_count and invalid_contact_ratio > QUALITY_MAX_UNMAPPED_RATIO:
+    if (
+        enforce_officer_delivery_quality
+        and final_count
+        and invalid_contact_ratio > QUALITY_MAX_UNMAPPED_RATIO
+    ):
         message = (
             f"Too many invalid officer contacts: {invalid_contact_count} invalid "
             f"contact rows for {final_count} inactive schools."
         )
-        if enforce_officer_delivery_quality:
-            errors.append(message)
-        else:
-            warnings.append(
-                f"{message} Officer contacts are informational because individual "
-                "officer delivery is not active for this run."
-            )
+        add_issue("officer_contacts_invalid", "blocked", message)
 
     return {
         "passed": not errors,
         "errors": errors,
         "warnings": warnings,
+        "issues": issues,
+        "activity_schema_mode": schema_mode,
+        "optional_missing_activity_columns": (
+            missing_activity_columns if total_activity_available else []
+        ),
+        "invalid_total_activity_rows": invalid_total_activity_rows,
+        "dormant_activity_conflict_rows": dormant_activity_conflict_rows,
         "master_count": master_count,
         "final_school_count": final_count,
         "master_coverage_ratio": coverage_ratio,
+        "exported_school_count": len(exported_emis),
+        "reconciled_export_school_count": len(reconciled_export_emis),
+        "export_coverage_ratio": export_coverage_ratio,
+        "dormant_reconciled_school_count": len(reconciled_dormant_emis),
+        "dormancy_ratio": dormancy_ratio,
+        "unknown_export_school_count": len(unknown_export_emis),
+        "unknown_export_emis_sample": sorted(unknown_export_emis)[:20],
+        "master_missing_from_export_count": len(master_missing_from_export),
+        "master_missing_from_export_emis_sample": sorted(master_missing_from_export)[:20],
+        "dormancy_rate_check_applicable": (
+            (observed_at or datetime.datetime.now()).hour
+            >= QUALITY_DORMANCY_WARNING_AFTER_HOUR
+        ),
         "unmapped_school_count": unmapped_count,
         "unmapped_ratio": unmapped_ratio,
         "invalid_contact_count": invalid_contact_count,
         "invalid_contact_ratio": invalid_contact_ratio,
         "officer_delivery_quality_enforced": enforce_officer_delivery_quality,
-        "max_master_coverage": QUALITY_MAX_MASTER_COVERAGE,
+        "officer_mapping_check_applicable": enforce_officer_delivery_quality,
+        "max_master_coverage": QUALITY_MAX_DORMANCY_RATIO,
+        "max_dormancy_ratio": QUALITY_MAX_DORMANCY_RATIO,
+        "min_export_coverage": QUALITY_MIN_EXPORT_COVERAGE,
+        "dormancy_warning_after_hour": QUALITY_DORMANCY_WARNING_AFTER_HOUR,
         "max_unmapped_ratio": QUALITY_MAX_UNMAPPED_RATIO,
     }
 
@@ -4191,7 +4399,7 @@ def _process_raw_report_file(
     raw_df, filtered_user_df, extraction_diagnostics = (
         _extract_raw_data_with_diagnostics(file_path, logger)
     )
-    clean_df = transform_data.fn(raw_df)
+    clean_df = transform_data(raw_df)
 
     # Step 2: Setup dynamic Output Folders & Filenames
     current_time_obj = datetime.datetime.now()
@@ -4318,14 +4526,14 @@ def _process_raw_report_file(
         )
         _save_run_summary(summary_path, summary, clean_df, logger)
         if not dry_run:
-            archive_raw_file.fn(file_path)
+            archive_raw_file(file_path)
         return summary
 
     # Step 4: Load outputs and audits
-    load_excel_report.fn(clean_df, excel_path, title_text)
+    load_excel_report(clean_df, excel_path, title_text)
     unmatched_df, invalid_contacts_df, _ = _build_officer_mapping_audit(clean_df)
-    load_officer_mapping_audit.fn(clean_df, mapping_audit_path, title_text)
-    load_activity_evidence_report.fn(clean_df, filtered_user_df, activity_evidence_path)
+    load_officer_mapping_audit(clean_df, mapping_audit_path, title_text)
+    load_activity_evidence_report(clean_df, filtered_user_df, activity_evidence_path)
     _append_lifecycle_event(
         lifecycle_events,
         "processed",
@@ -4342,7 +4550,7 @@ def _process_raw_report_file(
 
     if GENERATE_SCREENSHOT:
         try:
-            load_screenshot.fn(clean_df, image_path, title_text)
+            load_screenshot(clean_df, image_path, title_text)
             generated_image_path = image_path
         except Exception as e:
             logger.error(f"Screenshot failed, but pipeline will continue. Error: {e}")
@@ -4359,6 +4567,7 @@ def _process_raw_report_file(
         unmatched_df=unmatched_df,
         invalid_contacts_df=invalid_contacts_df,
         enforce_officer_delivery_quality=enforce_officer_delivery_quality,
+        observed_at=current_time_obj,
     )
     for warning in quality_gate["warnings"]:
         logger.warning(f"Data quality warning: {warning}")
@@ -4373,6 +4582,13 @@ def _process_raw_report_file(
         warning = _duplicate_portal_export_warning(stale_check)
         if warning not in quality_gate["warnings"]:
             quality_gate["warnings"].append(warning)
+            quality_gate.setdefault("issues", []).append(
+                {
+                    "code": "duplicate_portal_export",
+                    "severity": "warning",
+                    "message": warning,
+                }
+            )
         logger.warning(warning)
 
     if not quality_gate["passed"]:
@@ -4532,7 +4748,7 @@ def _process_raw_report_file(
     _save_run_summary(summary_path, pre_dispatch_summary, clean_df, logger)
 
     try:
-        whatsapp_result = send_whatsapp_alert.fn(
+        whatsapp_result = send_whatsapp_alert(
             clean_df,
             excel_path,
             generated_image_path,
@@ -4577,7 +4793,7 @@ def _process_raw_report_file(
         whatsapp_result.get("officer_delivery_audit") if whatsapp_result else None
     )
     if officer_delivery_audit_rows is not None:
-        load_officer_delivery_audit.fn(
+        load_officer_delivery_audit(
             officer_delivery_audit_rows,
             officer_delivery_audit_path,
         )
@@ -4637,7 +4853,7 @@ def _process_raw_report_file(
     _save_run_summary(summary_path, summary, clean_df, logger)
 
     if not dry_run and whatsapp_result and whatsapp_result.get("queued"):
-        archive_raw_file.fn(file_path)
+        archive_raw_file(file_path)
 
     return summary
 
@@ -4682,21 +4898,19 @@ def _stage_manual_selected_file(source_file: Path) -> Path:
 
 
 # ==========================================
-# 3. PREFECT FLOW (The Pipeline Orchestrator)
+# 3. PIPELINE ENTRY POINTS
 # ==========================================
-@flow(name="Hourly Dengue Report Pipeline", log_prints=True)
 def process_file_flow(dry_run: bool = False):
     logger = _get_logger()
     logger.info(f"Starting Hourly Pipeline... dry_run={dry_run}")
 
     # Step 1: Scrape the data
-    file_path = scrape_portal_data()
+    file_path = scrape_portal_data(logger=logger)
     summary = _process_raw_report_file(file_path, logger, dry_run=dry_run)
     _raise_if_summary_not_completed(summary, logger)
     logger.info("Pipeline completed successfully.")
 
 
-@flow(name="Manual Unfiltered Dengue Report Pipeline", log_prints=True)
 def process_manual_unfiltered_flow(dry_run: bool = False):
     logger = _get_logger()
     logger.info(
@@ -4738,7 +4952,6 @@ def process_manual_unfiltered_flow(dry_run: bool = False):
     )
 
 
-@flow(name="Selected Manual Dengue Report Pipeline", log_prints=True)
 def process_selected_manual_file_flow(source_file: str, dry_run: bool = False):
     logger = _get_logger()
     logger.info(
@@ -4758,6 +4971,7 @@ def process_selected_manual_file_flow(source_file: str, dry_run: bool = False):
 
 
 if __name__ == "__main__":
+    _configure_cli_logging()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     UNMAPPED_REPORT_DIR.mkdir(parents=True, exist_ok=True)

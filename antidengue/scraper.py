@@ -1,5 +1,6 @@
 import datetime
 import json
+import logging
 import os
 import re
 import shutil
@@ -8,7 +9,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
-from prefect import get_run_logger, task
 
 # ==========================================
 # 1. CONFIGURATION & PATHS
@@ -74,9 +74,9 @@ def record_scrape_time():
     return timestamp
 
 
-def solve_math_captcha(page):
+def solve_math_captcha(page, logger=None):
     """Reads the math problem from the DOM, solves it, and inputs the answer."""
-    logger = get_run_logger()
+    logger = logger or logging.getLogger("antidengue.scraper")
 
     # Wait for the captcha text to appear
     captcha_element = page.locator("text=/What is \\d+/")
@@ -261,7 +261,7 @@ def _fill_login_form(page, logger) -> None:
     logger.info("Filling portal credentials and CAPTCHA...")
     page.locator("#user_username").fill(PORTAL_USER)
     page.locator("#user_password").fill(PORTAL_PASS)
-    solve_math_captcha(page)
+    solve_math_captcha(page, logger)
 
 
 def _click_sign_in(page, logger) -> None:
@@ -476,12 +476,10 @@ def _perform_login(page, context, logger) -> None:
 
 
 # ==========================================
-# 3. PREFECT TASK: SCRAPER
+# 3. PORTAL SCRAPER ENTRY POINT
 # ==========================================
-# Note: retries=0 here to ensure Prefect doesn't immediately try again on failure
-@task(name="Extract: Scrape Data Portal", retries=0)
-def scrape_portal_data() -> Path:
-    logger = get_run_logger()
+def scrape_portal_data(logger=None) -> Path:
+    logger = logger or logging.getLogger("antidengue.scraper")
     WATCH_DIR.mkdir(parents=True, exist_ok=True)
 
     if not PORTAL_USER or not PORTAL_PASS:

@@ -32,8 +32,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 31,School Education Department,Lahore,Cantonment Board,35210726.lahore.sed(umar hayat),0,0,0,0,0
 32,School Education Department,Lahore,Wahga Town,35220612.lahore.sed(abdul rehman),0,0,0,0,0
 33,School Education Department,Lahore,Wahga Town,35220548.lahore.sed(GGES JUNIOR MODEL MISRI SHAH),0,0,0,0,0
-34,School Education Department,Lahore,Wahga Town,35210772.lahore.sed(iram amjad),0,0,0,0,0
-35,School Education Department,Lahore,Wahga Town,35210829.lahore.sed(Mudassir),0,0,0,0,0
+34,School Education Department,Lahore,Wahga Town,35210829.lahore.sed(Mudassir),0,0,0,0,0
+35,School Education Department,Lahore,Wahga Town,35210772.lahore.sed(iram amjad),0,0,0,0,0
 36,School Education Department,Lahore,Wahga Town,35210553.lahore.sed(Nasreen Arif),0,0,0,0,0
 37,School Education Department,Lahore,Cantonment Board,35210523.lahore.sed(pathankey),0,0,0,0,0
 38,School Education Department,Lahore,Cantonment Board,35210188.lahore.sed(Muhammad Shahid),0,0,0,0,0
@@ -46,8 +46,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 45,School Education Department,Lahore,Wahga Town,35220578.lahore.sed(Asma),0,0,0,0,0
 46,School Education Department,Lahore,Wahga Town,35210674.lahore.sed(maria iftikhar),0,0,0,0,0
 47,School Education Department,Lahore,Wahga Town,35220367.lahore.sed(Ayesha),3,0,0,0,3
-48,School Education Department,Lahore,Cantonment Board,35210100.lahore.sed(GHS Lakhoki Lahore Cantt),0,0,0,0,0
-49,School Education Department,Lahore,Wahga Town,35210456.lahore.sed(Uzma shezadi),0,0,0,0,0
+48,School Education Department,Lahore,Wahga Town,35210456.lahore.sed(Uzma shezadi),0,0,0,0,0
+49,School Education Department,Lahore,Cantonment Board,35210100.lahore.sed(GHS Lakhoki Lahore Cantt),0,0,0,0,0
 50,School Education Department,Lahore,Cantonment Board,35210634.lahore.sed(GGES Gohawa),0,0,0,0,0
 51,School Education Department,Lahore,Shalamar Town,35210296.lahore.sed(Muhammad Shahbaz),0,0,0,0,0
 52,School Education Department,Lahore,Allama Iqbal Town,35220223.lahore.sed(qaisar majeed),0,0,0,0,0
@@ -64,8 +64,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 63,School Education Department,Lahore,Samanabad Town,35210572.lahore.sed(Noman Niamat),0,0,0,0,0
 64,School Education Department,Lahore,Wahga Town,35220249.lahore.sed(Salamat ali),0,0,0,0,0
 65,School Education Department,Lahore,Wahga Town,35210911.lahore.sed(Rose Mary),0,0,0,0,0
-66,School Education Department,Lahore,Wahga Town,35210842.lahore.sed(nazish shaheen),0,0,0,0,0
-67,School Education Department,Lahore,Ravi Town,35220585.lahore.sed(khalid mehmood),0,0,0,0,0
+66,School Education Department,Lahore,Ravi Town,35220585.lahore.sed(khalid mehmood),0,0,0,0,0
+67,School Education Department,Lahore,Wahga Town,35210842.lahore.sed(nazish shaheen),0,0,0,0,0
 68,School Education Department,Lahore,Wahga Town,35210723.lahore.sed(waseem haider),0,0,0,0,0
 69,School Education Department,Lahore,Wahga Town,35210869.lahore.sed(khawar Ali),0,0,0,0,0
 70,School Education Department,Lahore,Wahga Town,35210986.lahore.sed(M Yasir),0,0,0,0,0
@@ -76,8 +76,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 75,School Education Department,Lahore,Wahga Town,35220199.lahore.sed(Israr Khan),0,0,0,0,0
 76,School Education Department,Lahore,Wahga Town,35210342.lahore.sed(Mugees Arsalan),0,0,0,0,0
 77,School Education Department,Lahore,Wahga Town,35220133.lahore.sed(Sana Ghani),0,0,0,0,0
-78,School Education Department,Lahore,Allama Iqbal Town,35220198.lahore.sed(shakil ahamad),0,0,0,0,0
-79,School Education Department,Lahore,Cantonment Board,35210224.lahore.sed(shoukat ali),0,0,0,0,0
+78,School Education Department,Lahore,Cantonment Board,35210224.lahore.sed(shoukat ali),0,0,0,0,0
+79,School Education Department,Lahore,Allama Iqbal Town,35220198.lahore.sed(shakil ahamad),0,0,0,0,0
 80,School Education Department,Lahore,Wahga Town,35220009.lahore.sed(Afaq Butt),0,0,0,0,0
 81,School Education Department,Lahore,Ravi Town,35220589.lahore.sed(Irfan Latif),0,0,0,0,0
 82,School Education Department,Lahore,Wahga Town,35220557.lahore.sed(Farah Deeba),0,0,0,0,0
@@ -106,11 +106,11 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 105,School Education Department,Lahore,Cantonment Board,35210404.lahore.sed(Muhammad irfan),0,0,0,0,0
 106,School Education Department,Lahore,Wahga Town,35210054.lahore.sed(Waris ali),0,0,0,0,0
 107,School Education Department,Lahore,Ravi Town,35220267.lahore.sed(Maqbool Ahmad),0,0,0,0,0
-108,School Education Department,Lahore,Gulberg Town,35210822.lahore.sed(TAYYABA TABASSUM),0,0,0,0,0
-109,School Education Department,Lahore,Shalamar Town,35210527.lahore.sed(Farah Saeed),0,0,0,0,0
+108,School Education Department,Lahore,Shalamar Town,35210527.lahore.sed(Farah Saeed),0,0,0,0,0
+109,School Education Department,Lahore,Gulberg Town,35210822.lahore.sed(TAYYABA TABASSUM),0,0,0,0,0
 110,School Education Department,Lahore,Allama Iqbal Town,35220201.lahore.sed(Naqeeb ul Rehman),0,0,0,0,0
-111,School Education Department,Lahore,Gulberg Town,35210139.lahore.sed(GGHS Ganga Ice Factory Gulberg lahore),0,0,0,0,0
-112,School Education Department,Lahore,Shalamar Town,35210298.lahore.sed(azzam iqbal),0,0,0,0,0
+111,School Education Department,Lahore,Shalamar Town,35210298.lahore.sed(azzam iqbal),0,0,0,0,0
+112,School Education Department,Lahore,Gulberg Town,35210139.lahore.sed(GGHS Ganga Ice Factory Gulberg lahore),0,0,0,0,0
 113,School Education Department,Lahore,Wahga Town,35220020.lahore.sed(GH S chishtia Islam Pura lahore),0,0,0,0,0
 114,School Education Department,Lahore,Samanabad Town,35220028.lahore.sed(MuhammadUsmanButt),0,0,0,0,0
 115,School Education Department,Lahore,Shalamar Town,35220275.lahore.sed(Muhammad Laique),0,0,0,0,0
@@ -122,8 +122,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 121,School Education Department,Lahore,Data Gunj Baksh Town,35220387.lahore.sed(Iram Shehzadi),0,0,0,0,0
 122,School Education Department,Lahore,Shalamar Town,35210110.lahore.sed(Shafiq),0,0,0,0,0
 123,School Education Department,Lahore,Cantonment Board,35210094.lahore.sed(salman azik raza),0,0,0,0,0
-124,School Education Department,Lahore,Wahga Town,35220031.lahore.sed(Govt M I Happy HS Sanda Lahore),0,0,0,0,0
-125,School Education Department,Lahore,Allama Iqbal Town,35220171.lahore.sed(Muhammad Asim khan),0,0,0,0,0
+124,School Education Department,Lahore,Allama Iqbal Town,35220171.lahore.sed(Muhammad Asim khan),0,0,0,0,0
+125,School Education Department,Lahore,Wahga Town,35220031.lahore.sed(Govt M I Happy HS Sanda Lahore),0,0,0,0,0
 126,School Education Department,Lahore,Wahga Town,35210997.lahore.sed(Razia),0,0,0,0,0
 127,School Education Department,Lahore,Wahga Town,35210137.lahore.sed(snober afzal),0,0,0,0,0
 128,School Education Department,Lahore,Gulberg Town,35210474.lahore.sed(Robina shaheen),0,0,0,0,0
@@ -147,8 +147,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 146,School Education Department,Lahore,Wahga Town,35210830.lahore.sed(Zubair Hussain),0,0,0,0,0
 147,School Education Department,Lahore,Allama Iqbal Town,35220204.lahore.sed(Rukhsana Akhtar),0,0,0,0,0
 148,School Education Department,Lahore,Cantonment Board,35210138.lahore.sed(Sheikh Imran),0,0,0,0,0
-149,School Education Department,Lahore,Gulberg Town,35210903.lahore.sed(Muhammad Usman ghani),0,0,0,0,0
-150,School Education Department,Lahore,Wahga Town,35210112.lahore.sed(gul zaib Ali khan),0,0,0,0,0
+149,School Education Department,Lahore,Wahga Town,35210112.lahore.sed(gul zaib Ali khan),0,0,0,0,0
+150,School Education Department,Lahore,Gulberg Town,35210903.lahore.sed(Muhammad Usman ghani),0,0,0,0,0
 151,School Education Department,Lahore,Cantonment Board,35210099.lahore.sed(Arslan Gulzar),0,0,0,0,0
 152,School Education Department,Lahore,Wahga Town,35220116.lahore.sed(farooq iqbal),0,0,0,0,0
 153,School Education Department,Lahore,Cantonment Board,35210086.lahore.sed(Ali Raza),0,0,0,0,0
@@ -313,9 +313,9 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 312,School Education Department,Lahore,Cantonment Board,35210376.lahore.sed(Maqbool Ahmad),0,0,0,0,0
 313,School Education Department,Lahore,Wahga Town,35210025.lahore.sed(naveed fida),0,0,0,0,0
 314,School Education Department,Lahore,Allama Iqbal Town,35220207.lahore.sed(saddam),0,0,0,0,0
-315,School Education Department,Lahore,Shalamar Town,35210001.lahore.sed(Govt Higher Secenday School Gohray Shah Road Lahor),0,0,0,0,0
-316,School Education Department,Lahore,Wahga Town,35210478.lahore.sed(GGPS S A model Bhabhra),0,0,0,0,0
-317,School Education Department,Lahore,Allama Iqbal Town,35220462.lahore.sed(Hafiz Muhammad Abdul Basit),0,0,0,0,0
+315,School Education Department,Lahore,Allama Iqbal Town,35220462.lahore.sed(Hafiz Muhammad Abdul Basit),0,0,0,0,0
+316,School Education Department,Lahore,Shalamar Town,35210001.lahore.sed(Govt Higher Secenday School Gohray Shah Road Lahor),0,0,0,0,0
+317,School Education Department,Lahore,Wahga Town,35210478.lahore.sed(GGPS S A model Bhabhra),0,0,0,0,0
 318,School Education Department,Lahore,Wahga Town,35220029.lahore.sed(Mushtaq Ahmad),1,0,0,0,1
 319,School Education Department,Lahore,Wahga Town,35210725.lahore.sed(Bushra yousaf),0,0,0,0,0
 320,School Education Department,Lahore,Shalamar Town,35210284.lahore.sed(Ganjay Sindhu),0,0,0,0,0
@@ -334,8 +334,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 333,School Education Department,Lahore,Wahga Town,35210315.lahore.sed(Amra Aslam),0,0,0,0,0
 334,School Education Department,Lahore,Wahga Town,35220642.lahore.sed(Nafeesa Akram),0,0,0,0,0
 335,School Education Department,Lahore,Allama Iqbal Town,35220234.lahore.sed(talib hussain),0,0,0,0,0
-336,School Education Department,Lahore,Samanabad Town,35210571.lahore.sed(Iram masood),0,0,0,0,0
-337,School Education Department,Lahore,Samanabad Town,35210471.lahore.sed(Salma jabeen),0,0,0,0,0
+336,School Education Department,Lahore,Samanabad Town,35210471.lahore.sed(Salma jabeen),0,0,0,0,0
+337,School Education Department,Lahore,Samanabad Town,35210571.lahore.sed(Iram masood),0,0,0,0,0
 338,School Education Department,Lahore,Cantonment Board,35210407.lahore.sed(Azeem Noor),0,0,0,0,0
 339,School Education Department,Lahore,Shalamar Town,35210754.lahore.sed(Fatima Nawaz),0,0,0,0,0
 340,School Education Department,Lahore,Cantonment Board,35210202.lahore.sed(Gps Dhillam Dhilwan),0,0,0,0,0
@@ -360,12 +360,12 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 359,School Education Department,Lahore,Shalamar Town,35210631.lahore.sed(Shahnaz Akhtar),0,0,0,0,0
 360,School Education Department,Lahore,Wahga Town,35210881.lahore.sed(Ali Hussain),0,0,0,0,0
 361,School Education Department,Lahore,Nishtar Town,35210439.lahore.sed(Malik kamran sikandar),0,0,0,0,0
-362,School Education Department,Lahore,Samanabad Town,35220111.lahore.sed(Naeem Farooq),0,0,0,0,0
-363,School Education Department,Lahore,Allama Iqbal Town,35220050.lahore.sed(Zeeshan Ismail),0,0,0,0,0
+362,School Education Department,Lahore,Allama Iqbal Town,35220050.lahore.sed(Zeeshan Ismail),0,0,0,0,0
+363,School Education Department,Lahore,Samanabad Town,35220111.lahore.sed(Naeem Farooq),0,0,0,0,0
 364,School Education Department,Lahore,Wahga Town,35220036.lahore.sed(Mirza Nasser Ahmad),0,0,0,0,0
 365,School Education Department,Lahore,Allama Iqbal Town,35220008.lahore.sed(Muhammad shafiq),0,0,0,0,0
-366,School Education Department,Lahore,Aziz Bhatti Town,35210837.lahore.sed(Momoona Firdous),0,0,0,0,0
-367,School Education Department,Lahore,Wahga Town,35220265.lahore.sed(mabbas),0,0,0,0,0
+366,School Education Department,Lahore,Wahga Town,35220265.lahore.sed(mabbas),0,0,0,0,0
+367,School Education Department,Lahore,Aziz Bhatti Town,35210837.lahore.sed(Momoona Firdous),0,0,0,0,0
 368,School Education Department,Lahore,Nishtar Town,35210444.lahore.sed(Aas Muhammad),0,0,0,0,0
 369,School Education Department,Lahore,Wahga Town,35210709.lahore.sed(Naureen Shaukat),0,0,0,0,0
 370,School Education Department,Lahore,Cantonment Board,35210505.lahore.sed(sadia Firdous),0,0,0,0,0
@@ -396,8 +396,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 395,School Education Department,Lahore,Nishtar Town,35220655.lahore.sed(Amna Anwar),0,0,0,0,0
 396,School Education Department,Lahore,Allama Iqbal Town,35220438.lahore.sed(Robina Rashid),0,0,0,0,0
 397,School Education Department,Lahore,Wahga Town,35220297.lahore.sed(Khadija Jilani),0,0,0,0,0
-398,School Education Department,Lahore,Shalamar Town,35210874.lahore.sed(CDG GHS BAJALINE LAHORE),0,0,0,0,0
-399,School Education Department,Lahore,Wahga Town,35210605.lahore.sed(iqra),0,0,0,0,0
+398,School Education Department,Lahore,Wahga Town,35210605.lahore.sed(iqra),0,0,0,0,0
+399,School Education Department,Lahore,Shalamar Town,35210874.lahore.sed(CDG GHS BAJALINE LAHORE),0,0,0,0,0
 400,School Education Department,Lahore,Wahga Town,35220432.lahore.sed(Adidaparveen),0,0,0,0,0
 401,School Education Department,Lahore,Wahga Town,35210801.lahore.sed(Gges rasool park),0,0,0,0,0
 402,School Education Department,Lahore,Ravi Town,35220276.lahore.sed(Arshad Ali),0,0,0,0,0
@@ -413,10 +413,10 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 412,School Education Department,Lahore,Nishtar Town,35210428.lahore.sed(Mirza kaleem ullah baig),0,0,0,0,0
 413,School Education Department,Lahore,Wahga Town,35210650.lahore.sed(anila),0,0,0,0,0
 414,School Education Department,Lahore,Allama Iqbal Town,35220303.lahore.sed(Robina Naimat),0,0,0,0,0
-415,School Education Department,Lahore,Cantonment Board,35210501.lahore.sed(GMPS Barka kalan),0,0,0,0,0
-416,School Education Department,Lahore,Allama Iqbal Town,35220202.lahore.sed(azmat ali),0,0,0,0,0
-417,School Education Department,Lahore,Gulberg Town,35210026.lahore.sed(Azwar Bhatti),0,0,0,0,0
-418,School Education Department,Lahore,Cantonment Board,35210515.lahore.sed(shafaqa ali),0,0,0,0,0
+415,School Education Department,Lahore,Allama Iqbal Town,35220202.lahore.sed(azmat ali),0,0,0,0,0
+416,School Education Department,Lahore,Cantonment Board,35210501.lahore.sed(GMPS Barka kalan),0,0,0,0,0
+417,School Education Department,Lahore,Cantonment Board,35210515.lahore.sed(shafaqa ali),0,0,0,0,0
+418,School Education Department,Lahore,Gulberg Town,35210026.lahore.sed(Azwar Bhatti),0,0,0,0,0
 419,School Education Department,Lahore,Cantonment Board,35210619.lahore.sed(Yasmeen Bano),0,0,0,0,0
 420,School Education Department,Lahore,Nishtar Town,35210130.lahore.sed(Muhammad Irfan),0,0,0,0,0
 421,School Education Department,Lahore,Wahga Town,35220431.lahore.sed(Rabia Mushtaq),0,0,0,0,0
@@ -515,8 +515,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 514,School Education Department,Lahore,Cantonment Board,35210027.lahore.sed(M Tanveer),0,0,0,0,0
 515,School Education Department,Lahore,Wahga Town,35220607.lahore.sed(M Tayyab Nazir),0,0,0,0,0
 516,School Education Department,Lahore,Allama Iqbal Town,35220434.lahore.sed(Sobia Kalsoom),0,0,0,0,0
-517,School Education Department,Lahore,Wahga Town,35220350.lahore.sed(samiullah),0,0,0,0,0
-518,School Education Department,Lahore,Wahga Town,35210156.lahore.sed(Hina),0,0,0,0,0
+517,School Education Department,Lahore,Wahga Town,35210156.lahore.sed(Hina),0,0,0,0,0
+518,School Education Department,Lahore,Wahga Town,35220350.lahore.sed(samiullah),0,0,0,0,0
 519,School Education Department,Lahore,Shalamar Town,35210024.lahore.sed(munawar Javaid bhatti),0,0,0,0,0
 520,School Education Department,Lahore,Samanabad Town,35220380.lahore.sed(Tahira Tabassum),0,0,0,0,0
 521,School Education Department,Lahore,Wahga Town,35220379.lahore.sed(samia saleem),0,0,0,0,0
@@ -550,8 +550,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 549,School Education Department,Lahore,Wahga Town,35210338.lahore.sed(Waseem akhtar),0,0,0,0,0
 550,School Education Department,Lahore,Wahga Town,35220242.lahore.sed(Zeeshan),0,0,0,0,0
 551,School Education Department,Lahore,Shalamar Town,35210607.lahore.sed(Rubina Shaheen),0,0,0,0,0
-552,School Education Department,Lahore,Shalamar Town,35210363.lahore.sed(Arslan Ammar),0,0,0,0,0
-553,School Education Department,Lahore,Data Gunj Baksh Town,35210082.lahore.sed(Gghs modren),0,0,0,0,0
+552,School Education Department,Lahore,Data Gunj Baksh Town,35210082.lahore.sed(Gghs modren),0,0,0,0,0
+553,School Education Department,Lahore,Shalamar Town,35210363.lahore.sed(Arslan Ammar),0,0,0,0,0
 554,School Education Department,Lahore,Wahga Town,35210987.lahore.sed(Rubina Amin),0,0,0,0,0
 555,School Education Department,Lahore,Wahga Town,35210671.lahore.sed(sadia chaudhry),0,0,0,0,0
 556,School Education Department,Lahore,Wahga Town,35220112.lahore.sed(hira),0,0,0,0,0
@@ -559,8 +559,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 558,School Education Department,Lahore,Aziz Bhatti Town,35210953.lahore.sed(ANUM IRSHAD),0,0,0,0,0
 559,School Education Department,Lahore,Cantonment Board,35210628.lahore.sed(GGES Rehmat Pura),0,0,0,0,0
 560,School Education Department,Lahore,Wahga Town,35220287.lahore.sed(salma Naz),0,0,0,0,0
-561,School Education Department,Lahore,Wahga Town,35210759.lahore.sed(M Waqas Ali),0,0,0,0,0
-562,School Education Department,Lahore,Wahga Town,35220339.lahore.sed(Salma kousar),0,0,0,0,0
+561,School Education Department,Lahore,Wahga Town,35220339.lahore.sed(Salma kousar),0,0,0,0,0
+562,School Education Department,Lahore,Wahga Town,35210759.lahore.sed(M Waqas Ali),0,0,0,0,0
 563,School Education Department,Lahore,Shalamar Town,35210169.lahore.sed(Girls H/S Salamat Pura),0,0,0,0,0
 564,School Education Department,Lahore,Shalamar Town,35210166.lahore.sed(miss shaziashabbir),0,0,0,0,0
 565,School Education Department,Lahore,Wahga Town,35210898.lahore.sed(maqsood ahmed),0,0,0,0,0
@@ -682,8 +682,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 681,School Education Department,Lahore,Wahga Town,35210006.lahore.sed(Muhammad Yasir Khan),0,0,0,0,0
 682,School Education Department,Lahore,Cantonment Board,35210176.lahore.sed(GGHS CHACHOWALI LAHORE CANTT),0,0,0,0,0
 683,School Education Department,Lahore,Shalamar Town,35210164.lahore.sed(Govt Tahir Model Girls High School),0,0,0,0,0
-684,School Education Department,Lahore,Allama Iqbal Town,35220102.lahore.sed(karamat ali),0,0,0,0,0
-685,School Education Department,Lahore,Shalamar Town,35210297.lahore.sed(Muhammad waheed ashraf),0,0,0,0,0
+684,School Education Department,Lahore,Shalamar Town,35210297.lahore.sed(Muhammad waheed ashraf),0,0,0,0,0
+685,School Education Department,Lahore,Allama Iqbal Town,35220102.lahore.sed(karamat ali),0,0,0,0,0
 686,School Education Department,Lahore,Cantonment Board,35210504.lahore.sed(tabinda munir),0,0,0,0,0
 687,School Education Department,Lahore,Wahga Town,35210689.lahore.sed(syeda farzana gulnaz),0,0,0,0,0
 688,School Education Department,Lahore,Wahga Town,35220415.lahore.sed(Kubra Ali),0,0,0,0,0
@@ -725,7 +725,7 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 724,School Education Department,Lahore,Wahga Town,35210091.lahore.sed(khadija afzal),0,0,0,0,0
 725,School Education Department,Lahore,Wahga Town,35220357.lahore.sed(Nahid Navid),0,0,0,0,0
 726,School Education Department,Lahore,Cantonment Board,35210414.lahore.sed(khalid Pervez),0,0,0,0,0
-727,School Education Department,Lahore,Wahga Town,35210314.lahore.sed(Muhammad Bilal Amin),1,0,0,0,1
+727,School Education Department,Lahore,Wahga Town,35210314.lahore.sed(Muhammad Bilal Amin),0,0,0,0,0
 728,School Education Department,Lahore,Allama Iqbal Town,35220175.lahore.sed(Riaz Ahmed),0,0,0,0,0
 729,School Education Department,Lahore,Cantonment Board,35210406.lahore.sed(zaheer ahmad),0,0,0,0,0
 730,School Education Department,Lahore,Wahga Town,35220139.lahore.sed(samia nisar),0,0,0,0,0
@@ -740,8 +740,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 739,School Education Department,Lahore,Allama Iqbal Town,35220058.lahore.sed(Dr Rukhsana Nighat),0,0,0,0,0
 740,School Education Department,Lahore,Shalamar Town,35210085.lahore.sed(Ali Raza),0,0,0,0,0
 741,School Education Department,Lahore,Samanabad Town,35210017.lahore.sed(GHS Islamia Samanabad Lahore),0,0,0,0,0
-742,School Education Department,Lahore,Allama Iqbal Town,35220181.lahore.sed(Muhammad Nawaz),0,0,0,0,0
-743,School Education Department,Lahore,Wahga Town,35220002.lahore.sed(Govt Girls higher secondary school awan town),0,0,0,0,0
+742,School Education Department,Lahore,Wahga Town,35220002.lahore.sed(Govt Girls higher secondary school awan town),0,0,0,0,0
+743,School Education Department,Lahore,Allama Iqbal Town,35220181.lahore.sed(Muhammad Nawaz),0,0,0,0,0
 744,School Education Department,Lahore,Wahga Town,35220333.lahore.sed(Farzana Faryad),0,0,0,0,0
 745,School Education Department,Lahore,Wahga Town,35210317.lahore.sed(AbuBakar),0,0,0,0,0
 746,School Education Department,Lahore,Shalamar Town,35210890.lahore.sed(Umer Syedzad),0,0,0,0,0
@@ -754,8 +754,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 753,School Education Department,Lahore,Wahga Town,35220636.lahore.sed(noora faka),0,0,0,0,0
 754,School Education Department,Lahore,Wahga Town,35210989.lahore.sed(Mumtaz Kharal),0,0,0,0,0
 755,School Education Department,Lahore,Wahga Town,35220354.lahore.sed(GGPS Bhatta Pind),0,0,0,0,0
-756,School Education Department,Lahore,Allama Iqbal Town,35220220.lahore.sed(Kashif hanif),0,0,0,0,0
-757,School Education Department,Lahore,Shalamar Town,35210952.lahore.sed(Qasim Zaidi),0,0,0,0,0
+756,School Education Department,Lahore,Shalamar Town,35210952.lahore.sed(Qasim Zaidi),0,0,0,0,0
+757,School Education Department,Lahore,Allama Iqbal Town,35220220.lahore.sed(Kashif hanif),0,0,0,0,0
 758,School Education Department,Lahore,Wahga Town,35210226.lahore.sed(Muhammad Imran),0,0,0,0,0
 759,School Education Department,Lahore,Allama Iqbal Town,35210695.lahore.sed(Shahnaz Kausar),0,0,0,0,0
 760,School Education Department,Lahore,Gulberg Town,35220189.lahore.sed(meh jabeen),0,0,0,0,0
@@ -782,8 +782,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 781,School Education Department,Lahore,Wahga Town,35210693.lahore.sed(Nabeela Gulzar),0,0,0,0,0
 782,School Education Department,Lahore,Shalamar Town,35210071.lahore.sed(Rubina Miraj),0,0,0,0,0
 783,School Education Department,Lahore,Wahga Town,35220039.lahore.sed(Ådeel Åhmed),0,0,0,0,0
-784,School Education Department,Lahore,Wahga Town,35210807.lahore.sed(Junior Model),0,0,0,0,0
-785,School Education Department,Lahore,Shalamar Town,35210010.lahore.sed(Muhammad yousaf),0,0,0,0,0
+784,School Education Department,Lahore,Shalamar Town,35210010.lahore.sed(Muhammad yousaf),0,0,0,0,0
+785,School Education Department,Lahore,Wahga Town,35210807.lahore.sed(Junior Model),0,0,0,0,0
 786,School Education Department,Lahore,Gulberg Town,35210035.lahore.sed(Shahid Javed),0,0,0,0,0
 787,School Education Department,Lahore,Wahga Town,35210912.lahore.sed(Sadaf karim),0,0,0,0,0
 788,School Education Department,Lahore,Wahga Town,35210841.lahore.sed(sania),0,0,0,0,0
@@ -814,8 +814,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 813,School Education Department,Lahore,Allama Iqbal Town,35220687.lahore.sed(Zeeshan Ahmed),1,0,0,0,1
 814,School Education Department,Lahore,Wahga Town,35220569.lahore.sed(Fouzia Nadeem),0,0,0,0,0
 815,School Education Department,Lahore,Wahga Town,35220554.lahore.sed(Ayesha Siddique),0,0,0,0,0
-816,School Education Department,Lahore,Cantonment Board,35210051.lahore.sed(GHS WALTON),0,0,0,0,0
-817,School Education Department,Lahore,Wahga Town,35210615.lahore.sed(ggps kotli ghassi),0,0,0,0,0
+816,School Education Department,Lahore,Wahga Town,35210615.lahore.sed(ggps kotli ghassi),0,0,0,0,0
+817,School Education Department,Lahore,Cantonment Board,35210051.lahore.sed(GHS WALTON),0,0,0,0,0
 818,School Education Department,Lahore,Wahga Town,35210131.lahore.sed(Ghulam Rasool Raza),0,0,0,0,0
 819,School Education Department,Lahore,Aziz Bhatti Town,35210089.lahore.sed(Bazgha Shakoor),0,0,0,0,0
 820,School Education Department,Lahore,Shalamar Town,35210795.lahore.sed(faiza),0,0,0,0,0
@@ -849,8 +849,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 848,School Education Department,Lahore,Data Gunj Baksh Town,35210154.lahore.sed(Qasim),0,0,0,0,0
 849,School Education Department,Lahore,Wahga Town,35210133.lahore.sed(masood alam),0,0,0,0,0
 850,School Education Department,Lahore,Wahga Town,35220364.lahore.sed(Saira Khanum),0,0,0,0,0
-851,School Education Department,Lahore,Nishtar Town,35210357.lahore.sed(Sheikh Zain Majid),0,0,0,0,0
-852,School Education Department,Lahore,Cantonment Board,35210402.lahore.sed(Muhammad Khalid),0,0,0,0,0
+851,School Education Department,Lahore,Cantonment Board,35210402.lahore.sed(Muhammad Khalid),0,0,0,0,0
+852,School Education Department,Lahore,Nishtar Town,35210357.lahore.sed(Sheikh Zain Majid),0,0,0,0,0
 853,School Education Department,Lahore,Cantonment Board,35210622.lahore.sed(Samina Riasat),0,0,0,0,0
 854,School Education Department,Lahore,Aziz Bhatti Town,35210884.lahore.sed(Afzal Mehmood),0,0,0,0,0
 855,School Education Department,Lahore,Wahga Town,35210184.lahore.sed(GGHS Dullo Khurd Lahore),0,0,0,0,0
@@ -874,8 +874,8 @@ Sr No,Department,District,Tehsil,Username,Simple Activities,Patient Activities,V
 873,School Education Department,Lahore,Wahga Town,35220639.lahore.sed(Muhammad Azam Ameen),0,0,0,0,0
 874,School Education Department,Lahore,Gulberg Town,35210152.lahore.sed(Mubah Benish),0,0,0,0,0
 875,School Education Department,Lahore,Wahga Town,35220088.lahore.sed(Dr Shoukat Iqbal),0,0,0,0,0
-876,School Education Department,Lahore,Wahga Town,35220370.lahore.sed(shaneela sabhoi),0,0,0,0,0
-877,School Education Department,Lahore,Wahga Town,35220617.lahore.sed(Muhammad asghar),0,0,0,0,0
+876,School Education Department,Lahore,Wahga Town,35220617.lahore.sed(Muhammad asghar),0,0,0,0,0
+877,School Education Department,Lahore,Wahga Town,35220370.lahore.sed(shaneela sabhoi),0,0,0,0,0
 878,School Education Department,Lahore,Allama Iqbal Town,35220439.lahore.sed(shahnaz akhtar),0,0,0,0,0
 879,School Education Department,Lahore,Shalamar Town,35210366.lahore.sed(Faiza kazmi),0,0,0,0,0
 880,School Education Department,Lahore,Cantonment Board,35210106.lahore.sed(hafiz m azam),0,0,0,0,0

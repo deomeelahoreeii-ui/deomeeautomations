@@ -32,8 +32,32 @@ def build_dispatch_plan(ctx: CompileContext) -> DispatchPlanResult:
             dispatch_plan.append(plan)
 
     quality = ctx.summary.get("quality_gate") if isinstance(ctx.summary, dict) else {}
-    for warning in (quality.get("warnings") or []) if isinstance(quality, dict) else []:
-        batch_issues.append(issue("report_quality_warning", "warning", str(warning)))
+    quality_issues = (quality.get("issues") or []) if isinstance(quality, dict) else []
+    if quality_issues:
+        for quality_issue in quality_issues:
+            if not isinstance(quality_issue, dict):
+                continue
+            severity = str(quality_issue.get("severity") or "warning")
+            if severity != "warning":
+                # A blocked source quality gate never reaches preview compilation.
+                continue
+            details = {
+                key: value
+                for key, value in quality_issue.items()
+                if key not in {"code", "severity", "message"}
+            }
+            batch_issues.append(
+                issue(
+                    str(quality_issue.get("code") or "report_quality_warning"),
+                    severity,
+                    str(quality_issue.get("message") or "Report quality warning."),
+                    **details,
+                )
+            )
+    else:
+        # Compatibility with summaries produced before structured quality issues.
+        for warning in (quality.get("warnings") or []) if isinstance(quality, dict) else []:
+            batch_issues.append(issue("report_quality_warning", "warning", str(warning)))
     zero_result = (
         (isinstance(quality, dict) and quality.get("final_school_count") == 0)
         or (isinstance(ctx.whatsapp_summary, dict)
