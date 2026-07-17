@@ -12,6 +12,7 @@ from automation_core.database import create_db_and_tables
 from automation_core.database_identity import database_identity
 from crm_filters.api import router as crm_filters_router
 from crm_domain.api import router as crm_domain_router
+from crm_domain.reply_api import router as crm_reply_router
 from master_data.api import router as master_data_router
 from whatsapp_gateway.api import router as whatsapp_router
 from whatsapp_gateway.preview_api import router as whatsapp_preview_router
@@ -49,6 +50,7 @@ app.include_router(jobs_router)
 app.include_router(antidengue_router)
 app.include_router(crm_filters_router)
 app.include_router(crm_domain_router)
+app.include_router(crm_reply_router)
 app.include_router(master_data_router)
 app.include_router(whatsapp_router)
 app.include_router(whatsapp_preview_router)

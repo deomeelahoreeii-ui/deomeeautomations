@@ -92,6 +92,55 @@ def _validate_crm_pending_contract(metadata) -> None:
         )
 
 
+def _normalized_paperless_value(value: object) -> object:
+    if isinstance(value, list):
+        return tuple(sorted(str(item) for item in value))
+    return str(value) if value is not None else None
+
+
+def _verify_main_publication_contract(client, metadata, case: ComplaintCase, document_id: int) -> None:
+    """Prove that the canonical document is actually visible as CRM Pending."""
+
+    document = client._get_document(document_id)
+    expected_title = f"CRM - {case.complaint_number} - Main Complaint - v{case.version}"
+    errors: list[str] = []
+    if str(document.get("title") or "") != expected_title:
+        errors.append("title")
+    if str(document.get("document_type") or "") != str(metadata.complaint_type_id):
+        errors.append("document type")
+    if metadata.correspondent_id is not None and str(document.get("correspondent") or "") != str(
+        metadata.correspondent_id
+    ):
+        errors.append("correspondent")
+
+    expected_fields = paperless_custom_field_values(
+        _case_values(case), document_role="Main Complaint"
+    )
+    expected_payload = {
+        str(item["field"]): item.get("value")
+        for item in client.custom_field_payload(expected_fields)
+    }
+    actual_payload = {
+        str(item.get("field")): item.get("value")
+        for item in document.get("custom_fields", []) or []
+    }
+    for name in ("Complaint Number", "Source", "Status", "Document Role"):
+        field_id = metadata.field_ids_by_name.get(name.casefold())
+        if field_id is None:
+            errors.append(name)
+            continue
+        key = str(field_id)
+        if _normalized_paperless_value(actual_payload.get(key)) != _normalized_paperless_value(
+            expected_payload.get(key)
+        ):
+            errors.append(name)
+    if errors:
+        raise RuntimeError(
+            f"Paperless document #{document_id} failed CRM Pending verification: "
+            + ", ".join(errors)
+        )
+
+
 def _publish_complaint_case(case_id: str) -> dict[str, object]:
     case_uuid = uuid.UUID(case_id)
     settings = get_settings()
@@ -119,6 +168,7 @@ def _publish_complaint_case(case_id: str) -> dict[str, object]:
 
     main_document_id: int | None = None
     completed = 0
+    skipped_duplicates = 0
     with tempfile.TemporaryDirectory(prefix=f"crm-publish-{case_id}-") as temp_name:
         for publication_id in publication_ids:
             with Session(engine) as session:
@@ -202,6 +252,21 @@ def _publish_complaint_case(case_id: str) -> dict[str, object]:
                         publication.updated_at = utcnow()
                         session.add(publication)
                         session.commit()
+                    if not is_main and paperless_id == main_document_id:
+                        publication.paperless_document_id = paperless_id
+                        publication.state = "skipped_duplicate"
+                        publication.last_error = (
+                            "Identical capture already published as the canonical main complaint; "
+                            "metadata update intentionally skipped."
+                        )
+                        publication.updated_at = utcnow()
+                        document.paperless_document_id = None
+                        document.updated_at = utcnow()
+                        session.add(publication)
+                        session.add(document)
+                        session.commit()
+                        skipped_duplicates += 1
+                        continue
                     client.update_document_metadata(
                         paperless_id,
                         title=title,
@@ -236,11 +301,44 @@ def _publish_complaint_case(case_id: str) -> dict[str, object]:
     with Session(engine) as session:
         case = session.get(ComplaintCase, case_uuid)
         assert case is not None
+        if main_document_id is None:
+            raise RuntimeError("Paperless publication did not produce a canonical main complaint")
+        try:
+            _verify_main_publication_contract(client, metadata, case, main_document_id)
+        except Exception as exc:
+            publications = session.exec(
+                select(PaperlessPublication).where(
+                    PaperlessPublication.complaint_case_id == case.id
+                )
+            ).all()
+            main_publication = next(
+                (
+                    publication
+                    for publication in publications
+                    if publication.intended_fields_json.get("role") == "main_complaint"
+                ),
+                None,
+            )
+            if main_publication is not None:
+                main_publication.state = "failed"
+                main_publication.last_error = str(exc)
+                main_publication.updated_at = utcnow()
+                session.add(main_publication)
+            case.state = "fresh"
+            case.updated_at = utcnow()
+            session.add(case)
+            session.commit()
+            raise
         case.state = "published"
         case.updated_at = utcnow()
         session.add(case)
         session.commit()
-    return {"case_id": case_id, "status": "published", "documents": completed}
+    return {
+        "case_id": case_id,
+        "status": "published",
+        "documents": completed,
+        "skipped_duplicates": skipped_duplicates,
+    }
 
 
 def _record_publication_failure(case_id: uuid.UUID, error: Exception) -> None:

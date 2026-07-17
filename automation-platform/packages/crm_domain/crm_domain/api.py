@@ -48,7 +48,7 @@ class BatchPublicationRequest(BaseModel):
 def _accepted_publication_documents(
     session: Session, case: ComplaintCase
 ) -> list[tuple[ComplaintDocument, ComplaintDocumentCaseLink]]:
-    return list(
+    rows = list(
         session.exec(
             select(ComplaintDocument, ComplaintDocumentCaseLink)
             .join(
@@ -69,6 +69,20 @@ def _accepted_publication_documents(
             )
         ).all()
     )
+    # A WhatsApp file can be captured more than once and linked under different
+    # roles. Publishing identical bytes twice is unsafe: Paperless may return
+    # the canonical document for the second upload and a later metadata PATCH
+    # would then turn the main complaint into an attachment. Ordering above
+    # makes the accepted main complaint win when hashes collide.
+    unique: list[tuple[ComplaintDocument, ComplaintDocumentCaseLink]] = []
+    seen_content: set[str] = set()
+    for document, link in rows:
+        content_key = document.source_sha256 or str(document.id)
+        if content_key in seen_content:
+            continue
+        seen_content.add(content_key)
+        unique.append((document, link))
+    return unique
 
 
 def _publication_blockers(session: Session, case: ComplaintCase) -> list[str]:
@@ -534,7 +548,8 @@ def approve_fresh_complaint(
 def _stage_case_publications(session: Session, case: ComplaintCase) -> None:
     document_links = _accepted_publication_documents(session, case)
     for document, link in document_links:
-        key_source = f"{case.id}:{document.id}:{document.source_sha256 or document.id}:v{case.version}"
+        content_key = document.source_sha256 or str(document.id)
+        key_source = f"{case.id}:{content_key}:v{case.version}"
         key = hashlib.sha256(key_source.encode()).hexdigest()
         existing = session.exec(
             select(PaperlessPublication).where(

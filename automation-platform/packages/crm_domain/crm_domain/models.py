@@ -167,3 +167,22 @@ class PaperlessPublication(SQLModel, table=True):
     last_error: str | None = Field(default=None, sa_column=Column(Text))
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class ComplaintReply(SQLModel, table=True):
+    __tablename__ = "crm_complaint_replies"
+    __table_args__ = (
+        UniqueConstraint("complaint_case_id", name="uq_crm_reply_case"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    complaint_case_id: uuid.UUID = Field(
+        foreign_key="crm_complaint_cases.id", index=True
+    )
+    reply_text: str = Field(sa_column=Column(Text, nullable=False))
+    source_filename: str = Field(index=True)
+    source_row: int
+    version: int = 1
+    imported_at: datetime = Field(default_factory=utcnow, index=True)
+    generated_at: datetime | None = Field(default=None, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)

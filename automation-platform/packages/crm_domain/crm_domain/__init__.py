@@ -10,6 +10,7 @@ from crm_domain.models import (
     ComplaintDocumentCaseLink,
     ComplaintFieldObservation,
     ComplaintMatch,
+    ComplaintReply,
     DocumentExtraction,
     PaperlessPublication,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "ComplaintDocumentCaseLink",
     "ComplaintFieldObservation",
     "ComplaintMatch",
+    "ComplaintReply",
     "DocumentExtraction",
     "PaperlessPublication",
 ]

@@ -10,6 +10,7 @@ LEGACY_REVIEW_PAGE = ROOT / "apps/web/src/pages/whatsapp/inbound-processing.astr
 DEV_SCRIPT = ROOT / "scripts/dev.sh"
 CASE_PAGE = ROOT / "apps/web/src/pages/crm/cases/[id].astro"
 CASE_LIST_PAGE = ROOT / "apps/web/src/pages/crm/cases/index.astro"
+REPLY_PAGE = ROOT / "apps/web/src/pages/crm/replies/index.astro"
 
 
 def test_crm_intake_navigation_exposes_review_workspace() -> None:
@@ -96,6 +97,18 @@ def test_approved_cases_can_be_verified_and_batch_published_to_crm_pending() -> 
     assert "publication-publishing-count" in review_list_source
     assert "publication_blockers" in detail_source
     assert "Ready for CRM Pending" in detail_source
+
+
+def test_native_reply_workspace_exposes_export_import_and_letter_generation() -> None:
+    source = REPLY_PAGE.read_text(encoding="utf-8")
+    review_source = LIST_PAGE.read_text(encoding="utf-8")
+    assert "Export complaint remarks" in source
+    assert "Import ChatGPT reply CSV" in source
+    assert "Generate DEO Report package" in source
+    assert "/api/v1/crm/replies/complaints.csv" in source
+    assert "/api/v1/crm/replies/imports" in source
+    assert "/api/v1/crm/replies/letter-packages" in source
+    assert "Replies & formal letters" in review_source
 
 
 def test_dev_script_requires_processing_worker_registration() -> None:
