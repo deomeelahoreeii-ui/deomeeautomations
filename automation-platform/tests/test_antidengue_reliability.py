@@ -326,3 +326,26 @@ def test_dashboard_uses_sse_and_bounded_idle_refresh() -> None:
         assert "60000" in text
     assert '"Idempotency-Key": requestKey' in source
     assert 'id="cancel-execution"' in source
+
+
+def test_scheduler_lock_connection_never_owns_work_transactions() -> None:
+    source = Path(
+        "packages/antidengue_automation/antidengue_automation/scheduler_service.py"
+    ).read_text(encoding="utf-8")
+    assert 'execution_options(isolation_level="AUTOCOMMIT")' in source
+    assert "Session(bind=" not in source
+    assert source.count("with Session(engine) as session:") >= 3
+
+
+def test_dashboard_preserves_json_content_type_with_idempotency_header() -> None:
+    source = Path("apps/web/src/pages/index.astro").read_text(encoding="utf-8")
+    fetch_block = source[source.index("const response = await fetch"):source.index("const data = await response.json")]
+    assert fetch_block.index("...init") < fetch_block.index('headers: { "Content-Type": "application/json"')
+    assert '"Idempotency-Key": requestKey' in source
+
+
+def test_recovery_script_delegates_to_canonical_equivalence_logic() -> None:
+    source = Path("scripts/recover_antidengue_executions.py").read_text(encoding="utf-8")
+    assert "recover_orphaned_executions(session)" in source
+    assert "dispatch_profile_id" not in source
+    assert "defaultdict" not in source

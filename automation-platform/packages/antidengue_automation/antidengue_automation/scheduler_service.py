@@ -30,18 +30,33 @@ def _request_stop(signum: int, _frame) -> None:
 
 def run_tick() -> dict[str, int]:
     """Advance durable state and publish only committed task-outbox rows."""
-    with engine.connect() as connection:
+    # The advisory lock deliberately owns a different connection from every
+    # unit of database work below. Binding a Session to this connection would
+    # make its commits subordinate to the lock connection's outer transaction;
+    # Celery could then receive a task before PostgreSQL committed its Job.
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as lock_connection:
         acquired = True
-        if connection.dialect.name == "postgresql":
-            acquired = bool(connection.execute(text("SELECT pg_try_advisory_lock(7349202617)")).scalar())
+        if lock_connection.dialect.name == "postgresql":
+            acquired = bool(
+                lock_connection.execute(text("SELECT pg_try_advisory_lock(7349202617)")).scalar()
+            )
         if not acquired:
             return {"created": 0, "advanced": 0, "published": 0, "publish_failed": 0, "recovered": 0}
         try:
-            with Session(bind=connection) as session:
+            # Existing durable publications are handled in their own session.
+            with Session(engine) as session:
                 recovery = recover_orphaned_executions(session)
                 before = publish_pending_tasks(session)
+
+            # Stage transitions commit their Job, execution link and outbox row
+            # using an engine-owned transaction before any broker call occurs.
+            with Session(engine) as session:
                 created = ensure_due_executions(session, utcnow())
                 advanced = advance_pending_executions(session)
+
+            # A fresh connection can only see committed rows. Reaching Celery
+            # from here is therefore an executable commit-before-publish guard.
+            with Session(engine) as session:
                 after = publish_pending_tasks(session)
             return {
                 "created": len(created),
@@ -51,8 +66,8 @@ def run_tick() -> dict[str, int]:
                 "recovered": recovery["failed"] + recovery["requeued"],
             }
         finally:
-            if connection.dialect.name == "postgresql":
-                connection.execute(text("SELECT pg_advisory_unlock(7349202617)"))
+            if lock_connection.dialect.name == "postgresql":
+                lock_connection.execute(text("SELECT pg_advisory_unlock(7349202617)"))
 
 
 def main() -> int:

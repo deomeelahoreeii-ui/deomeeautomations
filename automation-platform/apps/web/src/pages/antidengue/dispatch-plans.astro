@@ -29,7 +29,7 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
     const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
     const label = (value: string) => value.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
     async function api(path: string, init?: RequestInit) {
-      const response = await fetch(`${API}${path}`, { headers: { "Content-Type": "application/json" }, ...init });
+      const response = await fetch(`${API}${path}`, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers || {}) } });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Request failed");
       return data;
