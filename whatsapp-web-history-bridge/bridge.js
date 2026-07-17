@@ -10,7 +10,8 @@ import { HistoryStateStore } from "./lib/state-store.js";
 import { PlatformClient } from "./lib/platform-client.js";
 import { createBridgeService } from "./lib/bridge-service.js";
 import { formatError } from "./lib/errors.js";
-import { ensureClientPage } from "./lib/page-session.js";
+import { initializeClientWithRecovery } from "./lib/client-lifecycle.js";
+import { ensureClientPage, isTransientPageError } from "./lib/page-session.js";
 
 const log = pino({ level: config.logLevel });
 const sc = StringCodec();
@@ -162,66 +163,112 @@ async function verifyRuntimePrerequisites() {
 acquireLock();
 const store = new HistoryStateStore(config.statePath);
 const platform = new PlatformClient(config);
-const client = new Client(clientOptions());
 const nc = await connect({ servers: config.natsUrl, maxReconnectAttempts: -1 });
-const service = createBridgeService({ config, client, store, platform, log, sc, runtime });
-const subscription = nc.subscribe(config.subject(), {
-  callback: (_error, message) => void service.respond(message),
-});
+let client = null;
+let service = null;
+const retiringClients = new WeakSet();
 
-client.on("qr", async (qr) => {
-  runtime.status = "qr";
-  runtime.authenticated = false;
-  runtime.error = null;
-  fs.mkdirSync(path.dirname(config.qrPath), { recursive: true });
-  await QRCode.toFile(config.qrPath, qr, { width: 420, margin: 2 });
-  const terminalQr = await QRCode.toString(qr, { type: "terminal", small: true });
-  process.stdout.write(`\n${terminalQr}\n`);
-  log.warn({ qrPath: config.qrPath }, "WhatsApp Web bridge needs pairing; scan the terminal QR or saved PNG");
-});
-client.on("authenticated", () => {
-  runtime.status = "authenticated";
-  runtime.authenticated = true;
-  runtime.error = null;
-  log.info("WhatsApp Web bridge authenticated");
-});
-client.on("ready", async () => {
-  try {
-    const page = await ensureClientPage(client, {
-      timeoutMs: config.pageRecoveryTimeoutMs,
-      requireInjected: true,
-    });
-    runtime.page = page?.state || null;
-    runtime.status = "ready";
+function attachClientEvents(target) {
+  target.on("qr", async (qr) => {
+    if (retiringClients.has(target)) return;
+    runtime.status = "qr";
+    runtime.authenticated = false;
+    runtime.error = null;
+    fs.mkdirSync(path.dirname(config.qrPath), { recursive: true });
+    await QRCode.toFile(config.qrPath, qr, { width: 420, margin: 2 });
+    const terminalQr = await QRCode.toString(qr, { type: "terminal", small: true });
+    process.stdout.write(`\n${terminalQr}\n`);
+    log.warn({ qrPath: config.qrPath }, "WhatsApp Web bridge needs pairing; scan the terminal QR or saved PNG");
+  });
+  target.on("authenticated", () => {
+    if (retiringClients.has(target)) return;
+    runtime.status = "authenticated";
     runtime.authenticated = true;
     runtime.error = null;
-    runtime.webVersion = await client.getWWebVersion().catch(() => page?.state?.webVersion || null);
-    try { fs.unlinkSync(config.qrPath); } catch {}
-    log.info({
-      workerId: config.workerId,
-      subject: config.subject(),
-      mode: config.mode,
-      webVersion: runtime.webVersion,
-      page: runtime.page,
-      visibleProfile: runtime.visibleProfile,
-    }, "WhatsApp Web history bridge ready");
-  } catch (error) {
-    runtime.status = "failed";
-    runtime.error = formatError(error, "ready_page_validation");
-    log.error({ error: runtime.error, stack: error?.stack || null }, "WhatsApp Web page did not stabilize after ready");
+    log.info("WhatsApp Web bridge authenticated");
+  });
+  target.on("ready", async () => {
+    if (retiringClients.has(target)) return;
+    try {
+      const page = await ensureClientPage(target, {
+        timeoutMs: config.pageRecoveryTimeoutMs,
+        requireInjected: true,
+      });
+      if (retiringClients.has(target) || target !== client) return;
+      runtime.page = page?.state || null;
+      runtime.status = "ready";
+      runtime.authenticated = true;
+      runtime.error = null;
+      runtime.webVersion = await target.getWWebVersion().catch(() => page?.state?.webVersion || null);
+      try { fs.unlinkSync(config.qrPath); } catch {}
+      log.info({
+        workerId: config.workerId,
+        subject: config.subject(),
+        mode: config.mode,
+        webVersion: runtime.webVersion,
+        page: runtime.page,
+        visibleProfile: runtime.visibleProfile,
+      }, "WhatsApp Web history bridge ready");
+    } catch (error) {
+      if (retiringClients.has(target) || target !== client) return;
+      runtime.status = "failed";
+      runtime.error = "Managed WhatsApp Web became unavailable while validating its page. Restart the managed bridge.";
+      log.error({ error: formatError(error, "ready_page_validation"), stack: error?.stack || null }, "WhatsApp Web page did not stabilize after ready");
+    }
+  });
+  target.on("auth_failure", (message) => {
+    if (retiringClients.has(target)) return;
+    runtime.status = "auth_failure";
+    runtime.authenticated = false;
+    runtime.error = "WhatsApp Web authentication failed. Refresh the managed browser snapshot and pair it again.";
+    log.error({ error: String(message || "Authentication failed") }, "WhatsApp Web bridge authentication failed");
+  });
+  target.on("disconnected", (reason) => {
+    if (retiringClients.has(target)) return;
+    runtime.status = "disconnected";
+    runtime.authenticated = false;
+    runtime.error = "Managed WhatsApp Web disconnected. Restart the managed bridge.";
+    log.warn({ reason: String(reason || "Disconnected") }, "WhatsApp Web bridge disconnected");
+  });
+}
+
+function createManagedClient() {
+  const target = new Client(clientOptions());
+  attachClientEvents(target);
+  client = target;
+  service = createBridgeService({ config, client: target, store, platform, log, sc, runtime });
+  return target;
+}
+
+async function disposeManagedClient(target) {
+  retiringClients.add(target);
+  runtime.page = null;
+  try {
+    if (config.mode === "browser_url") {
+      await target.pupPage?.close().catch(() => {});
+      target.pupBrowser?.disconnect?.();
+    } else {
+      await target.destroy();
+    }
+  } catch {
+    await target.pupBrowser?.close?.().catch(() => {});
   }
-});
-client.on("auth_failure", (message) => {
-  runtime.status = "auth_failure";
-  runtime.authenticated = false;
-  runtime.error = String(message || "Authentication failed");
-  log.error({ error: runtime.error }, "WhatsApp Web bridge authentication failed");
-});
-client.on("disconnected", (reason) => {
-  runtime.status = "disconnected";
-  runtime.authenticated = false;
-  runtime.error = String(reason || "Disconnected");
-  log.warn({ reason: runtime.error }, "WhatsApp Web bridge disconnected");
+}
+
+const subscription = nc.subscribe(config.subject(), {
+  callback: (_error, message) => {
+    if (service) return void service.respond(message);
+    message.respond(sc.encode(JSON.stringify({
+      accepted: true,
+      provider: "wwebjs",
+      protocolVersion: config.protocolVersion,
+      workerId: config.workerId,
+      status: runtime.status,
+      ready: false,
+      historyReady: false,
+      message: "Managed WhatsApp Web is starting.",
+    })));
+  },
 });
 
 async function shutdown(signal) {
@@ -230,10 +277,10 @@ async function shutdown(signal) {
   await nc.drain().catch(() => {});
   try {
     if (config.mode === "browser_url") {
-      await client.pupPage?.close().catch(() => {});
-      client.pupBrowser?.disconnect?.();
+      await client?.pupPage?.close().catch(() => {});
+      client?.pupBrowser?.disconnect?.();
     } else {
-      await client.destroy();
+      if (client) await disposeManagedClient(client);
     }
   } catch {}
   releaseLock();
@@ -251,12 +298,30 @@ log.info({
   protocolVersion: config.protocolVersion,
 }, "Starting WhatsApp Web history bridge");
 verifyRuntimePrerequisites()
-  .then(() => {
-    runtime.status = "initializing";
-    return client.initialize();
-  })
+  .then(() => initializeClientWithRecovery({
+    attempts: config.initializationAttempts,
+    retryDelayMs: config.initializationRetryDelayMs,
+    isTransient: isTransientPageError,
+    createClient: () => createManagedClient(),
+    disposeClient: (target) => disposeManagedClient(target),
+    onAttempt: ({ attempt }) => {
+      runtime.status = attempt === 1 ? "initializing" : "recovering";
+      runtime.authenticated = false;
+      runtime.error = attempt === 1 ? null : "Managed WhatsApp Web is recovering its browser page. Retry shortly.";
+    },
+    onRetry: ({ attempt, total, error }) => {
+      log.warn({
+        attempt,
+        total,
+        error: formatError(error, "bridge_initialize"),
+      }, "Transient WhatsApp Web page failure; recreating the managed browser client");
+    },
+  }))
   .catch((error) => {
     runtime.status = "failed";
-    runtime.error = formatError(error, "bridge_initialize");
-    log.error({ error: runtime.error, stack: error?.stack || null }, "WhatsApp Web bridge initialization failed");
+    runtime.authenticated = false;
+    runtime.error = isTransientPageError(error)
+      ? `Managed WhatsApp Web could not stabilize after ${config.initializationAttempts} attempts. Restart the managed bridge.`
+      : "Managed WhatsApp Web could not start. Check the bridge server logs and managed browser snapshot.";
+    log.error({ error: formatError(error, "bridge_initialize"), stack: error?.stack || null }, "WhatsApp Web bridge initialization failed");
   });

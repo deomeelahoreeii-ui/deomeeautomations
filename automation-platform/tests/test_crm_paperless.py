@@ -63,6 +63,32 @@ def test_title_matching_does_not_match_longer_number() -> None:
     assert not title_has_exact_complaint("Complaint 104-12345 received", "104-1234")
 
 
+def test_publication_maps_paperless_select_labels_to_option_ids() -> None:
+    from crm_filters.paperless import PaperlessClient
+
+    client = PaperlessClient(base_url="https://paperless.lab.internal", token="token")
+    client.metadata = metadata()
+    client.metadata.field_ids_by_name = {
+        "complaint number": 11,
+        "source": 12,
+        "document role": 13,
+        "status": 14,
+    }
+    assert client.custom_field_payload(
+        {
+            "Complaint Number": "104-6609317",
+            "Source": "CRM Portal",
+            "Document Role": "Main Complaint",
+            "Status": "Pending",
+        }
+    ) == [
+        {"field": 11, "value": "104-6609317"},
+        {"field": 12, "value": "20"},
+        {"field": 13, "value": "30"},
+        {"field": 14, "value": "102"},
+    ]
+
+
 def test_internal_paperless_tls_failure_uses_configured_fallback() -> None:
     import requests
     from unittest.mock import MagicMock

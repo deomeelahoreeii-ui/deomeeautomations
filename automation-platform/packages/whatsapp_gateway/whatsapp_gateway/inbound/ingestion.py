@@ -16,6 +16,8 @@ from whatsapp_gateway.inbound.upserts import (
     upsert_inbound_attachment,
     upsert_inbound_message,
 )
+from whatsapp_gateway.directory.master_contacts import ensure_master_contact
+from whatsapp_gateway.models import WhatsAppDirectoryContact
 
 
 def attachment_values(event: InboundMessageEvent, now) -> dict[str, Any] | None:
@@ -55,7 +57,9 @@ def message_values(
         "message_timestamp": event.messageTimestamp.astimezone(timezone.utc).replace(
             tzinfo=None
         ),
-        "push_name": event.pushName,
+        # Baileys can attach the connected account's own push name to outgoing
+        # messages. It is not evidence about the remote contact.
+        "push_name": None if event.fromMe else event.pushName,
         "text_content": event.text,
         "message_type": event.messageType,
         "ingestion_source": event.ingestionSource,
@@ -84,6 +88,20 @@ def ingest_event(
         values=values,
         now=now,
     )
+
+    if values["directory_contact_id"] and event.pushName and not event.fromMe:
+        directory_contact = session.get(
+            WhatsAppDirectoryContact,
+            values["directory_contact_id"],
+        )
+        if directory_contact is not None:
+            ensure_master_contact(
+                session,
+                directory_contact,
+                observed_name=event.pushName,
+                name_source="whatsapp_push",
+                observed_at=now,
+            )
 
     attachment_id = None
     mapped_attachment = attachment_values(event, now)

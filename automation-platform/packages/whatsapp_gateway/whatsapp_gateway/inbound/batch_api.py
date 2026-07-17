@@ -13,6 +13,7 @@ from sqlmodel import Session, select
 from automation_core.config import Settings, get_settings
 from automation_core.database import get_session
 from automation_core.object_storage import ObjectStorageError, S3ObjectStorage
+from whatsapp_gateway.directory.master_contacts import resolved_contact_name
 from whatsapp_gateway.inbound.batches import (
     BATCH_TERMINAL_STATUSES,
     reconcile_batch,
@@ -32,6 +33,7 @@ from whatsapp_gateway.models import (
     WhatsAppInboundBatchItem,
     WhatsAppInboundHistoryRequest,
     WhatsAppInboundMessage,
+    WhatsAppInboundProcessingRun,
 )
 
 
@@ -52,13 +54,20 @@ def _batch_view(session: Session, batch: WhatsAppInboundBatch) -> dict[str, Any]
     push_name = session.exec(
         select(WhatsAppInboundMessage.push_name)
         .where(WhatsAppInboundMessage.directory_contact_id == batch.contact_id)
+        .where(WhatsAppInboundMessage.from_me.is_(False))
         .where(WhatsAppInboundMessage.push_name.is_not(None))
         .order_by(WhatsAppInboundMessage.message_timestamp.desc())
         .limit(1)
     ).first()
+    processing_run = session.exec(
+        select(WhatsAppInboundProcessingRun)
+        .where(WhatsAppInboundProcessingRun.batch_id == batch.id)
+        .order_by(WhatsAppInboundProcessingRun.created_at.desc())
+        .limit(1)
+    ).first()
     return {
         **serialize_batch(batch),
-        "contact_name": (contact.display_name if contact else "") or str(push_name or "Unnamed contact"),
+        "contact_name": (resolved_contact_name(session, contact) if contact else "") or str(push_name or "Unnamed contact"),
         "contact_identity": (
             (contact.phone_jid or contact.primary_lid_jid or contact.canonical_key)
             if contact
@@ -68,6 +77,13 @@ def _batch_view(session: Session, batch: WhatsAppInboundBatch) -> dict[str, Any]
         "history_request_id": str(request.id) if request else None,
         "history_status": request.status if request else None,
         "history_error": request.error if request else None,
+        "processing_run_id": str(processing_run.id) if processing_run else None,
+        "processing_run_code": processing_run.run_code if processing_run else None,
+        "processing_status": processing_run.status if processing_run else "not_started",
+        "processing_total_items": processing_run.total_items if processing_run else 0,
+        "processing_processed_items": processing_run.processed_items if processing_run else 0,
+        "processing_review_items": processing_run.review_items if processing_run else 0,
+        "processing_failed_items": processing_run.failed_items if processing_run else 0,
     }
 
 

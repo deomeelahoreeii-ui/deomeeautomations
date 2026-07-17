@@ -82,7 +82,9 @@ export function normalizeInboundMessage(rawMessage, { source = "live" } = {}) {
     fromMe: Boolean(key.fromMe),
     chatScope: remoteJid.endsWith("@g.us") ? "group" : "direct",
     messageTimestamp: timestamp ? new Date(timestamp * 1000).toISOString() : new Date().toISOString(),
-    pushName: String(rawMessage?.pushName || "").trim() || null,
+    // On outgoing events Baileys may expose the connected account's own
+    // pushName. Publishing it would mislabel the remote conversation partner.
+    pushName: key.fromMe ? null : String(rawMessage?.pushName || "").trim() || null,
     text: safeText(content) || null,
     messageType: media?.messageKey || Object.keys(content || {})[0] || "unknown",
     ingestionSource: source,

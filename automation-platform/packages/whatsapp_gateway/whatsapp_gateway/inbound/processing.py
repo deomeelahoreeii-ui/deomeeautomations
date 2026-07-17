@@ -11,6 +11,8 @@ from sqlmodel import Session, select
 
 from automation_core.config import Settings
 from automation_core.time import utcnow
+from whatsapp_gateway.directory.master_contacts import resolved_contact_name
+from whatsapp_gateway.inbound.processing_groups import complaint_group_summary
 from whatsapp_gateway.models import (
     WhatsAppDirectoryContact,
     WhatsAppInboundAttachment,
@@ -150,11 +152,14 @@ def create_processing_run(
 
 def _contact_display_name(session: Session, batch: WhatsAppInboundBatch) -> str:
     contact = session.get(WhatsAppDirectoryContact, batch.contact_id)
-    if contact and contact.display_name:
-        return contact.display_name
+    if contact:
+        name = resolved_contact_name(session, contact)
+        if name:
+            return name
     push_name = session.exec(
         select(WhatsAppInboundMessage.push_name)
         .where(WhatsAppInboundMessage.directory_contact_id == batch.contact_id)
+        .where(WhatsAppInboundMessage.from_me.is_(False))
         .where(WhatsAppInboundMessage.push_name.is_not(None))
         .order_by(WhatsAppInboundMessage.message_timestamp.desc())
         .limit(1)
@@ -240,50 +245,6 @@ def serialize_processing_item(
         "finished_at": item.finished_at,
         "updated_at": item.updated_at,
     }
-
-
-
-def complaint_group_summary(
-    session: Session,
-    run_id: uuid.UUID,
-) -> list[dict[str, Any]]:
-    items = list(
-        session.exec(
-            select(WhatsAppInboundProcessingItem)
-            .where(WhatsAppInboundProcessingItem.run_id == run_id)
-            .where(WhatsAppInboundProcessingItem.detected_complaint_number.is_not(None))
-            .order_by(
-                WhatsAppInboundProcessingItem.detected_complaint_number,
-                WhatsAppInboundProcessingItem.created_at,
-            )
-        ).all()
-    )
-    groups: dict[str, dict[str, Any]] = {}
-    for item in items:
-        number = item.detected_complaint_number
-        if not number:
-            continue
-        group = groups.setdefault(
-            number,
-            {
-                "complaint_number": number,
-                "item_count": 0,
-                "categories": {},
-                "eligible_items": 0,
-                "duplicate_items": 0,
-                "review_items": 0,
-                "approved_items": 0,
-            },
-        )
-        group["item_count"] += 1
-        categories = group["categories"]
-        categories[item.primary_category] = categories.get(item.primary_category, 0) + 1
-        group["eligible_items"] += int(item.status in {"eligible", "approved"})
-        group["duplicate_items"] += int(item.status == "duplicate_in_paperless")
-        group["review_items"] += int(item.status in {"needs_review", "deferred"})
-        group["approved_items"] += int(item.review_status == "approved")
-    return [groups[number] for number in sorted(groups)]
-
 def recalculate_processing_run(session: Session, run: WhatsAppInboundProcessingRun) -> None:
     items = list(
         session.exec(

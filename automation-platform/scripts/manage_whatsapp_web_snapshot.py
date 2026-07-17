@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import time
 from dataclasses import dataclass
@@ -62,6 +63,13 @@ def _user_data_dir(args: list[str]) -> Path | None:
             return Path(value).expanduser().resolve() if value else None
         if arg == "--user-data-dir" and index + 1 < len(args):
             return Path(args[index + 1]).expanduser().resolve()
+        # Chromium/Brave may rewrite /proc/<pid>/cmdline into one display-style
+        # argument after startup. Keep recognizing the managed snapshot in that
+        # form so a live browser is never mistaken for stale singleton locks.
+        match = re.search(r"(?:^|\s)--user-data-dir=(?:\"([^\"]+)\"|'([^']+)'|(\S+))", arg)
+        if match:
+            value = next((part for part in match.groups() if part), "")
+            return Path(value).expanduser().resolve() if value else None
     return None
 
 
@@ -75,7 +83,9 @@ def find_managed_browser_pids(snapshot: Snapshot, proc_root: Path = Path("/proc"
         args = _read_cmdline(entry / "cmdline")
         if not args:
             continue
-        executable = Path(args[0]).name.lower()
+        # Brave may expose its entire rewritten command line as argv[0]. The
+        # executable itself is still the first whitespace-delimited token.
+        executable = Path(args[0].split(maxsplit=1)[0]).name.lower()
         if not any(name in executable for name in BROWSER_NAMES):
             continue
         if _user_data_dir(args) == snapshot.root:

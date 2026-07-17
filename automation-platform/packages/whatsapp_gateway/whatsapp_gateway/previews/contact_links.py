@@ -14,7 +14,7 @@ from automation_core.database import get_session
 from automation_core.job_service import append_log, create_job, get_job, mark_job_failed, set_task_id
 from automation_core.models import Job, JobPublic, JobStatus, JobType
 from automation_core.time import utcnow
-from master_data.models import Officer, School, SchoolHead, Wing
+from master_data.models import MasterContact, Officer, School, SchoolHead, Wing
 from whatsapp_gateway.models import (
     WhatsAppAccount, WhatsAppApplication, WhatsAppAudience, WhatsAppAudienceMember,
     WhatsAppContactLink, WhatsAppDirectoryContact, WhatsAppDispatchPreview,
@@ -32,6 +32,7 @@ from whatsapp_gateway.previews.schemas import (
     ContactLinkInput, PreviewApprovalInput,
 )
 from whatsapp_gateway.previews.serialization import _artifact_dict, _delivery_dict, _digits, _with_approval
+from whatsapp_gateway.directory.master_contacts import ensure_master_contact, resolved_contact_dict
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp-previews"])
 
@@ -54,7 +55,12 @@ def contact_links(
     return {
         "contact": {
             "id": str(contact.id),
-            "display_name": contact.display_name,
+            **resolved_contact_dict(
+                contact,
+                session.get(MasterContact, contact.master_contact_id)
+                if contact.master_contact_id
+                else None,
+            ),
             "phone_jid": contact.phone_jid,
             "primary_lid_jid": contact.primary_lid_jid,
         },
@@ -175,6 +181,13 @@ def save_contact_link(
     link.active = True
     link.updated_at = utcnow()
     session.add(link)
+    ensure_master_contact(
+        session,
+        contact,
+        observed_name=officer.name if officer else head.name,
+        name_source="verified_entity",
+        name_verified=True,
+    )
     session.commit()
     session.refresh(link)
     return entity_link_details(session, link)

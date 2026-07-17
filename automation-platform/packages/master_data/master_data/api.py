@@ -7,10 +7,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
+from sqlalchemy import func
 from sqlmodel import Session, col, select
 
 from automation_core.database import engine, get_session
 from master_data.models import (
+    MasterContact,
     MasterDataAudit,
     MasterDataAuditPublic,
     Officer,
@@ -19,8 +21,14 @@ from master_data.models import (
     SchoolHead,
     SchoolOfficerOverride,
 )
+from master_data.contacts import (
+    get_or_create_contact,
+    master_contact_dict,
+    normalized_contact_mobile,
+    set_manual_contact_name,
+)
 from master_data.postgres_repository import PostgresMasterDataRepository
-from master_data.schemas import OfficerWrite, SchoolWrite
+from master_data.schemas import MasterContactWrite, OfficerWrite, SchoolWrite
 
 router = APIRouter(prefix="/api/v1/master-data", tags=["master-data"])
 
@@ -106,6 +114,98 @@ def read_options() -> dict:
         return repository().options()
     except Exception as exc:
         raise translate_error(exc) from exc
+
+
+@router.get("/contacts")
+def read_contacts(
+    search: str = "",
+    active: bool | None = True,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+    session: Session = Depends(get_session),
+) -> dict:
+    filters = []
+    if active is not None:
+        filters.append(MasterContact.active.is_(active))
+    if search.strip():
+        pattern = f"%{search.strip()}%"
+        filters.append(
+            col(MasterContact.name).ilike(pattern)
+            | col(MasterContact.normalized_mobile).ilike(pattern)
+        )
+    total = session.scalar(
+        select(func.count()).select_from(MasterContact).where(*filters)
+    ) or 0
+    records = session.exec(
+        select(MasterContact)
+        .where(*filters)
+        .order_by(
+            func.nullif(MasterContact.name, "").asc().nulls_last(),
+            MasterContact.normalized_mobile,
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+    return {
+        "items": [master_contact_dict(item) for item in records],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.post("/contacts", status_code=status.HTTP_201_CREATED)
+def create_contact(
+    data: MasterContactWrite,
+    session: Session = Depends(get_session),
+) -> dict:
+    mobile = normalized_contact_mobile(data.mobile)
+    if mobile and session.scalar(
+        select(MasterContact).where(MasterContact.normalized_mobile == mobile)
+    ):
+        raise HTTPException(status_code=409, detail="A master contact already uses this mobile")
+    contact = get_or_create_contact(
+        session,
+        mobile=mobile,
+        name=data.name,
+        name_source="manual",
+        name_verified=True,
+    )
+    contact.notes = data.notes.strip()
+    contact.active = data.active
+    session.add(contact)
+    session.commit()
+    session.refresh(contact)
+    return master_contact_dict(contact)
+
+
+@router.put("/contacts/{contact_id}")
+def update_contact(
+    contact_id: uuid.UUID,
+    data: MasterContactWrite,
+    session: Session = Depends(get_session),
+) -> dict:
+    contact = session.get(MasterContact, contact_id)
+    if contact is None:
+        raise HTTPException(status_code=404, detail="Master contact not found")
+    mobile = normalized_contact_mobile(data.mobile)
+    duplicate = session.scalar(
+        select(MasterContact).where(
+            MasterContact.normalized_mobile == mobile,
+            MasterContact.id != contact.id,
+        )
+    ) if mobile else None
+    if duplicate:
+        raise HTTPException(status_code=409, detail="A master contact already uses this mobile")
+    set_manual_contact_name(session, contact, data.name)
+    contact.normalized_mobile = mobile
+    contact.notes = data.notes.strip()
+    contact.active = data.active
+    contact.updated_at = utcnow()
+    session.add(contact)
+    session.commit()
+    session.refresh(contact)
+    return master_contact_dict(contact)
 
 
 @router.get("/schools")

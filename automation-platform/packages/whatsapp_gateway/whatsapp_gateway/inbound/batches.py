@@ -90,6 +90,7 @@ def create_history_batch(
     worker_key: str,
     provider: str,
     requested_count: int,
+    all_history: bool = False,
     remote_jid: str | None,
     anchor_message_id: str | None,
     anchor_timestamp: datetime | None,
@@ -103,6 +104,7 @@ def create_history_batch(
         worker_key=worker_key,
         provider=provider,
         requested_count=requested_count,
+        all_history=all_history,
         remote_jid=remote_jid,
         anchor_message_id=anchor_message_id,
         anchor_timestamp=anchor_timestamp,
@@ -119,8 +121,13 @@ def create_history_batch(
         session,
         batch_id=batch.id,
         event_type="batch_created",
-        message=f"Created inbound batch {batch.batch_code} for {requested_count} older messages.",
-        details={"provider": provider, "remote_jid": remote_jid, "requested_count": requested_count},
+        message=(
+            f"Created inbound batch {batch.batch_code} for all available history "
+            f"(up to {requested_count} messages)."
+            if all_history
+            else f"Created inbound batch {batch.batch_code} for {requested_count} older messages."
+        ),
+        details={"provider": provider, "remote_jid": remote_jid, "requested_count": requested_count, "all_history": all_history},
     )
     return batch
 
@@ -134,6 +141,7 @@ def serialize_batch(batch: WhatsAppInboundBatch) -> dict[str, Any]:
         "worker_key": batch.worker_key,
         "provider": batch.provider,
         "requested_count": batch.requested_count,
+        "all_history": batch.all_history,
         "remote_jid": batch.remote_jid,
         "anchor_message_id": batch.anchor_message_id,
         "anchor_timestamp": batch.anchor_timestamp,

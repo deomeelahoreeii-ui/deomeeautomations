@@ -18,6 +18,7 @@ from sqlmodel import Session
 from automation_core.config import get_settings
 from automation_core.database import get_session
 from automation_core.time import utcnow
+from whatsapp_gateway.directory.master_contacts import resolved_contact_name
 from master_data.models import District, Markaz, Officer, School, SchoolHead, Tehsil, Wing
 from whatsapp_gateway.models import (
     WhatsAppAccount,
@@ -112,7 +113,7 @@ def audience_members(
                 "id": str(member.id),
                 "target_type": "contact",
                 "target_id": str(member.directory_contact_id),
-                "name": target.display_name or "Unnamed contact" if target else "Deleted contact",
+                "name": resolved_contact_name(session, target) or "Unnamed contact" if target else "Deleted contact",
                 "identifier": (target.phone_jid or target.primary_lid_jid) if target else member.target_key,
                 "available": target.active if target else False,
                 "detail": target.primary_lid_jid or "No LID mapping" if target else "Unavailable",

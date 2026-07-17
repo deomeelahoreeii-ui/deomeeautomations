@@ -83,6 +83,22 @@ def test_spreadsheet_text_is_inspected_for_crm_numbers(tmp_path) -> None:
     assert extraction.method == "spreadsheet:xlsx"
     assert classification.complaint_number == "104-6609317"
     assert classification.category == "crm_supporting_document"
+    assert extraction.metadata["complaint_rows"][0]["complaint_number"] == "104-6609317"
+
+
+def test_spreadsheet_keeps_each_complaint_row_as_a_candidate(tmp_path) -> None:
+    path = tmp_path / "complaints.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Complaint No", "Person Name"])
+    sheet.append(["104-6609317", "Fatima"])
+    sheet.append(["104-6609318", "Ali"])
+    workbook.save(path)
+    extraction = extract_document(path)
+    assert [row["complaint_number"] for row in extraction.metadata["complaint_rows"]] == [
+        "104-6609317",
+        "104-6609318",
+    ]
 
 
 def test_ods_text_is_inspected_for_crm_numbers(tmp_path) -> None:

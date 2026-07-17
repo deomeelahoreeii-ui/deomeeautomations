@@ -13,6 +13,7 @@ import whatsapp_gateway.models  # noqa: F401
 from automation_api.main import app
 from automation_core.config import Settings, get_settings
 from automation_core.database import get_session
+from crm_domain.models import ComplaintCase
 from whatsapp_gateway.models import (
     WhatsAppAccount,
     WhatsAppDirectoryContact,
@@ -152,6 +153,18 @@ def test_processing_run_creation_and_manual_review(tmp_path, monkeypatch) -> Non
             assert run["contact_name"] == "Faheem Bukhari CEO Office"
             assert created["task_id"] == "task-4c"
 
+            captured_runs = client.get(
+                "/api/v1/whatsapp/inbound/batches", params={"limit": 20}
+            )
+            assert captured_runs.status_code == 200, captured_runs.text
+            captured = next(
+                item
+                for item in captured_runs.json()["items"]
+                if item["id"] == str(batch_id)
+            )
+            assert captured["processing_run_id"] == run["id"]
+            assert captured["processing_status"] == "queued"
+
             detail = client.get(
                 f"/api/v1/whatsapp/inbound/processing-runs/{run['id']}"
             )
@@ -173,20 +186,27 @@ def test_processing_run_creation_and_manual_review(tmp_path, monkeypatch) -> Non
             assert body["status"] == "approved"
             assert body["detected_complaint_number"] == "104-6609317"
 
+            group_review = client.post(
+                f"/api/v1/whatsapp/inbound/processing-runs/{run['id']}/complaint-groups/104-6609317/review",
+                json={
+                    "decision": "approved",
+                    "reviewed_by": "Ahmad",
+                    "note": "Approved as one complaint group.",
+                },
+            )
+            assert group_review.status_code == 200, group_review.text
+            assert group_review.json()["case_state"] == "fresh"
+            assert group_review.json()["case_id"]
+
             grouped = client.get(
                 f"/api/v1/whatsapp/inbound/processing-runs/{run['id']}"
             ).json()["complaint_groups"]
-            assert grouped == [
-                {
-                    "complaint_number": "104-6609317",
-                    "item_count": 1,
-                    "categories": {"crm_complaint": 1},
-                    "eligible_items": 1,
-                    "duplicate_items": 0,
-                    "review_items": 0,
-                    "approved_items": 1,
-                }
-            ]
+            assert len(grouped) == 1
+            assert grouped[0]["complaint_number"] == "104-6609317"
+            assert grouped[0]["item_count"] == 1
+            assert grouped[0]["categories"] == {"crm_complaint": 1}
+            assert grouped[0]["approved_items"] == 1
+            assert grouped[0]["review_bucket"] == "approved"
 
             events = client.get(
                 f"/api/v1/whatsapp/inbound/processing-runs/{run['id']}/events"
@@ -199,6 +219,62 @@ def test_processing_run_creation_and_manual_review(tmp_path, monkeypatch) -> Non
             assert len(session.exec(select(WhatsAppInboundProcessingRun)).all()) == 1
             persisted = session.exec(select(WhatsAppInboundProcessingItem)).one()
             assert persisted.reviewed_by == "Ahmad"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_batch_approval_only_accepts_explicit_ready_groups(tmp_path, monkeypatch) -> None:
+    engine, batch_id = setup_processing_app(tmp_path, monkeypatch)
+    try:
+        with TestClient(app) as client:
+            created = client.post(
+                "/api/v1/whatsapp/inbound/processing-runs",
+                json={"batch_id": str(batch_id), "paperless_check": True},
+            ).json()["processing_run"]
+            with Session(engine) as session:
+                item = session.exec(select(WhatsAppInboundProcessingItem)).one()
+                item.status = "eligible"
+                item.primary_category = "crm_complaint"
+                item.detected_complaint_number = "104-6609317"
+                item.confidence = 1.0
+                item.extracted_text = """Complaint No: 104-6609317
+Person Name: Fatima Khan
+Mobile No: 03001234567
+Complaint District: LAHORE
+Complaint Remarks: The complaint requires review.
+"""
+                item.extraction_method = "pdftotext+field"
+                item.extracted_metadata_json = {"needs_review": False}
+                item.paperless_category = "fresh"
+                item.paperless_reason = "No Paperless match."
+                session.add(item)
+                session.commit()
+
+            approved = client.post(
+                f"/api/v1/whatsapp/inbound/processing-runs/{created['id']}/complaint-group-approvals",
+                json={
+                    "complaint_numbers": ["104-6609317", "104-6609317"],
+                    "reviewed_by": "Ahmad",
+                    "note": "Verified in the Ready queue.",
+                },
+            )
+
+            assert approved.status_code == 200, approved.text
+            assert approved.json()["approved_count"] == 1
+            assert approved.json()["complaint_numbers"] == ["104-6609317"]
+
+            stale = client.post(
+                f"/api/v1/whatsapp/inbound/processing-runs/{created['id']}/complaint-group-approvals",
+                json={"complaint_numbers": ["104-6609317"]},
+            )
+            assert stale.status_code == 409
+            assert "no longer Ready" in stale.json()["detail"]
+
+        with Session(engine) as session:
+            case = session.exec(select(ComplaintCase)).one()
+            assert case.state == "fresh"
+            assert case.complainant_name == "Fatima Khan"
+            assert case.district == "LAHORE"
     finally:
         app.dependency_overrides.clear()
 

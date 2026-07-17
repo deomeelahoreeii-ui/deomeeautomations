@@ -15,6 +15,7 @@ from sqlmodel import Session, select
 from automation_core.config import Settings, get_settings
 from automation_core.database import get_session
 from automation_core.object_storage import S3ObjectStorage
+from crm_domain.identifiers import normalize_complaint_number
 from whatsapp_gateway.inbound.processing import (
     complaint_group_summary,
     create_processing_run,
@@ -26,6 +27,10 @@ from whatsapp_gateway.inbound.processing import (
     update_review_decision,
 )
 from whatsapp_gateway.inbound.processing_tasks import process_inbound_batch
+from whatsapp_gateway.inbound.crm_review import (
+    approve_manual_item,
+    decide_complaint_group,
+)
 from whatsapp_gateway.models import (
     WhatsAppInboundAttachment,
     WhatsAppInboundBatch,
@@ -48,6 +53,18 @@ class ReviewProcessingItemRequest(BaseModel):
     note: str | None = Field(default=None, max_length=4000)
     category: str | None = Field(default=None, max_length=80)
     complaint_number: str | None = Field(default=None, max_length=40)
+
+
+class ReviewComplaintGroupRequest(BaseModel):
+    decision: Literal["approved", "rejected"]
+    reviewed_by: str = Field(default="web-operator", min_length=1, max_length=100)
+    note: str | None = Field(default=None, max_length=4000)
+
+
+class BatchReviewComplaintGroupsRequest(BaseModel):
+    complaint_numbers: list[str] = Field(min_length=1, max_length=200)
+    reviewed_by: str = Field(default="web-operator", min_length=1, max_length=100)
+    note: str | None = Field(default=None, max_length=4000)
 
 
 def create_inbound_processing_run(
@@ -191,20 +208,122 @@ def review_inbound_processing_item(
     if item is None:
         raise HTTPException(status_code=404, detail="Processing item not found")
     try:
-        update_review_decision(
-            session,
-            item=item,
-            decision=data.decision,
-            reviewed_by=data.reviewed_by,
-            note=data.note,
-            category=data.category,
-            complaint_number=data.complaint_number,
-        )
+        if data.decision == "approved":
+            approve_manual_item(
+                session,
+                item=item,
+                complaint_number=data.complaint_number or item.detected_complaint_number or "",
+                category=data.category or item.primary_category,
+                reviewed_by=data.reviewed_by,
+                note=data.note,
+            )
+        else:
+            update_review_decision(
+                session,
+                item=item,
+                decision=data.decision,
+                reviewed_by=data.reviewed_by,
+                note=data.note,
+                category=data.category,
+                complaint_number=data.complaint_number,
+            )
         session.commit()
         session.refresh(item)
         return serialize_processing_item(session, item)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def review_inbound_complaint_group(
+    run_id: uuid.UUID,
+    complaint_number: str,
+    data: ReviewComplaintGroupRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    run = session.get(WhatsAppInboundProcessingRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Inbound processing run not found")
+    try:
+        case = decide_complaint_group(
+            session,
+            run=run,
+            complaint_number=complaint_number,
+            decision=data.decision,
+            reviewed_by=data.reviewed_by,
+            note=data.note,
+        )
+        session.commit()
+        return {
+            "run_id": str(run.id),
+            "complaint_number": complaint_number,
+            "decision": data.decision,
+            "case_id": str(case.id) if case else None,
+            "case_state": case.state if case else "rejected",
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def batch_approve_inbound_complaint_groups(
+    run_id: uuid.UUID,
+    data: BatchReviewComplaintGroupsRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Approve an explicit, current Ready selection in one transaction."""
+
+    run = session.get(WhatsAppInboundProcessingRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Inbound processing run not found")
+    normalized = [normalize_complaint_number(value) for value in data.complaint_numbers]
+    if any(value is None for value in normalized):
+        raise HTTPException(status_code=422, detail="Every selected complaint number must be valid")
+    numbers = list(dict.fromkeys(value for value in normalized if value))
+    groups = {
+        str(group["complaint_number"]): group
+        for group in complaint_group_summary(session, run.id)
+    }
+    missing = [number for number in numbers if number not in groups]
+    stale = [
+        number
+        for number in numbers
+        if number in groups and groups[number]["review_bucket"] != "ready"
+    ]
+    if missing or stale:
+        details = []
+        if missing:
+            details.append(f"not found: {', '.join(missing)}")
+        if stale:
+            details.append(f"no longer Ready: {', '.join(stale)}")
+        raise HTTPException(
+            status_code=409,
+            detail="Refresh the queue before batch approval; " + "; ".join(details),
+        )
+    cases = []
+    try:
+        for number in numbers:
+            case = decide_complaint_group(
+                session,
+                run=run,
+                complaint_number=number,
+                decision="approved",
+                reviewed_by=data.reviewed_by,
+                note=data.note,
+            )
+            if case is not None:
+                cases.append(case)
+        session.commit()
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "run_id": str(run.id),
+        "approved_count": len(cases),
+        "complaint_numbers": numbers,
+        "cases": [
+            {"id": str(case.id), "complaint_number": case.complaint_number, "state": case.state}
+            for case in cases
+        ],
+    }
 
 
 def _remove_file(path: str) -> None:

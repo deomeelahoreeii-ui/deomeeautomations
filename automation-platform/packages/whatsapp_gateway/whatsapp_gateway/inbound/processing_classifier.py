@@ -243,15 +243,43 @@ def _run_tesseract(path: Path) -> str:
 
 def _spreadsheet_text(path: Path, *, limit: int) -> tuple[str, dict[str, object]]:
     suffix = path.suffix.lower()
-    values: list[str] = []
+    rendered_rows: list[str] = []
+    complaint_rows: list[dict[str, object]] = []
     rows = 0
     sheets = 0
+    headers: list[str] = []
+
+    def capture_row(values: list[object], *, sheet: str, row_number: int) -> None:
+        nonlocal headers
+        cleaned = [_compact(str(value)) if value not in (None, "") else "" for value in values]
+        if not headers:
+            headers = [value or f"Column {index + 1}" for index, value in enumerate(cleaned)]
+            return
+        mapping = {
+            headers[index] if index < len(headers) else f"Column {index + 1}": value
+            for index, value in enumerate(cleaned)
+            if value
+        }
+        if not mapping:
+            return
+        rendered_rows.append(" | ".join(f"{key}: {value}" for key, value in mapping.items()))
+        numbers = normalize_complaint_numbers("\n".join(mapping.values()))
+        if len(numbers) == 1:
+            complaint_rows.append(
+                {
+                    "sheet": sheet,
+                    "row_number": row_number,
+                    "complaint_number": numbers[0],
+                    "values": mapping,
+                }
+            )
+
     if suffix == ".csv":
         with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
-            for row in csv.reader(handle):
+            for row_number, row in enumerate(csv.reader(handle), start=1):
                 rows += 1
-                values.extend(str(value) for value in row if value not in (None, ""))
-                if sum(len(value) for value in values) >= limit:
+                capture_row(list(row), sheet="CSV", row_number=row_number)
+                if sum(len(value) for value in rendered_rows) >= limit:
                     break
         sheets = 1
     elif suffix == ".xlsx":
@@ -259,12 +287,13 @@ def _spreadsheet_text(path: Path, *, limit: int) -> tuple[str, dict[str, object]
         try:
             sheets = len(workbook.worksheets)
             for sheet in workbook.worksheets:
-                for row in sheet.iter_rows(values_only=True):
+                headers = []
+                for row_number, row in enumerate(sheet.iter_rows(values_only=True), start=1):
                     rows += 1
-                    values.extend(str(value) for value in row if value not in (None, ""))
-                    if sum(len(value) for value in values) >= limit:
+                    capture_row(list(row), sheet=sheet.title, row_number=row_number)
+                    if sum(len(value) for value in rendered_rows) >= limit:
                         break
-                if sum(len(value) for value in values) >= limit:
+                if sum(len(value) for value in rendered_rows) >= limit:
                     break
         finally:
             workbook.close()
@@ -275,12 +304,17 @@ def _spreadsheet_text(path: Path, *, limit: int) -> tuple[str, dict[str, object]
         sheets = workbook.nsheets
         for index in range(workbook.nsheets):
             sheet = workbook.sheet_by_index(index)
+            headers = []
             for row_index in range(sheet.nrows):
                 rows += 1
-                values.extend(str(value) for value in sheet.row_values(row_index) if value not in (None, ""))
-                if sum(len(value) for value in values) >= limit:
+                capture_row(
+                    list(sheet.row_values(row_index)),
+                    sheet=sheet.name,
+                    row_number=row_index + 1,
+                )
+                if sum(len(value) for value in rendered_rows) >= limit:
                     break
-            if sum(len(value) for value in values) >= limit:
+            if sum(len(value) for value in rendered_rows) >= limit:
                 break
         workbook.release_resources()
     elif suffix == ".ods":
@@ -288,18 +322,29 @@ def _spreadsheet_text(path: Path, *, limit: int) -> tuple[str, dict[str, object]
         text_ns = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
         with zipfile.ZipFile(path) as archive:
             root = ET.fromstring(archive.read("content.xml"))
-        sheets = len(root.findall(f".//{{{table_ns}}}table"))
-        rows = len(root.findall(f".//{{{table_ns}}}table-row"))
-        for paragraph in root.findall(f".//{{{text_ns}}}p"):
-            value = "".join(paragraph.itertext()).strip()
-            if value:
-                values.append(value)
-            if sum(len(item) for item in values) >= limit:
-                break
+        tables = root.findall(f".//{{{table_ns}}}table")
+        sheets = len(tables)
+        for table_index, table in enumerate(tables, start=1):
+            headers = []
+            sheet_name = table.attrib.get(f"{{{table_ns}}}name", f"Sheet{table_index}")
+            for row_number, row in enumerate(table.findall(f"{{{table_ns}}}table-row"), start=1):
+                rows += 1
+                values = [
+                    " ".join("".join(p.itertext()).strip() for p in cell.findall(f".//{{{text_ns}}}p")).strip()
+                    for cell in row.findall(f"{{{table_ns}}}table-cell")
+                ]
+                capture_row(values, sheet=sheet_name, row_number=row_number)
+                if sum(len(value) for value in rendered_rows) >= limit:
+                    break
     else:
         raise RuntimeError(f"Unsupported spreadsheet extension: {suffix or '(none)'}")
-    text = "\n".join(values)
-    return text[:limit], {"rows_inspected": rows, "sheets_inspected": sheets}
+    text = "\n".join(rendered_rows)
+    return text[:limit], {
+        "rows_inspected": rows,
+        "sheets_inspected": sheets,
+        "complaint_rows": complaint_rows,
+        "complaint_row_count": len(complaint_rows),
+    }
 
 
 def extract_document(path: Path, *, mime_type: str | None = None, text_limit: int = 100_000) -> ExtractionResult:
@@ -317,6 +362,8 @@ def extract_document(path: Path, *, mime_type: str | None = None, text_limit: in
                     "applicant_text": complaint.applicant_text[:5000],
                     "remarks_text": complaint.remarks_text[:10000],
                     "needs_review": complaint.needs_review,
+                    "page_count": complaint.page_count,
+                    "ocr_pages": list(complaint.ocr_pages),
                 },
                 error=complaint.error,
             )

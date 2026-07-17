@@ -8,6 +8,15 @@ from sqlmodel import SQLModel
 
 from automation_core.config import get_settings
 from automation_core.models import Artifact, Job, JobLog, SourceFile, SourceFileRun, TaskOutbox
+from crm_domain.models import (
+    ComplaintCase,
+    ComplaintDocument,
+    ComplaintDocumentCaseLink,
+    ComplaintFieldObservation,
+    ComplaintMatch,
+    DocumentExtraction,
+    PaperlessPublication,
+)
 from antidengue_automation.models import (
     AntiDengueSchedule,
     AntiDengueScheduleEvent,

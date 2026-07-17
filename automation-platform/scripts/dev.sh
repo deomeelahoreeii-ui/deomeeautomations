@@ -397,6 +397,8 @@ if payload.get("provider") != "wwebjs":
     raise SystemExit(1)
 if int(payload.get("protocolVersion") or 0) < 3:
     raise SystemExit(1)
+if str(payload.get("status") or "").lower() in {"failed", "disconnected", "auth_failure"}:
+    raise SystemExit(1)
 PYBRIDGE
 }
 

@@ -96,7 +96,7 @@ export const config = {
   inboundOutboxBatchSize: parseInteger("WA_INBOUND_OUTBOX_BATCH_SIZE", 100),
   inboundMediaSubject: process.env.WA_INBOUND_MEDIA_SUBJECT || "whatsapp.worker.inbound.media",
   inboundHistorySubject: process.env.WA_INBOUND_HISTORY_SUBJECT || "whatsapp.worker.inbound.history",
-  inboundHistoryMaxCount: parseInteger("WA_INBOUND_HISTORY_MAX_COUNT", 200),
+  inboundHistoryMaxCount: parseInteger("WA_INBOUND_HISTORY_MAX_COUNT", 5000),
   inboundHistoryQuietMs: parseInteger("WA_INBOUND_HISTORY_QUIET_MS", 8000),
   inboundHistoryNoResultMs: parseInteger("WA_INBOUND_HISTORY_NO_RESULT_MS", 45000),
   inboundHistoryHardTimeoutMs: parseInteger("WA_INBOUND_HISTORY_HARD_TIMEOUT_MS", 180000),

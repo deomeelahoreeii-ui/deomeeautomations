@@ -3,9 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from whatsapp_gateway.api_common import *
+from master_data.models import MasterContact
+from whatsapp_gateway.directory.master_contacts import resolved_contact_dict
+from whatsapp_gateway.directory.master_contact_routes import router as _master_contact_router
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp"])
-
+router.include_router(_master_contact_router)
 @router.post("/directory/sync")
 async def sync_directory(session: Session = Depends(get_session)) -> dict[str, Any]:
     account, _ = ensure_defaults(session)
@@ -335,6 +338,7 @@ def directory_contacts(
         pattern = f"%{search.strip()}%"
         filters.append(
             or_(
+                MasterContact.name.ilike(pattern),
                 WhatsAppDirectoryContact.display_name.ilike(pattern),
                 WhatsAppDirectoryContact.phone_jid.ilike(pattern),
                 WhatsAppDirectoryContact.primary_lid_jid.ilike(pattern),
@@ -343,12 +347,17 @@ def directory_contacts(
     if token_status:
         filters.append(WhatsAppDirectoryContact.token_status == token_status)
     total = session.scalar(
-        select(func.count()).select_from(WhatsAppDirectoryContact).where(*filters)
+        select(func.count())
+        .select_from(WhatsAppDirectoryContact)
+        .outerjoin(MasterContact, MasterContact.id == WhatsAppDirectoryContact.master_contact_id)
+        .where(*filters)
     ) or 0
-    records = session.scalars(
-        select(WhatsAppDirectoryContact)
+    records = session.execute(
+        select(WhatsAppDirectoryContact, MasterContact)
+        .outerjoin(MasterContact, MasterContact.id == WhatsAppDirectoryContact.master_contact_id)
         .where(*filters)
         .order_by(
+            func.nullif(MasterContact.name, "").asc().nulls_last(),
             WhatsAppDirectoryContact.display_name,
             WhatsAppDirectoryContact.phone_jid,
         )
@@ -356,7 +365,7 @@ def directory_contacts(
         .offset((page - 1) * page_size)
     ).all()
     items = []
-    for item in records:
+    for item, master_contact in records:
         aliases = session.scalars(
             select(WhatsAppIdentityAlias)
             .where(WhatsAppIdentityAlias.contact_id == item.id)
@@ -382,7 +391,8 @@ def directory_contacts(
         items.append(
             {
                 "id": str(item.id),
-                "display_name": item.display_name,
+                **resolved_contact_dict(item, master_contact),
+                "master_contact_id": str(master_contact.id) if master_contact else None,
                 "phone_jid": item.phone_jid,
                 "primary_lid_jid": item.primary_lid_jid,
                 "aliases": [alias.lid_jid for alias in aliases],
@@ -398,6 +408,7 @@ def directory_contacts(
             }
         )
     return {"items": items, "total": total, "page": page, "page_size": page_size}
+
 
 @router.post("/directory/contacts/{contact_id}/token/refresh")
 async def refresh_contact_token(

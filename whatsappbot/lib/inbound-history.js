@@ -86,7 +86,11 @@ export function createInboundHistoryResponder({ config, store, log, sc }) {
       throw new Error(`Another history request is still active (${active.request_id})`);
     }
 
-    const count = Math.max(1, Math.min(Number.parseInt(request.count, 10) || 50, config.inboundHistoryMaxCount));
+    const requestedCount = Number.parseInt(request.count, 10) || 50;
+    if (requestedCount < 1 || requestedCount > config.inboundHistoryMaxCount) {
+      throw new Error(`History count must be between 1 and ${config.inboundHistoryMaxCount}`);
+    }
+    const count = request.allHistory ? config.inboundHistoryMaxCount : requestedCount;
     const remoteJids = uniqueJids(request.remoteJids);
     const anchor = store.oldestBoundary(remoteJids);
     if (!anchor) {

@@ -49,6 +49,8 @@ class ExtractedComplaint:
     confidence: float = 0.0
     needs_review: bool = False
     error: str = ""
+    page_count: int = 0
+    ocr_pages: tuple[int, ...] = ()
 
 
 def sha256_file(path: Path) -> str:
@@ -131,7 +133,7 @@ def extract_pdf_text(pdf_path: Path) -> str:
     return process.stdout
 
 
-def render_first_page(pdf_path: Path, output_path: Path) -> Path:
+def render_page(pdf_path: Path, output_path: Path, *, page_number: int) -> Path:
     pdftoppm = shutil.which("pdftoppm")
     if not pdftoppm:
         raise RuntimeError("OCR needs poppler/pdftoppm. Install package: poppler")
@@ -142,9 +144,9 @@ def render_first_page(pdf_path: Path, output_path: Path) -> Path:
             "-png",
             "-singlefile",
             "-f",
-            "1",
+            str(page_number),
             "-l",
-            "1",
+            str(page_number),
             "-r",
             "300",
             str(pdf_path),
@@ -201,14 +203,32 @@ def _ocr_label_crop(image: Image.Image, temp_dir: Path) -> str:
     )
 
 
-def tesseract_ocr_first_page(pdf_path: Path) -> str:
+def tesseract_ocr_page(pdf_path: Path, *, page_number: int) -> str:
     with tempfile.TemporaryDirectory(prefix="crm-pdf-ocr-") as temp_name:
         temp_dir = Path(temp_name)
-        image_path = render_first_page(pdf_path, temp_dir / "first-page.png")
+        image_path = render_page(
+            pdf_path, temp_dir / f"page-{page_number}.png", page_number=page_number
+        )
         full_text = _run_tesseract(image_path, psm=6)
         with Image.open(image_path) as image:
             label_text = _ocr_label_crop(image, temp_dir)
         return f"{full_text}\nComplaint label OCR: {label_text}".strip()
+
+
+def tesseract_ocr_first_page(pdf_path: Path) -> str:
+    """Compatibility entrypoint retained for callers and test overrides."""
+
+    return tesseract_ocr_page(pdf_path, page_number=1)
+
+
+def _pdf_pages(raw_text: str) -> list[str]:
+    pages = raw_text.split("\f")
+    # pdftotext appends one form-feed terminator. Remove only that synthetic
+    # trailing entry; any preceding empty entry represents a real image-only
+    # page that must be sent through OCR.
+    if raw_text.endswith("\f") and pages:
+        pages.pop()
+    return pages or [raw_text]
 
 
 def build_applicant_text(fields: dict[str, str], raw_text: str) -> str:
@@ -250,9 +270,12 @@ def extract_crm_pdf(pdf_path: Path) -> ExtractedComplaint:
     method = "pdftotext"
     errors: list[str] = []
     fields: dict[str, str] = {}
+    pages: list[str] = []
+    ocr_pages: list[int] = []
 
     try:
         raw_text = extract_pdf_text(pdf_path)
+        pages = _pdf_pages(raw_text)
         fields.update(parse_key_values_from_text(raw_text))
     except Exception as exc:
         errors.append(f"PDF text extraction failed: {exc}")
@@ -260,14 +283,39 @@ def extract_crm_pdf(pdf_path: Path) -> ExtractedComplaint:
     initial_numbers = complaint_numbers_in(
         "\n".join((field_value(fields, "complaint_number"), raw_text, pdf_path.name))
     )
-    if len(compact_text(raw_text)) < 80 or len(initial_numbers) != 1:
+    pages_to_ocr = []
+    for index, page_text in enumerate(pages[:50], start=1):
+        compact_page = compact_text(page_text)
+        page_fields = parse_key_values_from_text(page_text)
+        # Portal PDFs can contain a tiny selectable title layer over a full-page
+        # scanned complaint. A complaint number alone is not sufficient proof
+        # that the useful page content was extracted.
+        sparse_structured_page = (
+            len(compact_page) < 500
+            and not field_value(page_fields, "person_name")
+            and not field_value(page_fields, "remarks")
+        )
+        if len(compact_page) < 60 or sparse_structured_page:
+            pages_to_ocr.append(index)
+    if len(initial_numbers) != 1 and 1 not in pages_to_ocr:
+        pages_to_ocr.insert(0, 1)
+    ocr_parts: list[str] = []
+    for page_number in pages_to_ocr:
         try:
-            ocr_text = tesseract_ocr_first_page(pdf_path)
-            method = "pdftotext+tesseract" if raw_text else "tesseract"
-            for key, value in parse_key_values_from_text(ocr_text).items():
+            page_text = (
+                tesseract_ocr_first_page(pdf_path)
+                if page_number == 1
+                else tesseract_ocr_page(pdf_path, page_number=page_number)
+            )
+            ocr_parts.append(f"[OCR page {page_number}]\n{page_text}")
+            ocr_pages.append(page_number)
+            for key, value in parse_key_values_from_text(page_text).items():
                 fields.setdefault(key, value)
         except Exception as exc:
-            errors.append(f"OCR failed: {exc}")
+            errors.append(f"OCR page {page_number} failed: {exc}")
+    if ocr_parts:
+        ocr_text = "\n".join(ocr_parts)
+        method = "pdftotext+selective-tesseract" if raw_text else "tesseract"
 
     combined_text = "\n".join(part for part in (raw_text, ocr_text) if part)
     field_numbers = complaint_numbers_in(field_value(fields, "complaint_number"))
@@ -312,4 +360,6 @@ def extract_crm_pdf(pdf_path: Path) -> ExtractedComplaint:
         confidence=confidence,
         needs_review=not complaint_number or confidence < 0.60 or bool(error),
         error=error,
+        page_count=len(pages),
+        ocr_pages=tuple(ocr_pages),
     )

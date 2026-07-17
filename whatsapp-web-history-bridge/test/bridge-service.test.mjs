@@ -64,6 +64,32 @@ test("history request is rejected until the attached WhatsApp Web page is ready"
   );
 });
 
+test("all-history requests use the configured safety ceiling and preserve their scope", async () => {
+  const instance = service({ config: { maxHistoryCount: 5000 } });
+  const result = await instance.requestHistory({
+    workerId: "default",
+    requestId: "all-history",
+    remoteJids: ["923360249999@s.whatsapp.net"],
+    count: 5000,
+    allHistory: true,
+  });
+  assert.equal(result.requestedCount, 5000);
+  assert.equal(result.allHistory, true);
+});
+
+test("history requests above the configured ceiling are rejected instead of truncated", async () => {
+  const instance = service({ config: { maxHistoryCount: 5000 } });
+  await assert.rejects(
+    () => instance.requestHistory({
+      workerId: "default",
+      requestId: "too-many",
+      remoteJids: ["923360249999@s.whatsapp.net"],
+      count: 5001,
+    }),
+    /between 1 and 5000/,
+  );
+});
+
 test("local_auth is explicitly blocked because it is not the visible browser profile", async () => {
   const instance = service({ config: { mode: "local_auth", allowLocalAuthHistory: false } });
   await assert.rejects(

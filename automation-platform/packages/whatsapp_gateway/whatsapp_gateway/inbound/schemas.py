@@ -50,6 +50,10 @@ class CreateInboundExportRequest(InboundFileFilter):
     requested_by: str = Field(default="web-operator", max_length=100)
 
 
+MAX_INBOUND_HISTORY_MESSAGES = 5000
+
+
 class RequestInboundHistory(BaseModel):
     contact_id: uuid.UUID
-    count: int = Field(default=50, ge=1, le=200)
+    count: int = Field(default=50, ge=1, le=MAX_INBOUND_HISTORY_MESSAGES)
+    all_history: bool = False

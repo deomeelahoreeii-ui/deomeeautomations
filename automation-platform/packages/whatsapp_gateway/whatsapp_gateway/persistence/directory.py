@@ -51,6 +51,12 @@ class WhatsAppDirectoryContact(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     account_id: uuid.UUID = Field(foreign_key="whatsapp_accounts.id", index=True)
+    master_contact_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="master_contacts.id",
+        ondelete="SET NULL",
+        index=True,
+    )
     canonical_key: str = Field(index=True)
     phone_jid: str | None = Field(default=None, index=True)
     primary_lid_jid: str | None = Field(default=None, index=True)

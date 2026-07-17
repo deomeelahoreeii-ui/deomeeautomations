@@ -53,6 +53,26 @@ class MasterDataRecord(SQLModel):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class MasterContact(MasterDataRecord, table=True):
+    """Channel-independent person/contact identity shared by every module."""
+
+    __tablename__ = "master_contacts"
+    __table_args__ = (
+        CheckConstraint(
+            "name_source IN ('unknown', 'whatsapp_push', 'whatsapp_profile', "
+            "'verified_entity', 'manual', 'import')",
+            name="ck_master_contacts_name_source",
+        ),
+    )
+
+    name: str = Field(default="", index=True)
+    normalized_mobile: str | None = Field(default=None, unique=True, index=True)
+    name_source: str = Field(default="unknown", index=True)
+    name_verified: bool = Field(default=False, index=True)
+    last_observed_at: datetime | None = Field(default=None, index=True)
+    notes: str = Field(default="", sa_column=Column(Text))
+
+
 class District(MasterDataRecord, table=True):
     __tablename__ = "districts"
 

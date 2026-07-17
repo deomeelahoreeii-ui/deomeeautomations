@@ -23,11 +23,14 @@ class FakeMessage:
 
 class FakeBridge:
     requests: list[tuple[str, dict]] = []
+    health_payload: dict | None = None
 
     async def request(self, subject, payload, timeout):
         request = json.loads(payload.decode("utf-8"))
         self.requests.append((subject, request))
         if request["action"] == "bridge_health":
+            if self.health_payload is not None:
+                return FakeMessage(self.health_payload)
             return FakeMessage(
                 {
                     "provider": "wwebjs",
@@ -98,6 +101,7 @@ def make_app(tmp_path, monkeypatch):
     app.dependency_overrides[get_settings] = lambda: settings
     fake = FakeBridge()
     fake.requests = []
+    fake.health_payload = None
     monkeypatch.setattr(
         "whatsapp_gateway.inbound_api.nats.connect",
         lambda *_args, **_kwargs: _async_value(fake),
@@ -131,6 +135,73 @@ def test_bridge_health_and_history_route_use_wwebjs_subject(tmp_path, monkeypatc
         assert request_subject == "whatsapp.web.inbound.history.default"
         assert payload["platformRemoteJid"] == "923360249999@s.whatsapp.net"
         assert payload["beforeTimestamp"] is None
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_bridge_health_hides_internal_browser_stack_from_operator(tmp_path, monkeypatch):
+    contact_id, fake = make_app(tmp_path, monkeypatch)
+    fake.health_payload = {
+        "provider": "wwebjs",
+        "protocolVersion": 3,
+        "workerId": "default",
+        "status": "failed",
+        "ready": False,
+        "historyReady": False,
+        "error": "TargetCloseError at /private/node_modules/puppeteer/CallbackRegistry.js:82",
+    }
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/v1/whatsapp/inbound/history/bridge/status",
+                params={"contact_id": str(contact_id)},
+            )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "failed"
+        assert payload["error"] == payload["message"]
+        assert "node_modules" not in json.dumps(payload)
+        assert "CallbackRegistry" not in json.dumps(payload)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_all_history_scope_is_audited_and_sent_with_safety_limit(tmp_path, monkeypatch):
+    contact_id, fake = make_app(tmp_path, monkeypatch)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/whatsapp/inbound/history/request",
+                json={"contact_id": str(contact_id), "count": 50, "all_history": True},
+            )
+        assert response.status_code == 202, response.text
+        assert response.json()["requested_count"] == 5000
+        assert response.json()["all_history"] is True
+        _, payload = next(
+            item for item in fake.requests if item[1]["action"] == "request_history"
+        )
+        assert payload["count"] == 5000
+        assert payload["allHistory"] is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_custom_history_count_above_old_limit_is_preserved(tmp_path, monkeypatch):
+    contact_id, fake = make_app(tmp_path, monkeypatch)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/whatsapp/inbound/history/request",
+                json={"contact_id": str(contact_id), "count": 1234},
+            )
+        assert response.status_code == 202, response.text
+        assert response.json()["requested_count"] == 1234
+        assert response.json()["all_history"] is False
+        _, payload = next(
+            item for item in fake.requests if item[1]["action"] == "request_history"
+        )
+        assert payload["count"] == 1234
+        assert payload["allHistory"] is False
     finally:
         app.dependency_overrides.clear()
 

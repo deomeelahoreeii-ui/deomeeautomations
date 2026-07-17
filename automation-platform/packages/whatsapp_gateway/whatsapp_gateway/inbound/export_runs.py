@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 
 from whatsapp_gateway.inbound.common import normalize_media_types, normalize_utc_naive, require_contact
 from whatsapp_gateway.inbound.contact_matching import contact_coverage, find_matching_attachments
+from whatsapp_gateway.directory.master_contacts import resolved_contact_name
 from whatsapp_gateway.models import WhatsAppInboundExportItem, WhatsAppInboundExportRun
 
 def create_export_run(
@@ -39,7 +40,7 @@ def create_export_run(
         job_id=job_id,
         account_id=contact.account_id,
         contact_id=contact.id,
-        contact_name=contact.display_name or contact.phone_jid or contact.canonical_key,
+        contact_name=resolved_contact_name(session, contact) or contact.phone_jid or contact.canonical_key,
         date_from=normalize_utc_naive(date_from),
         date_to=normalize_utc_naive(date_to),
         chat_scope=chat_scope,

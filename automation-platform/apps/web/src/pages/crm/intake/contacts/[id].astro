@@ -1,0 +1,61 @@
+---
+import CrmIntakeNav from "../../../../components/CrmIntakeNav.astro";
+import CrmLayout from "../../../../layouts/CrmLayout.astro";
+const contactId = Astro.params.id || "";
+const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+---
+
+<CrmLayout title="Contact Intake History" description="Review one contact's durable intake timeline and accumulated WhatsApp evidence library." page="intake">
+  <a class="btn btn-sm" href={`/crm/intake/?contact=${contactId}`} slot="actions">＋ New intake for contact</a>
+  <CrmIntakeNav active="runs" />
+
+  <section class="master-card crm-contact-workspace-header" id="contact-workspace-root" data-contact-id={contactId} data-api-base={apiBase}>
+    <div class="inbound-card-heading">
+      <div><p class="eyebrow">Contact intake history</p><h2 id="workspace-contact-name">Loading contact…</h2><p id="workspace-contact-identity">—</p></div>
+      <div class="inbound-detail-actions"><span class="badge" id="workspace-state">Loading</span><a class="btn btn-xs" href="/crm/intake/batches">All intake runs</a></div>
+    </div>
+    <p class="crm-contact-workspace-explainer">This page is contact-wide. It combines evidence captured across multiple runs. Open an individual run below when you need that run's exact files and audit trail.</p>
+  </section>
+
+  <section class="inbound-summary-grid crm-contact-workspace-summary">
+    <article class="master-card"><span>Intake runs</span><strong id="workspace-run-count">—</strong></article>
+    <article class="master-card"><span>All evidence</span><strong id="workspace-evidence-count">—</strong></article>
+    <article class="master-card"><span>PDF / images</span><strong id="workspace-type-count">—</strong></article>
+    <article class="master-card"><span>Archived size</span><strong id="workspace-total-size">—</strong></article>
+  </section>
+
+  <section class="master-card crm-contact-timeline-panel">
+    <div class="inbound-card-heading"><div><p class="eyebrow">Durable timeline</p><h2>Intake runs for this contact</h2><p>Each card is a stable run. Its detail page survives refresh and contains only that run's evidence.</p></div></div>
+    <div class="crm-contact-run-strip" id="workspace-runs"><div class="empty-cell">Loading intake runs…</div></div>
+  </section>
+
+  <section class="master-card crm-contact-evidence-panel">
+    <div class="inbound-card-heading">
+      <div><p class="eyebrow">Accumulated evidence library</p><h2>Files across every intake run</h2><p id="workspace-coverage">Loading captured coverage…</p></div>
+      <span class="badge" id="workspace-result-count">—</span>
+    </div>
+    <div class="toolbar crm-contact-evidence-toolbar">
+      <button class="btn btn-sm active" data-category="">All files</button>
+      <button class="btn btn-sm" data-category="pdf">PDFs</button>
+      <button class="btn btn-sm" data-category="image">Images</button>
+      <button class="btn btn-sm" data-category="spreadsheet">Spreadsheets</button>
+    </div>
+    <div class="table-wrap"><table class="table table-sm inbound-file-table"><thead><tr><th>Received</th><th>Evidence</th><th>Type</th><th>Conversation</th><th>Archive</th><th></th></tr></thead><tbody id="workspace-evidence"><tr><td colspan="6" class="empty-cell">Loading evidence…</td></tr></tbody></table></div>
+    <footer class="crm-contact-evidence-pagination"><span id="workspace-page-label">—</span><div><button class="btn btn-sm" id="workspace-previous">Previous</button><button class="btn btn-sm" id="workspace-next">Next</button></div></footer>
+  </section>
+
+  <script>
+    import { actions } from "astro:actions";
+    const root=document.getElementById("contact-workspace-root") as HTMLElement,contactId=root.dataset.contactId||"",apiBase=root.dataset.apiBase||"";
+    const el=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T;
+    const escapeHtml=(v:unknown)=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
+    const formatDate=(v:any)=>{if(!v)return"—";const d=new Date(v);return Number.isNaN(d.getTime())?String(v):d.toLocaleString();};
+    const formatBytes=(v:any)=>{const n=Number(v||0);if(!n)return"0 B";const u=["B","KB","MB","GB"];const i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),3);return`${(n/1024**i).toFixed(i?1:0)} ${u[i]}`;};
+    let category=(new URL(window.location.href)).searchParams.get("type")||"",page=Math.max(1,Number((new URL(window.location.href)).searchParams.get("page"))||1),pages=1;
+    function syncUrl(){const url=new URL(window.location.href);category?url.searchParams.set("type",category):url.searchParams.delete("type");page>1?url.searchParams.set("page",String(page)):url.searchParams.delete("page");history.replaceState({},"",url);}
+    function renderRuns(items:any[]){el("workspace-runs").innerHTML=items.length?items.map(x=>`<article><header><span class="badge">${escapeHtml(String(x.status).replaceAll("_"," "))}</span><time>${escapeHtml(formatDate(x.created_at))}</time></header><h3>${escapeHtml(x.batch_code)}</h3><p>${x.all_history?"All available history":`${x.requested_count} requested`} · ${x.messages_discovered} captured · ${x.files_discovered} files</p><a class="btn btn-sm btn-primary" href="/crm/intake/batches/${escapeHtml(x.id)}">Open this run →</a></article>`).join(""):'<div class="crm-intake-empty"><span>◎</span><h3>No intake runs yet</h3><p>Start the first durable capture for this contact.</p><a class="btn btn-sm btn-primary" href="/crm/intake/?contact='+escapeHtml(contactId)+'">Start intake</a></div>';}
+    function renderEvidence(d:any){const evidence=d.evidence||{},items=evidence.items||[];pages=Number(evidence.pages||1);el("workspace-result-count").textContent=`${evidence.total||0} file(s)`;el("workspace-page-label").textContent=`Page ${evidence.page||1} of ${pages}`;el<HTMLButtonElement>("workspace-previous").disabled=page<=1;el<HTMLButtonElement>("workspace-next").disabled=page>=pages;el("workspace-evidence").innerHTML=items.length?items.map((x:any)=>`<tr><td>${escapeHtml(formatDate(x.timestamp))}</td><td><strong>${escapeHtml(x.filename)}</strong><small>${escapeHtml(x.caption||"")}</small></td><td><span class="badge">${escapeHtml(x.category)}</span><small>${escapeHtml(x.mime_type||"")}</small></td><td>${escapeHtml(x.chat_scope)}</td><td><span class="badge">${escapeHtml(x.download_status||"metadata only")}</span><small>${escapeHtml(formatBytes(x.size_bytes))}</small></td><td>${x.downloadable?`<a class="btn btn-xs" href="${apiBase}/api/v1/whatsapp/inbound/contacts/${contactId}/evidence/${escapeHtml(x.attachment_id)}/download">Download</a>`:""}</td></tr>`).join(""):'<tr><td colspan="6" class="empty-cell">No evidence matches this filter.</td></tr>';}
+    async function load(){el("workspace-state").textContent="Loading";const [workspace,runs]=await Promise.all([actions.whatsapp.inboundContactWorkspace({contactId,category:(category||undefined) as any,page,pageSize:50}),actions.whatsapp.inboundBatches({contactId,limit:200})]);if(workspace.error){el("workspace-contact-name").textContent="Contact unavailable";el("workspace-state").textContent="Error";el("workspace-evidence").innerHTML=`<tr><td colspan="6" class="empty-cell">${escapeHtml(workspace.error.message)}</td></tr>`;return;}const d=workspace.data as any,m=d.metrics||{},c=m.category_counts||{},coverage=d.coverage||{};el("workspace-contact-name").textContent=d.contact.display_name;el("workspace-contact-identity").textContent=d.contact.identity||"WhatsApp identity unavailable";el("workspace-run-count").textContent=String(m.run_count||0);el("workspace-evidence-count").textContent=String(m.evidence_total||0);el("workspace-type-count").textContent=`${c.pdf||0} / ${c.image||0}`;el("workspace-total-size").textContent=formatBytes(m.total_bytes);el("workspace-coverage").textContent=`Captured coverage: ${formatDate(coverage.earliest_message_at)} to ${formatDate(coverage.latest_message_at)}. ${coverage.note||""}`;renderEvidence(d);renderRuns((runs.data as any)?.items||[]);el("workspace-state").textContent="Ready";document.querySelectorAll<HTMLButtonElement>("[data-category]").forEach(b=>b.classList.toggle("active",b.dataset.category===category));}
+    document.querySelectorAll<HTMLButtonElement>("[data-category]").forEach(button=>button.addEventListener("click",()=>{category=button.dataset.category||"";page=1;syncUrl();void load();}));el("workspace-previous").addEventListener("click",()=>{if(page>1){page-=1;syncUrl();void load();}});el("workspace-next").addEventListener("click",()=>{if(page<pages){page+=1;syncUrl();void load();}});void load();
+  </script>
+</CrmLayout>

@@ -5,6 +5,13 @@ from typing import Literal
 from sqlmodel import Field, SQLModel
 
 
+class MasterContactWrite(SQLModel):
+    name: str = Field(min_length=1, max_length=200)
+    mobile: str = Field(default="", max_length=30)
+    notes: str = Field(default="", max_length=2000)
+    active: bool = True
+
+
 class SchoolWrite(SQLModel):
     emis: str = Field(min_length=1, max_length=30)
     name: str = Field(min_length=1, max_length=300)

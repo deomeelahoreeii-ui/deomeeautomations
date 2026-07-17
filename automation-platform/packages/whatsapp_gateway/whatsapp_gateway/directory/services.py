@@ -4,6 +4,7 @@ from whatsapp_gateway.api_imports import *
 
 from whatsapp_gateway.api_schemas import *
 from whatsapp_gateway.gateway.services import gateway_datetime
+from whatsapp_gateway.directory.master_contacts import ensure_master_contact
 
 def directory_group_dict(
     item: WhatsAppDirectoryGroup,
@@ -65,7 +66,8 @@ def upsert_directory_contact(
     item.canonical_key = phone_jid or item.canonical_key
     item.phone_jid = phone_jid or item.phone_jid
     item.primary_lid_jid = primary_lid or item.primary_lid_jid
-    item.display_name = str(source.get("displayName") or source.get("name") or item.display_name)
+    observed_name = str(source.get("displayName") or source.get("name") or "").strip()
+    item.display_name = observed_name or item.display_name
     item.source = str(source.get("source") or item.source or "gateway")
     item.confidence = float(source.get("confidence") or item.confidence or 0)
     item.active = bool(source.get("active", True))
@@ -79,6 +81,13 @@ def upsert_directory_contact(
         )
     session.add(item)
     session.flush()
+    ensure_master_contact(
+        session,
+        item,
+        observed_name=observed_name,
+        name_source="whatsapp_profile",
+        observed_at=synced_at,
+    )
     aliases = source.get("aliases") or []
     if primary_lid and not any(
         (alias.get("lidJid") or alias.get("lid_jid")) == primary_lid

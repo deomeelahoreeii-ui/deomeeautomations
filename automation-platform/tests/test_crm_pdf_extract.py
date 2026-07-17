@@ -55,3 +55,41 @@ def test_extract_crm_pdf_uses_ocr_for_image_only_pdf(tmp_path: Path, monkeypatch
     assert result.complaint_number == "104-7654321"
     assert result.extraction_method == "tesseract+field"
     assert result.ocr_text
+
+
+def test_extract_crm_pdf_selectively_ocrs_blank_later_pages(tmp_path: Path, monkeypatch) -> None:
+    pdf = tmp_path / "mixed.pdf"
+    pdf.write_bytes(b"%PDF-1.4\ncontent\n%%EOF\n")
+    first = "Complaint No: 104-6609317\nPerson Name: Fatima\nComplaint Remarks: " + ("detail " * 30)
+    monkeypatch.setattr(pdf_extract, "extract_pdf_text", lambda _path: first + "\f\f")
+    called: list[int] = []
+    monkeypatch.setattr(
+        pdf_extract,
+        "tesseract_ocr_page",
+        lambda _path, *, page_number: called.append(page_number) or "Attachment text",
+    )
+    result = pdf_extract.extract_crm_pdf(pdf)
+    assert result.page_count == 2
+    assert result.ocr_pages == (2,)
+    assert called == [2]
+
+
+def test_extract_crm_pdf_ocrs_sparse_selectable_overlay(tmp_path: Path, monkeypatch) -> None:
+    pdf = tmp_path / "portal-scan.pdf"
+    pdf.write_bytes(b"%PDF-1.4\ncontent\n%%EOF\n")
+    monkeypatch.setattr(
+        pdf_extract,
+        "extract_pdf_text",
+        lambda _path: "CHIEF MINISTER COMPLAINT CELL\nComplaint ID: 104-6032890\nGenerated on 6/29/2026\f",
+    )
+    monkeypatch.setattr(
+        pdf_extract,
+        "tesseract_ocr_first_page",
+        lambda _path: "Name GHULAM YASEEN CNIC 3630209500245\nComplaint Details\nSalary deduction requires investigation.",
+    )
+
+    result = pdf_extract.extract_crm_pdf(pdf)
+
+    assert result.ocr_pages == (1,)
+    assert "GHULAM YASEEN" in result.ocr_text
+    assert result.extraction_method == "pdftotext+selective-tesseract+field"

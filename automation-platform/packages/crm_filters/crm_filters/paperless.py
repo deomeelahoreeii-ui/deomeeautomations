@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import json
+import mimetypes
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -68,11 +71,13 @@ class PaperlessComplaintCandidate:
     applicant_clean: str
     remarks_text: str
     remarks_clean: str
+    fields: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
 class PaperlessMetadata:
     complaint_type_id: int | str | None = None
+    attachment_type_id: int | str | None = None
     complaint_number_field_id: int | str | None = None
     source_field_id: int | str | None = None
     status_field_id: int | str | None = None
@@ -275,7 +280,9 @@ class PaperlessClient:
         allow_insecure_fallback: bool = False,
         timeout_seconds: float = 15,
         document_type_name: str = "Complaint",
+        attachment_type_name: str = "Attachment",
         max_pages: int = 10,
+        task_timeout_seconds: int = 180,
     ) -> None:
         self.base_url = paperless_api_base_url(base_url)
         self.username = username
@@ -286,7 +293,9 @@ class PaperlessClient:
         self.allow_insecure_fallback = allow_insecure_fallback
         self.timeout_seconds = timeout_seconds
         self.document_type_name = document_type_name
+        self.attachment_type_name = attachment_type_name
         self.max_pages = max(1, max_pages)
+        self.task_timeout_seconds = max(10, task_timeout_seconds)
         self.session = requests.Session()
         self.metadata: PaperlessMetadata | None = None
         self.insecure_fallback_used = False
@@ -416,9 +425,11 @@ class PaperlessClient:
     def fetch_metadata(self) -> PaperlessMetadata:
         metadata = PaperlessMetadata()
         for item in self._get_all("/api/document_types/"):
-            if str(item.get("name", "")).strip().casefold() == self.document_type_name.casefold():
+            name = str(item.get("name", "")).strip().casefold()
+            if name == self.document_type_name.casefold():
                 metadata.complaint_type_id = item.get("id")
-                break
+            if name == self.attachment_type_name.casefold():
+                metadata.attachment_type_id = item.get("id")
 
         for custom_field in self._get_all("/api/custom_fields/"):
             field_name_raw = str(custom_field.get("name", "")).strip()
@@ -470,6 +481,106 @@ class PaperlessClient:
                 "Document Role custom field was not found; role filtering cannot be applied."
             )
         return metadata
+
+    def custom_field_payload(self, values: dict[str, object]) -> list[dict[str, object]]:
+        if self.metadata is None:
+            raise RuntimeError("PaperlessClient.connect() must be called before mapping fields.")
+        payload: list[dict[str, object]] = []
+        for name, raw_value in values.items():
+            field_id = self.metadata.field_ids_by_name.get(name.casefold())
+            if field_id is None or raw_value in (None, ""):
+                continue
+            labels = self.metadata.option_labels_by_field_id.get(str(field_id), {})
+            value = raw_value
+            if labels:
+                reverse = {label.casefold(): option_id for option_id, label in labels.items()}
+                value = reverse.get(str(raw_value).strip().casefold(), raw_value)
+            payload.append({"field": field_id, "value": value})
+        return payload
+
+    def upload_document(
+        self,
+        path: Path,
+        *,
+        title: str,
+        document_type_id: int | str,
+        custom_fields: dict[str, object],
+    ) -> tuple[str, int]:
+        task_id, document_id = self.post_document(
+            path, title=title, document_type_id=document_type_id
+        )
+        self.update_document_metadata(
+            document_id,
+            title=title,
+            document_type_id=document_type_id,
+            custom_fields=custom_fields,
+        )
+        return task_id, document_id
+
+    def post_document(
+        self,
+        path: Path,
+        *,
+        title: str,
+        document_type_id: int | str,
+    ) -> tuple[str, int]:
+        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        with path.open("rb") as handle:
+            response = self._request(
+                "POST",
+                f"{self.base_url}/api/documents/post_document/",
+                files={"document": (path.name, handle, content_type)},
+                data={"title": title, "document_type": str(document_type_id)},
+            )
+        response.raise_for_status()
+        body = response.json()
+        task_id = str(
+            body if isinstance(body, str) else body.get("task_id") or body.get("task") or ""
+        )
+        if not task_id:
+            raise RuntimeError(f"Paperless upload did not return a task id: {body!r}")
+        document_id = self.wait_for_document_id(task_id)
+        return task_id, document_id
+
+    def update_document_metadata(
+        self,
+        document_id: int,
+        *,
+        title: str,
+        document_type_id: int | str,
+        custom_fields: dict[str, object],
+    ) -> None:
+        patch = self._request(
+            "PATCH",
+            f"{self.base_url}/api/documents/{document_id}/",
+            json={
+                "title": title,
+                "document_type": document_type_id,
+                "custom_fields": self.custom_field_payload(custom_fields),
+            },
+        )
+        patch.raise_for_status()
+
+    def wait_for_document_id(self, task_id: str) -> int:
+        deadline = time.monotonic() + self.task_timeout_seconds
+        while time.monotonic() < deadline:
+            for task in self._get_all("/api/tasks/", limit=100):
+                if str(task.get("task_id") or "") != task_id:
+                    continue
+                status = str(task.get("status") or "").upper()
+                related = task.get("related_document")
+                if status == "SUCCESS" and related:
+                    return int(related)
+                result = str(task.get("result") or "")
+                match = re.search(r"document id (\d+)", result, re.IGNORECASE)
+                if status == "SUCCESS" and match:
+                    return int(match.group(1))
+                if status in {"FAILURE", "REVOKED"}:
+                    if related and "duplicate" in result.casefold():
+                        return int(related)
+                    raise RuntimeError(f"Paperless task failed: {json.dumps(task, default=str)}")
+            time.sleep(2)
+        raise TimeoutError(f"Timed out waiting for Paperless task {task_id}")
 
     def prepare_complaint_lookup_index(
         self,
@@ -651,6 +762,7 @@ class PaperlessClient:
                     applicant_clean=clean_identity(applicant_text),
                     remarks_text=remarks_text,
                     remarks_clean=clean_remarks(remarks_text),
+                    fields=fields,
                 )
             )
             if position == total or position % 50 == 0:

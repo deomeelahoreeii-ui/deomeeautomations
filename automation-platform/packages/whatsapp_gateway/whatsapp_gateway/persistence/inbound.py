@@ -92,6 +92,7 @@ class WhatsAppInboundHistoryRequest(SQLModel, table=True):
     provider: str = Field(default="baileys", index=True)
     batch_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_inbound_batches.id", unique=True, index=True)
     requested_count: int = 50
+    all_history: bool = False
     remote_jid: str | None = Field(default=None, index=True)
     anchor_message_id: str | None = Field(default=None, index=True)
     anchor_timestamp: datetime | None = Field(default=None, index=True)
@@ -149,6 +150,7 @@ class WhatsAppInboundBatch(SQLModel, table=True):
     worker_key: str = Field(index=True)
     provider: str = Field(default="wwebjs", index=True)
     requested_count: int = 50
+    all_history: bool = False
     remote_jid: str | None = Field(default=None, index=True)
     anchor_message_id: str | None = Field(default=None, index=True)
     anchor_timestamp: datetime | None = Field(default=None, index=True)

@@ -29,6 +29,7 @@ celery_app = Celery(
         "whatsapp_gateway.tasks",
         "whatsapp_gateway.inbound_tasks",
         "whatsapp_gateway.inbound.processing_tasks",
+        "whatsapp_gateway.inbound.publication_tasks",
     ],
 )
 
@@ -47,6 +48,7 @@ celery_app.conf.update(
         "whatsapp_gateway.build_inbound_export": {"queue": "whatsapp"},
         "whatsapp_gateway.process_inbound_batch": {"queue": "whatsapp"},
         "crm_filters.*": {"queue": "crm"},
+        "crm_domain.*": {"queue": "crm"},
     },
     task_serializer="json",
     task_track_started=True,

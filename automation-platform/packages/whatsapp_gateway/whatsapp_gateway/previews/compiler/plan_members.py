@@ -10,6 +10,7 @@ from whatsapp_gateway.antidengue_renderer import (
     render_tehsil_dormant_report, render_wing_dormant_report,
 )
 from whatsapp_gateway.models import (WhatsAppAudienceMember, WhatsAppDirectoryContact, WhatsAppDirectoryGroup)
+from whatsapp_gateway.directory.master_contacts import resolved_contact_name
 from whatsapp_gateway.previews.compiler.context import CompileContext
 from whatsapp_gateway.previews.compiler.errors import issue
 from whatsapp_gateway.previews.compiler.routes import (
@@ -141,6 +142,6 @@ def plan_contact_member(
         and (ctx.recipient_scope is None or _plan_recipient_scope(plan, ctx.report_type.key) == ctx.recipient_scope.key)), None)
     if selected_plan is None:
         batch_issues.append(issue("missing_individual_report", "blocked",
-            f"The dry run has no matching individual report for {directory_contact.display_name or directory_contact.canonical_key}."))
+            f"The dry run has no matching individual report for {resolved_contact_name(ctx.session, directory_contact) or directory_contact.canonical_key}."))
         return None
     return copy.deepcopy(selected_plan)

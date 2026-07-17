@@ -42,6 +42,15 @@ def test_finds_only_browser_using_the_private_snapshot(tmp_path: Path) -> None:
     assert MODULE.find_managed_browser_pids(snapshot, proc_root) == [101]
 
 
+def test_finds_browser_after_brave_collapses_its_command_line(tmp_path: Path) -> None:
+    snapshot = make_snapshot(tmp_path)
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    rewritten = f"/usr/bin/brave --profile-directory=Profile 1 --user-data-dir={snapshot.root} --no-first-run"
+    write_process(proc_root, 104, [rewritten])
+    assert MODULE.find_managed_browser_pids(snapshot, proc_root) == [104]
+
+
 def test_stale_singleton_markers_are_removed_when_no_browser_is_live(tmp_path: Path) -> None:
     snapshot = make_snapshot(tmp_path)
     proc_root = tmp_path / "proc"

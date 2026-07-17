@@ -25,7 +25,13 @@ import WhatsAppLayout from "../../../layouts/WhatsAppLayout.astro";
   <dialog class="modal" id="contact-link-dialog"><div class="modal-box master-modal wide-modal">
     <div class="modal-title"><div><p class="eyebrow">Verified identity</p><h2 id="contact-link-title">Link master data</h2><small id="contact-link-identity"></small></div><button type="button" id="close-contact-link">×</button></div>
     <div class="contact-link-layout">
-      <section><h3>Current links</h3><p>Verified links let the planner enforce wing isolation for individual deliveries.</p><div id="current-contact-links" class="current-contact-links"></div></section>
+      <section>
+        <h3>Shared master contact</h3>
+        <p>This verified name is reused by CRM, audiences, previews and every other module. WhatsApp aliases remain separate.</p>
+        <div class="wa-form-grid"><label><span>Canonical contact name</span><input class="input input-bordered input-sm" id="master-contact-name" maxlength="200" placeholder="Enter the person's verified name…" /></label></div>
+        <button type="button" class="btn btn-sm btn-primary" id="save-master-contact-name">Save verified name</button>
+        <h3>Routing authorization</h3><p>Verified role links let the planner enforce wing isolation for individual deliveries.</p><div id="current-contact-links" class="current-contact-links"></div>
+      </section>
       <section><h3>Add verified link</h3><div class="wa-form-grid"><label><span>Recipient type</span><select class="select select-bordered select-sm" id="link-entity-type"><option value="officer">Officer</option><option value="school_head">School head</option></select></label><label><span>Search master data</span><input class="input input-bordered input-sm" id="link-target-search" placeholder="Name, mobile, EMIS or school…" /></label></div><div id="contact-link-candidates" class="contact-link-candidates"></div></section>
     </div>
   </div><form method="dialog" class="modal-backdrop"><button>close</button></form></dialog>
@@ -68,7 +74,7 @@ import WhatsAppLayout from "../../../layouts/WhatsAppLayout.astro";
         button.addEventListener("click", async () => { try { const warning = item.suggested ? "The phone numbers match. Confirm this identity before it is used for routing." : "The phone numbers do not match. Verify this identity carefully; an incorrect link can route reports to the wrong person."; if (!await confirmAction(`Link WhatsApp contact to ${item.name}?`, warning, "Verify link")) return; const saved = await actions.whatsapp.saveContactLink({contactId: selectedContact.id, entity_type: item.entity_type, entity_id: item.id}); if (saved.error) throw saved.error; await showSuccess("Contact linked", `${item.name} is now verified for wing-safe individual routing.`); await loadCurrentLinks(); await table.refresh(false); } catch (error) { await showError(error); } }); target.append(button);
       }
     }
-    async function openContactLinks(item: any) { selectedContact = item; el("contact-link-title").textContent = item.display_name || "Unnamed contact"; el("contact-link-identity").textContent = item.phone_jid || item.primary_lid_jid || "No WhatsApp identifier"; el<HTMLInputElement>("link-target-search").value = ""; linkDialog.showModal(); try { await Promise.all([loadCurrentLinks(), loadLinkTargets()]); } catch (error) { await showError(error); } }
+    async function openContactLinks(item: any) { selectedContact = item; el("contact-link-title").textContent = item.display_name || "Unnamed contact"; el("contact-link-identity").textContent = item.phone_jid || item.primary_lid_jid || "No WhatsApp identifier"; el<HTMLInputElement>("master-contact-name").value = item.display_name || ""; el<HTMLInputElement>("link-target-search").value = ""; linkDialog.showModal(); try { await Promise.all([loadCurrentLinks(), loadLinkTargets()]); } catch (error) { await showError(error); } }
 
     async function loadPage(pageIndex: number, pageSize: number) {
       const result = await actions.whatsapp.directoryContacts({
@@ -88,9 +94,9 @@ import WhatsAppLayout from "../../../layouts/WhatsAppLayout.astro";
       { accessorKey: "primary_lid_jid", header: "Primary LID", enableSorting: false, cell: ({row}: any) => stack(row.original.primary_lid_jid || "—", `${row.original.alias_count} LID alias${row.original.alias_count === 1 ? "" : "es"}`) },
       { accessorKey: "group_count", header: "Known groups", enableSorting: false },
       { accessorKey: "confidence", header: "Mapping", enableSorting: false, cell: ({row}: any) => stack(`${Math.round(Number(row.original.confidence || 0) * 100)}% confidence`, row.original.source) },
-      { accessorKey: "link_count", header: "Master data", enableSorting: false, cell: ({row}: any) => badge(row.original.link_count ? `${row.original.link_count} verified` : "Unlinked", row.original.link_count ? "" : "warning") },
+      { accessorKey: "master_contact_id", header: "Master data", enableSorting: false, cell: ({row}: any) => stack(row.original.name_verified ? "Verified name" : row.original.master_contact_id ? "Observed name" : "Unlinked", `${String(row.original.name_source || "unknown").replaceAll("_", " ")}${row.original.link_count ? ` · ${row.original.link_count} routing link${row.original.link_count === 1 ? "" : "s"}` : ""}`) },
       { accessorKey: "token_status", header: "Privacy token", enableSorting: false, cell: ({row}: any) => badge(String(row.original.token_status || "unknown").replaceAll("_", " "), tokenTone(row.original.token_status)) },
-      { id: "actions", header: "", enableSorting: false, cell: ({row}: any) => actionButtons([{ label: "Link master data", onClick: () => void openContactLinks(row.original) }, ...(row.original.primary_lid_jid ? [{ label: "Refresh token", onClick: async () => {
+      { id: "actions", header: "", enableSorting: false, cell: ({row}: any) => actionButtons([{ label: "Manage identity", onClick: () => void openContactLinks(row.original) }, ...(row.original.primary_lid_jid ? [{ label: "Refresh token", onClick: async () => {
         if (!await confirmAction("Refresh this privacy token?", "The gateway will securely request a fresh token. No message will be sent.", "Refresh token")) return;
         try {
           showLoading("Refreshing privacy token", "Waiting for the connected WhatsApp gateway…");
@@ -120,6 +126,18 @@ import WhatsAppLayout from "../../../layouts/WhatsAppLayout.astro";
       } catch (error) { closeAlert(); await showError(error); }
     });
     el("close-contact-link").addEventListener("click", () => linkDialog.close());
+    el("save-master-contact-name").addEventListener("click", async () => {
+      const name = el<HTMLInputElement>("master-contact-name").value.trim();
+      if (!name) { await showError(new Error("Enter a contact name.")); return; }
+      try {
+        const result = await actions.whatsapp.saveMasterContactName({ id: selectedContact.id, name });
+        if (result.error) throw result.error;
+        selectedContact = { ...selectedContact, ...(result.data as any) };
+        el("contact-link-title").textContent = name;
+        await showSuccess("Master contact updated", `${name} will now appear consistently across modules.`);
+        await table.refresh(false);
+      } catch (error) { await showError(error); }
+    });
     el("link-entity-type").addEventListener("change", () => void loadLinkTargets());
     el("link-target-search").addEventListener("input", () => { window.clearTimeout(linkTimer); linkTimer = window.setTimeout(() => void loadLinkTargets(), 250); });
   </script>

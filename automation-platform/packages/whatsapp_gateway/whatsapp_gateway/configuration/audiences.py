@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from whatsapp_gateway.api_common import *
+from whatsapp_gateway.directory.master_contacts import resolved_contact_name
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp"])
 
@@ -177,7 +178,7 @@ def audience_members(
                 "id": str(member.id),
                 "target_type": "contact",
                 "target_id": str(member.directory_contact_id),
-                "name": target.display_name or "Unnamed contact" if target else "Deleted contact",
+                "name": resolved_contact_name(session, target) or "Unnamed contact" if target else "Deleted contact",
                 "identifier": (target.phone_jid or target.primary_lid_jid) if target else member.target_key,
                 "available": target.active if target else False,
                 "detail": target.primary_lid_jid or "No LID mapping" if target else "Unavailable",

@@ -84,6 +84,25 @@ export const server = {
     }),
   },
   crm: {
+    cases: defineAction({
+      input: z.object({ search: z.string().default(""), state: z.string().default(""), limit: z.number().int().min(1).max(200).default(100) }),
+      handler: (input) => {
+        const params = new URLSearchParams({ search: input.search, state: input.state, limit: String(input.limit) });
+        return api(`/api/v1/crm/cases?${params}`);
+      },
+    }),
+    complaintCase: defineAction({ input: z.object({ id: z.string().uuid() }), handler: ({id}) => api(`/api/v1/crm/cases/${id}`) }),
+    reviewComplaintCase: defineAction({
+      input: z.object({ id: z.string().uuid(), fields: z.record(z.string(), z.string().nullable()), accepted_document_ids: z.array(z.string().uuid()), rejected_document_ids: z.array(z.string().uuid()) }),
+      handler: ({id, ...body}) => api(`/api/v1/crm/cases/${id}/review`, { method: "PATCH", body: JSON.stringify(body) }),
+    }),
+    reviewComplaintDocument: defineAction({
+      input: z.object({ caseId: z.string().uuid(), documentId: z.string().uuid(), role: z.enum(["main_complaint", "complaint_details", "attachment", "reply", "report"]), accepted: z.boolean() }),
+      handler: ({caseId, documentId, ...body}) => api(`/api/v1/crm/cases/${caseId}/documents/${documentId}`, { method: "PATCH", body: JSON.stringify(body) }),
+    }),
+    approveFreshComplaint: defineAction({ input: z.object({id:z.string().uuid()}), handler: ({id}) => api(`/api/v1/crm/cases/${id}/approve-fresh`, {method:"POST"}) }),
+    publishComplaint: defineAction({ input: z.object({id:z.string().uuid()}), handler: ({id}) => api(`/api/v1/crm/cases/${id}/publish`, {method:"POST"}) }),
+    backfillPaperlessCases: defineAction({ input: z.object({limit:z.number().int().positive().max(100000).optional()}), handler: ({limit}) => api("/api/v1/crm/cases/backfill-paperless", {method:"POST", body:JSON.stringify({limit})}) }),
     sheets: defineAction({
       input: z.object({
         search: z.string().default(""),
@@ -320,7 +339,8 @@ export const server = {
     requestInboundHistory: defineAction({
       input: z.object({
         contact_id: z.string().uuid(),
-        count: z.number().int().min(1).max(200).default(50),
+        count: z.number().int().min(1).max(5000).default(50),
+        all_history: z.boolean().default(false),
       }),
       handler: (input) => api("/api/v1/whatsapp/inbound/history/request", {
         method: "POST",
@@ -355,6 +375,19 @@ export const server = {
         if (input.status) params.set("status", input.status);
         if (input.search) params.set("search", input.search);
         return api(`/api/v1/whatsapp/inbound/batches?${params}`);
+      },
+    }),
+    inboundContactWorkspace: defineAction({
+      input: z.object({
+        contactId: z.string().uuid(),
+        category: z.enum(["image", "pdf", "spreadsheet"]).optional(),
+        page: z.number().int().positive().default(1),
+        pageSize: z.number().int().min(1).max(100).default(50),
+      }),
+      handler: ({ contactId, category, page, pageSize }) => {
+        const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+        if (category) params.set("category", category);
+        return api(`/api/v1/whatsapp/inbound/contacts/${contactId}/workspace?${params}`);
       },
     }),
     inboundBatch: defineAction({
@@ -422,6 +455,34 @@ export const server = {
         if (after) params.set("after", after);
         return api(`/api/v1/whatsapp/inbound/processing-runs/${id}/events?${params}`);
       },
+    }),
+    reviewInboundComplaintGroup: defineAction({
+      input: z.object({
+        runId: z.string().uuid(),
+        complaintNumber: z.string().min(1).max(40),
+        decision: z.enum(["approved", "rejected"]),
+        reviewed_by: z.string().min(1).max(100).default("web-operator"),
+        note: z.string().max(4000).nullable().optional(),
+      }),
+      handler: ({ runId, complaintNumber, ...body }) => api(
+        `/api/v1/whatsapp/inbound/processing-runs/${runId}/complaint-groups/${encodeURIComponent(complaintNumber)}/review`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    }),
+    batchApproveInboundComplaintGroups: defineAction({
+      input: z.object({
+        runId: z.string().uuid(),
+        complaintNumbers: z.array(z.string().min(1).max(40)).min(1).max(200),
+        reviewed_by: z.string().min(1).max(100).default("web-operator"),
+        note: z.string().max(4000).nullable().optional(),
+      }),
+      handler: ({ runId, complaintNumbers, ...body }) => api(
+        `/api/v1/whatsapp/inbound/processing-runs/${runId}/complaint-group-approvals`,
+        {
+          method: "POST",
+          body: JSON.stringify({ ...body, complaint_numbers: complaintNumbers }),
+        },
+      ),
     }),
     reviewInboundProcessingItem: defineAction({
       input: z.object({
@@ -657,6 +718,13 @@ export const server = {
     refreshContactToken: defineAction({
       input: z.object({ id: z.string().uuid() }),
       handler: ({ id }) => api(`/api/v1/whatsapp/directory/contacts/${id}/token/refresh`, { method: "POST" }),
+    }),
+    saveMasterContactName: defineAction({
+      input: z.object({ id: z.string().uuid(), name: z.string().trim().min(1).max(200) }),
+      handler: ({ id, name }) => api(`/api/v1/whatsapp/directory/contacts/${id}/master-contact`, {
+        method: "PUT",
+        body: JSON.stringify({ name }),
+      }),
     }),
     contactLinks: defineAction({
       input: z.object({ id: z.string().uuid() }),

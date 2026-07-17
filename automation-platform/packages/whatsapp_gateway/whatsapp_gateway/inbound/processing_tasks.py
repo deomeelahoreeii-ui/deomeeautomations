@@ -9,14 +9,12 @@ from celery.exceptions import SoftTimeLimitExceeded
 from sqlmodel import Session, select
 
 from automation_core.celery_app import celery_app
-from automation_core.config import Settings, get_settings
+from automation_core.config import get_settings
 from automation_core.database import engine
-from automation_core.object_storage import ObjectStorageError, S3ObjectStorage
+from automation_core.object_storage import S3ObjectStorage
 from automation_core.time import utcnow
-from crm_filters.paperless import PaperlessClient
 from whatsapp_gateway.inbound.processing import (
     CRM_CATEGORIES,
-    classification_document,
     recalculate_processing_run,
     record_processing_event,
 )
@@ -24,13 +22,24 @@ from whatsapp_gateway.inbound.processing_classifier import (
     classify_extracted_document,
     extract_document,
 )
+from whatsapp_gateway.inbound.crm_registry import (
+    associate_run_attachments,
+    complaint_numbers_for_run,
+    persist_crm_capture,
+    persist_paperless_reconciliation,
+)
+from whatsapp_gateway.inbound.processing_support import (
+    materialize_source as _materialize_source,
+    paperless_client as _paperless_client,
+    paperless_configured as _paperless_configured,
+    write_derived_record as _write_derived_record,
+)
 from whatsapp_gateway.models import (
     WhatsAppInboundAttachment,
     WhatsAppInboundBatchItem,
     WhatsAppInboundMessage,
     WhatsAppInboundProcessingItem,
     WhatsAppInboundProcessingRun,
-    WhatsAppInboundStoredObject,
 )
 
 
@@ -62,91 +71,6 @@ class InboundProcessingTask(Task):
             session.commit()
 
 
-def _paperless_client(settings: Settings) -> PaperlessClient:
-    return PaperlessClient(
-        base_url=settings.paperless_url,
-        username=settings.paperless_username,
-        password=settings.paperless_password,
-        token=settings.paperless_token,
-        verify_ssl=settings.paperless_verify_ssl,
-        ca_bundle=settings.paperless_ca_bundle,
-        allow_insecure_fallback=settings.paperless_allow_insecure_fallback,
-        timeout_seconds=settings.paperless_timeout_seconds,
-        document_type_name=settings.paperless_document_type_complaint,
-        max_pages=settings.paperless_max_pages,
-    )
-
-
-def _paperless_configured(settings: Settings) -> bool:
-    return bool(
-        settings.paperless_url
-        and (
-            settings.paperless_token
-            or (settings.paperless_username and settings.paperless_password)
-        )
-    )
-
-
-def _materialize_source(
-    *,
-    session: Session,
-    item: WhatsAppInboundProcessingItem,
-    destination: Path,
-    settings: Settings,
-    storage: S3ObjectStorage,
-) -> Path:
-    attachment = session.get(WhatsAppInboundAttachment, item.attachment_id)
-    batch_item = session.get(WhatsAppInboundBatchItem, item.batch_item_id)
-    if attachment is None or batch_item is None:
-        raise RuntimeError("The inbound attachment or batch item is unavailable")
-    if item.stored_object_id:
-        stored = session.get(WhatsAppInboundStoredObject, item.stored_object_id)
-        if stored is None:
-            raise RuntimeError("The RustFS object ledger record is unavailable")
-        result = storage.download_file(
-            bucket=stored.bucket,
-            object_key=stored.object_key,
-            destination=destination,
-        )
-        if result["size_bytes"] != stored.size_bytes:
-            raise ObjectStorageError("Downloaded object size does not match the storage ledger")
-        if stored.sha256 and result["sha256"] != stored.sha256:
-            raise ObjectStorageError("Downloaded object checksum does not match the storage ledger")
-        return destination
-    if attachment.stored_path:
-        source = Path(attachment.stored_path)
-        if source.is_file():
-            destination.write_bytes(source.read_bytes())
-            return destination
-    raise RuntimeError("The file is unavailable in RustFS and the compatibility archive")
-
-
-def _write_derived_record(
-    *,
-    session: Session,
-    item: WhatsAppInboundProcessingItem,
-    settings: Settings,
-    storage: S3ObjectStorage,
-) -> None:
-    if not settings.object_storage_enabled:
-        return
-    key = f"classification/{item.run_id}/{item.id}.json"
-    storage.put_bytes(
-        bucket=settings.object_storage_derived_bucket,
-        object_key=key,
-        body=classification_document(item),
-        content_type="application/json",
-        metadata={
-            "processing-item-id": str(item.id),
-            "attachment-id": str(item.attachment_id),
-            "category": item.primary_category,
-            "complaint-number": item.detected_complaint_number or "",
-        },
-    )
-    item.derived_object_key = key
-    session.add(item)
-
-
 def _post_classification_status(item: WhatsAppInboundProcessingItem) -> str:
     if item.primary_category == "unsupported":
         return "unsupported"
@@ -155,7 +79,10 @@ def _post_classification_status(item: WhatsAppInboundProcessingItem) -> str:
     if item.primary_category in {"possible_crm_complaint", "crm_supporting_document", "crm_reply_or_report", "unknown"}:
         return "needs_review"
     if item.primary_category == "crm_complaint":
-        return "needs_review" if item.confidence < 0.80 else "extracted"
+        extraction_needs_review = bool(
+            (item.extracted_metadata_json or {}).get("needs_review")
+        )
+        return "needs_review" if item.confidence < 0.80 or extraction_needs_review else "extracted"
     return "extracted"
 
 
@@ -285,6 +212,13 @@ def process_inbound_batch(run_id: str) -> dict[str, object]:
                         item.finished_at = utcnow()
                         item.updated_at = utcnow()
                         session.add(item)
+                        persist_crm_capture(
+                            session,
+                            item=item,
+                            batch_item=batch_item,
+                            attachment=attachment,
+                            filename=filename,
+                        )
                         record_processing_event(
                             session,
                             run_id=run.id,
@@ -324,17 +258,15 @@ def process_inbound_batch(run_id: str) -> dict[str, object]:
             with Session(engine) as session:
                 run = session.get(WhatsAppInboundProcessingRun, run_uuid)
                 assert run is not None
-                complaint_numbers = sorted(
-                    {
-                        value
-                        for value in session.exec(
-                            select(WhatsAppInboundProcessingItem.detected_complaint_number)
-                            .where(WhatsAppInboundProcessingItem.run_id == run.id)
-                            .where(WhatsAppInboundProcessingItem.detected_complaint_number.is_not(None))
-                        ).all()
-                        if value
-                    }
-                )
+                associated_attachments = associate_run_attachments(session, run.id)
+                if associated_attachments:
+                    record_processing_event(
+                        session,
+                        run_id=run.id,
+                        event_type="complaint_attachments_associated",
+                        message=f"Proposed {associated_attachments} numberless attachment association(s).",
+                    )
+                complaint_numbers = complaint_numbers_for_run(session, run.id)
                 if run.paperless_check_requested and complaint_numbers:
                     run.status = "checking_paperless"
                     run.paperless_check_status = "running"
@@ -389,7 +321,10 @@ def process_inbound_batch(run_id: str) -> dict[str, object]:
                         item.paperless_reason = result.reason  # type: ignore[attr-defined]
                         item.paperless_document_ids = list(result.matched_document_ids)  # type: ignore[attr-defined]
                         item.paperless_statuses = list(result.matched_statuses)  # type: ignore[attr-defined]
-                        if result.category == "fresh" and item.primary_category == "crm_complaint" and item.confidence >= 0.80:  # type: ignore[attr-defined]
+                        extraction_ready = not bool(
+                            (item.extracted_metadata_json or {}).get("needs_review")
+                        )
+                        if result.category == "fresh" and item.primary_category == "crm_complaint" and item.confidence >= 0.80 and extraction_ready:  # type: ignore[attr-defined]
                             item.status = "eligible"
                         elif result.category == "fresh":  # type: ignore[attr-defined]
                             item.status = "needs_review"
@@ -400,9 +335,19 @@ def process_inbound_batch(run_id: str) -> dict[str, object]:
                     elif complaint_number and run.paperless_check_requested:
                         item.paperless_category = "unavailable" if paperless_error else "fresh"
                         item.paperless_reason = paperless_error or "No matching CRM main complaint was found in Paperless."
-                        item.status = "needs_review" if paperless_error or item.primary_category != "crm_complaint" else "eligible"
+                        extraction_ready = not bool(
+                            (item.extracted_metadata_json or {}).get("needs_review")
+                        )
+                        item.status = "needs_review" if paperless_error or item.primary_category != "crm_complaint" or not extraction_ready else "eligible"
                     else:
                         item.paperless_category = "not_applicable" if not complaint_number else "not_checked"
+                    persist_paperless_reconciliation(
+                        session,
+                        item=item,
+                        paperless_requested=run.paperless_check_requested,
+                        paperless_results=paperless_results,
+                        paperless_error=paperless_error,
+                    )
                     item.updated_at = utcnow()
                     session.add(item)
                     try:

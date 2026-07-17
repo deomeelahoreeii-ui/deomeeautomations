@@ -28,6 +28,10 @@ from whatsapp_gateway.inbound.history import (
     list_inbound_history_requests,
     request_inbound_history,
 )
+from whatsapp_gateway.inbound.contact_workspace import (
+    contact_intake_workspace,
+    download_contact_evidence,
+)
 from whatsapp_gateway.inbound.history_tracking import (
     HISTORY_ACTIVE_STATUSES,
     HISTORY_HARD_TIMEOUT_SECONDS,
@@ -42,11 +46,13 @@ from whatsapp_gateway.inbound.history_tracking import (
 from whatsapp_gateway.inbound.ingestion import ingest_event
 from whatsapp_gateway.inbound.media_upload import upload_attachment_content
 from whatsapp_gateway.inbound.processing_api import (
+    batch_approve_inbound_complaint_groups,
     create_inbound_processing_run,
     list_inbound_processing_events,
     list_inbound_processing_runs,
     preview_inbound_processing_item,
     read_inbound_processing_run,
+    review_inbound_complaint_group,
     review_inbound_processing_item,
 )
 from whatsapp_gateway.inbound.schemas import (
@@ -71,6 +77,8 @@ router.post(
 )(upload_attachment_content)
 router.get("/history/bridge/status")(history_bridge_status)
 router.get("/storage/status")(object_storage_status)
+router.get("/contacts/{contact_id}/workspace")(contact_intake_workspace)
+router.get("/contacts/{contact_id}/evidence/{attachment_id}/download")(download_contact_evidence)
 router.get("/batches")(list_inbound_batches)
 router.get("/batches/{batch_id}")(read_inbound_batch)
 router.get("/batches/{batch_id}/events")(list_inbound_batch_events)
@@ -87,6 +95,12 @@ router.post("/processing-runs", status_code=status.HTTP_202_ACCEPTED)(create_inb
 router.get("/processing-runs")(list_inbound_processing_runs)
 router.get("/processing-runs/{run_id}")(read_inbound_processing_run)
 router.get("/processing-runs/{run_id}/events")(list_inbound_processing_events)
+router.post("/processing-runs/{run_id}/complaint-group-approvals")(
+    batch_approve_inbound_complaint_groups
+)
+router.post("/processing-runs/{run_id}/complaint-groups/{complaint_number}/review")(
+    review_inbound_complaint_group
+)
 router.post("/processing-items/{item_id}/review")(review_inbound_processing_item)
 router.get("/processing-items/{item_id}/content")(preview_inbound_processing_item)
 router.get("/status")(inbound_status)

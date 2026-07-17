@@ -21,6 +21,16 @@ test("normalizes document metadata", () => {
   assert.equal(value.attachment.originalFilename, "complaints.xlsx");
 });
 
+test("does not attribute the connected account push name to an outgoing contact", () => {
+  const value = normalizeInboundMessage({
+    ...sample,
+    key: { ...sample.key, fromMe: true },
+    pushName: "Operator Name",
+  });
+  assert.equal(value.fromMe, true);
+  assert.equal(value.pushName, null);
+});
+
 test("stores messages idempotently and queues one outbox event", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wa-inbound-"));
   const store = new InboundMessageStore({ filePath: path.join(dir, "store.sqlite"), workerId: "default", log: console });

@@ -10,6 +10,7 @@ from sqlmodel import Session
 
 from whatsapp_gateway.inbound.common import normalize_media_types, normalize_utc_naive, require_contact
 from whatsapp_gateway.inbound.contact_matching import contact_coverage, find_matching_attachments
+from whatsapp_gateway.directory.master_contacts import resolved_contact_name
 
 def build_preview(
     session: Session,
@@ -55,7 +56,7 @@ def build_preview(
     return {
         "contact": {
             "id": str(contact.id),
-            "display_name": contact.display_name,
+            "display_name": resolved_contact_name(session, contact),
             "phone_jid": contact.phone_jid,
             "primary_lid_jid": contact.primary_lid_jid,
         },

@@ -94,6 +94,7 @@ def serialize_history_request(
         "provider": item.provider,
         "batch_id": str(item.batch_id) if item.batch_id else None,
         "requested_count": item.requested_count,
+        "all_history": item.all_history,
         "remote_jid": item.remote_jid,
         "anchor_message_id": item.anchor_message_id,
         "anchor_timestamp": item.anchor_timestamp,

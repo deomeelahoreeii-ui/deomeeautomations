@@ -22,7 +22,7 @@ from whatsapp_gateway.inbound.history_tracking import (
     serialize_history_request as _serialize_history_request,
 )
 from whatsapp_gateway.inbound.history_worker_status import refresh_history_request_from_worker
-from whatsapp_gateway.inbound.schemas import RequestInboundHistory
+from whatsapp_gateway.inbound.schemas import MAX_INBOUND_HISTORY_MESSAGES, RequestInboundHistory
 from whatsapp_gateway.models import (
     WhatsAppAccount,
     WhatsAppDirectoryContact,
@@ -58,6 +58,23 @@ def _iso_utc(value: datetime | None) -> str | None:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _bridge_operator_message(result: dict[str, Any]) -> str:
+    if result.get("historyReady") or result.get("ready"):
+        return "Managed WhatsApp Web is ready."
+    bridge_status = str(result.get("status") or "unavailable").strip().lower()
+    messages = {
+        "starting": "Managed WhatsApp Web is starting. Retry shortly.",
+        "initializing": "Managed WhatsApp Web is starting. Retry shortly.",
+        "recovering": "Managed WhatsApp Web is recovering its browser page. Retry shortly.",
+        "qr": "Managed WhatsApp Web needs pairing. Scan the QR shown by the bridge process.",
+        "authenticated": "Managed WhatsApp Web is authenticated and finishing startup.",
+        "failed": "Managed WhatsApp Web could not start. Restart the managed bridge and check its server log.",
+        "disconnected": "Managed WhatsApp Web disconnected. Restart the managed bridge.",
+        "auth_failure": "Managed WhatsApp Web authentication failed. Refresh the browser snapshot and pair it again.",
+    }
+    return messages.get(bridge_status, "Managed WhatsApp Web is unavailable.")
 
 
 async def _request_nats(
@@ -111,10 +128,15 @@ async def history_bridge_status(
             },
             timeout=min(float(settings.whatsapp_inbound_history_timeout_seconds), 3.0),
         )
+        operator_message = _bridge_operator_message(result)
         return {
             **result,
             "provider": "wwebjs",
             "reachable": True,
+            # Never expose Node/Puppeteer internals through the operator API.
+            # Full diagnostics remain in the structured bridge server log.
+            "error": None if result.get("historyReady") else operator_message,
+            "message": operator_message,
         }
     except (NoRespondersError, NatsTimeoutError, OSError, ValueError, json.JSONDecodeError) as exc:
         return {
@@ -123,7 +145,7 @@ async def history_bridge_status(
             "ready": False,
             "status": "offline",
             "worker_id": account.worker_key,
-            "error": str(exc),
+            "error": "WhatsApp Web history bridge is not reachable.",
             "message": "WhatsApp Web history bridge is not reachable.",
         }
 
@@ -189,6 +211,7 @@ async def request_inbound_history(
     baseline_messages, baseline_attachments = _history_contact_counts(
         session, account.id, contact.id
     )
+    requested_count = MAX_INBOUND_HISTORY_MESSAGES if data.all_history else data.count
     platform_remote_jid = contact.phone_jid or contact.primary_lid_jid or remote_jids[0]
     batch = create_history_batch(
         session,
@@ -196,7 +219,8 @@ async def request_inbound_history(
         contact_id=contact.id,
         worker_key=account.worker_key,
         provider=provider,
-        requested_count=data.count,
+        requested_count=requested_count,
+        all_history=data.all_history,
         remote_jid=platform_remote_jid,
         anchor_message_id=anchor.message_id if anchor else None,
         anchor_timestamp=anchor.message_timestamp if anchor else None,
@@ -209,7 +233,8 @@ async def request_inbound_history(
         worker_key=account.worker_key,
         provider=provider,
         batch_id=batch.id,
-        requested_count=data.count,
+        requested_count=requested_count,
+        all_history=data.all_history,
         baseline_messages=baseline_messages,
         baseline_attachments=baseline_attachments,
         remote_jid=platform_remote_jid,
@@ -229,7 +254,8 @@ async def request_inbound_history(
         "provider": provider,
         "remoteJids": remote_jids,
         "platformRemoteJid": contact.phone_jid or contact.primary_lid_jid or remote_jids[0],
-        "count": data.count,
+        "count": requested_count,
+        "allHistory": data.all_history,
         "anchorMessageId": anchor.message_id if anchor else None,
         "beforeTimestamp": _iso_utc(anchor.message_timestamp) if anchor else None,
     }
@@ -265,8 +291,12 @@ async def request_inbound_history(
             session,
             batch_id=batch.id,
             event_type="history_request_accepted",
-            message=f"WhatsApp Web accepted the request for up to {data.count} older messages.",
-            details={"request_id": request_id, "operation_id": audit.operation_id},
+            message=(
+                f"WhatsApp Web accepted the request for all available history (up to {requested_count} messages)."
+                if data.all_history
+                else f"WhatsApp Web accepted the request for up to {requested_count} older messages."
+            ),
+            details={"request_id": request_id, "operation_id": audit.operation_id, "all_history": data.all_history},
         )
         session.commit()
         session.refresh(audit)

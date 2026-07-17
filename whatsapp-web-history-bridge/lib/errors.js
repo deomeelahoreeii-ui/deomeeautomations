@@ -1,4 +1,4 @@
-const MAX_ERROR_TEXT = 6000;
+const MAX_ERROR_TEXT = 700;
 
 function safeJson(value) {
   try {
@@ -24,15 +24,12 @@ export function formatError(error, phase = null) {
   const details = errorDetails(error);
   const prefix = phase ? `${phase}: ` : "";
   const headline = `${prefix}${details.name === "Error" ? "" : `${details.name}: `}${details.message}`;
-  const stackLines = String(details.stack || "")
-    .split("\n")
-    .slice(1, 7)
-    .map((line) => line.trim())
-    .filter(Boolean);
   const cause = details.cause
     ? ` | caused by ${details.cause.name === "Error" ? "" : `${details.cause.name}: `}${details.cause.message}`
     : "";
-  const text = [headline, stackLines.length ? ` | ${stackLines.join(" | ")}` : "", cause].join("");
+  // Stack traces belong in structured server logs. This value crosses the
+  // NATS/API boundary and is safe to show to an operator in the web UI.
+  const text = `${headline}${cause}`;
   return text.slice(0, MAX_ERROR_TEXT);
 }
 

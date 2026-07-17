@@ -174,7 +174,11 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
         : `WhatsApp Web bridge is not ready (${runtime.status})${runtime.error ? `: ${runtime.error}` : ""}`;
       throw new Error(detail);
     }
-    const count = Math.max(1, Math.min(Number.parseInt(request.count, 10) || 50, config.maxHistoryCount));
+    const requestedCount = Number.parseInt(request.count, 10) || 50;
+    if (requestedCount < 1 || requestedCount > config.maxHistoryCount) {
+      throw new Error(`History count must be between 1 and ${config.maxHistoryCount}`);
+    }
+    const count = request.allHistory ? config.maxHistoryCount : requestedCount;
     const requestId = String(request.requestId || "").trim();
     if (!requestId) throw new Error("requestId is required");
     const remoteJids = [...new Set((request.remoteJids || []).map((value) => String(value || "").trim()).filter(Boolean))];
@@ -188,7 +192,7 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
       anchorTimestamp: request.beforeTimestamp || null,
     });
     setImmediate(() => void processRequest({ ...request, remoteJids }, item));
-    return responseItem({ ...item, operationId: `wwebjs:${requestId}` });
+    return responseItem({ ...item, allHistory: Boolean(request.allHistory), operationId: `wwebjs:${requestId}` });
   }
 
   async function downloadAttachment(request) {

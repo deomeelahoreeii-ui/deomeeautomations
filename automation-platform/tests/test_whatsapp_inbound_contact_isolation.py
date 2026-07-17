@@ -12,6 +12,7 @@ import whatsapp_gateway.models  # noqa: F401
 from automation_core.time import utcnow
 from whatsapp_gateway.identity_repair import repair_inbound_message_identities
 from whatsapp_gateway.inbound_service import find_matching_attachments
+from whatsapp_gateway.inbound.contact_workspace import contact_intake_workspace
 from whatsapp_gateway.models import (
     WhatsAppAccount,
     WhatsAppDirectoryContact,
@@ -189,6 +190,13 @@ def test_contact_scan_is_account_scoped_sender_scoped_and_read_only() -> None:
             chat_scope="direct_and_groups",
             media_types=["pdf"],
         )
+        workspace = contact_intake_workspace(
+            contact_a.id,
+            category=None,
+            page=1,
+            page_size=100,
+            session=session,
+        )
         session.refresh(direct_a)
 
     assert [message.message_id for _, message, _ in direct] == ["a-direct"]
@@ -197,6 +205,11 @@ def test_contact_scan_is_account_scoped_sender_scoped_and_read_only() -> None:
         "a-group",
     }
     assert direct_a.directory_contact_id is None
+    assert workspace["metrics"]["evidence_total"] == 2
+    assert workspace["metrics"]["run_count"] == 0
+    assert {
+        item["message_id"] for item in workspace["evidence"]["items"]
+    } == {"a-direct", "a-group"}
 
 
 def test_identity_repair_corrects_assigns_and_clears_unproved_ownership(
