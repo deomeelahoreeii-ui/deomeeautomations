@@ -1,2 +1,0 @@
-whatsapp-web-history-bridge/lib/errors.js
-whatsapp-web-history-bridge/test/jid.test.mjs

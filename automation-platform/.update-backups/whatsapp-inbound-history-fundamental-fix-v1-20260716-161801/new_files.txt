@@ -1,4 +1,0 @@
-whatsappbot/test/inbound-history-lifecycle.test.mjs
-automation-platform/packages/whatsapp_gateway/whatsapp_gateway/inbound/history_worker_status.py
-automation-platform/tests/test_whatsapp_inbound_history_ui_contract.py
-automation-platform/tests/test_whatsapp_inbound_history_runtime_contract.py

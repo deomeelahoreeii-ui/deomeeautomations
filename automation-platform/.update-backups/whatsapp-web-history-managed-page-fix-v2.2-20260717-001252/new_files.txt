@@ -1,2 +1,0 @@
-whatsapp-web-history-bridge/lib/page-session.js
-whatsapp-web-history-bridge/test/page-session.test.mjs
