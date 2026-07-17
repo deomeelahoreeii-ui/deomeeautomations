@@ -20,6 +20,15 @@ def test_dashboard_retires_direct_live_send_and_uses_safe_orchestration() -> Non
     assert "Start live send" not in source
 
 
+def test_dashboard_persists_and_restores_profile_selection() -> None:
+    source = DASHBOARD.read_text(encoding="utf-8")
+    assert 'profileSelectionKey = "antidengue.dashboard.dispatch-profile-ids.v1"' in source
+    assert "restoreProfileSelection();" in source
+    assert "persistProfileSelection();" in source
+    assert "executions[0].dispatch_profile_ids" in source
+    assert "void loadProfiles()" in source
+
+
 def test_schedule_and_run_history_navigation_is_present() -> None:
     layout = LAYOUT.read_text(encoding="utf-8")
     assert '"schedules", "Schedules", "/antidengue/schedules"' in layout

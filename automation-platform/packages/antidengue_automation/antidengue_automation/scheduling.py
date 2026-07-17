@@ -9,7 +9,8 @@ from typing import Iterable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException
-from sqlalchemy import select as sa_select, text
+from sqlalchemy import cast, select as sa_select, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
@@ -849,6 +850,17 @@ def lock_execution_scope(session: Session, scope: str) -> None:
     signed = raw if raw < 2**63 else raw - 2**64
     session.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": signed})
 
+
+def equivalent_profile_ids_clause(dialect_name: str, canonical_ids: list[str]):
+    profile_ids_column = AntiDengueScheduleExecution.dispatch_profile_ids
+    if dialect_name == "postgresql":
+        # The existing portable schema uses PostgreSQL JSON, which has no
+        # equality operator. JSONB has structural equality and preserves array
+        # order, so compare canonical selections through JSONB on PostgreSQL.
+        return cast(profile_ids_column, JSONB) == cast(canonical_ids, JSONB)
+    return profile_ids_column == canonical_ids
+
+
 def find_equivalent_active_execution(
     session: Session,
     *,
@@ -861,11 +873,13 @@ def find_equivalent_active_execution(
 ) -> AntiDengueScheduleExecution | None:
     profile_ids = normalize_dispatch_profile_ids(dispatch_profile_ids, dispatch_profile_id)
     canonical_ids = [str(value) for value in profile_ids]
+    dialect_name = session.bind.dialect.name if session.bind is not None else ""
+    profile_ids_match = equivalent_profile_ids_clause(dialect_name, canonical_ids)
     statement = (
         select(AntiDengueScheduleExecution)
         .where(
             AntiDengueScheduleExecution.status.in_(sorted(ACTIVE_EXECUTION_STATUSES)),
-            AntiDengueScheduleExecution.dispatch_profile_ids == canonical_ids,
+            profile_ids_match,
             AntiDengueScheduleExecution.dispatch_policy == dispatch_policy,
             AntiDengueScheduleExecution.login_mode == login_mode,
         )

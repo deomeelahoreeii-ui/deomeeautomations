@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.dialects import postgresql
 from sqlmodel import SQLModel, Session, create_engine, select
 
 import antidengue_automation.models  # noqa: F401
@@ -16,6 +17,7 @@ from antidengue_automation.models import AntiDengueScheduleExecution
 from antidengue_automation.scheduling import (
     cancel_execution,
     create_execution,
+    equivalent_profile_ids_clause,
     recover_orphaned_executions,
 )
 from automation_api.main import app
@@ -76,6 +78,13 @@ def memory_engine():
     )
     SQLModel.metadata.create_all(engine)
     return engine
+
+
+def test_postgresql_profile_selection_comparison_uses_jsonb_equality() -> None:
+    clause = equivalent_profile_ids_clause("postgresql", [str(uuid.uuid4()), str(uuid.uuid4())])
+    sql = str(clause.compile(dialect=postgresql.dialect()))
+    assert " AS JSONB) = CAST(" in sql
+    assert "dispatch_profile_ids" in sql
 
 
 def test_outbox_publishes_only_after_job_commit(monkeypatch) -> None:

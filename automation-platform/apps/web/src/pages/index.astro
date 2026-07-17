@@ -113,6 +113,29 @@ import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
     let profiles: any[] = [];
     const selectedProfileIds = new Set<string>();
     let profilesLoaded = false;
+    const profileSelectionKey = "antidengue.dashboard.dispatch-profile-ids.v1";
+    let hasPersistedProfileSelection = false;
+
+    function restoreProfileSelection() {
+      try {
+        const raw = localStorage.getItem(profileSelectionKey);
+        if (raw === null) return;
+        const stored = JSON.parse(raw);
+        if (Array.isArray(stored)) stored.filter((value) => typeof value === "string").forEach((value) => selectedProfileIds.add(value));
+        hasPersistedProfileSelection = true;
+      } catch {
+        selectedProfileIds.clear();
+      }
+    }
+
+    function persistProfileSelection() {
+      hasPersistedProfileSelection = true;
+      try {
+        localStorage.setItem(profileSelectionKey, JSON.stringify([...selectedProfileIds]));
+      } catch {
+        // The run remains usable when browser storage is unavailable.
+      }
+    }
 
     async function api(path: string, init?: RequestInit) {
       const response = await fetch(`${API}${path}`, {
@@ -145,6 +168,9 @@ import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
       const data = await api("/api/v1/whatsapp/previews/options");
       profiles = data.profiles;
       profilesLoaded = true;
+      const availableProfileIds = new Set(profiles.map((item) => item.id));
+      for (const id of selectedProfileIds) if (!availableProfileIds.has(id)) selectedProfileIds.delete(id);
+      if (hasPersistedProfileSelection || selectedProfileIds.size) persistProfileSelection();
       if (!data.profiles.length) {
         el("profile-options").innerHTML = "<p>No enabled AntiDengue routing profiles.</p>";
         el("profile-help").textContent = "Configure an enabled AntiDengue dispatch profile under WhatsApp Routing first.";
@@ -154,6 +180,7 @@ import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
       filter.innerHTML = '<option value="">All reports / wings</option>';
       for (const value of [...new Set(profiles.map((item) => `${item.report_type_name || "Report"} · ${item.wing_name || "All wings"}`))].sort()) filter.add(new Option(value, value));
       renderProfileOptions();
+      renderProfileSummary();
     }
 
     function visibleProfiles() {
@@ -170,7 +197,7 @@ import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
       for (const profile of visibleProfiles()) {
         const label = document.createElement("label"); label.className = "routing-profile-option";
         const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.className = "checkbox checkbox-sm"; checkbox.checked = selectedProfileIds.has(profile.id);
-        checkbox.addEventListener("change", () => { checkbox.checked ? selectedProfileIds.add(profile.id) : selectedProfileIds.delete(profile.id); renderProfileOptions(); renderProfileSummary(); });
+        checkbox.addEventListener("change", () => { checkbox.checked ? selectedProfileIds.add(profile.id) : selectedProfileIds.delete(profile.id); persistProfileSelection(); renderProfileOptions(); renderProfileSummary(); });
         const text = document.createElement("span"); text.textContent = `${profile.name} · ${profile.audience_name} · ${profile.target_count} target(s)`;
         label.append(checkbox, text); container.append(label);
       }
@@ -209,6 +236,12 @@ import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
     async function loadExecutions() {
       const data = await api("/api/v1/antidengue/executions?limit=30");
       executions = data.items;
+      if (!hasPersistedProfileSelection && executions.length) {
+        const latestProfileIds = executions[0].dispatch_profile_ids || [executions[0].dispatch_profile_id];
+        latestProfileIds.filter(Boolean).forEach((value: string) => selectedProfileIds.add(value));
+        if (selectedProfileIds.size) persistProfileSelection();
+        if (profilesLoaded) { renderProfileOptions(); renderProfileSummary(); }
+      }
       if (selectedExecutionId && !executions.some((item) => item.id === selectedExecutionId)) selectedExecutionId = null;
       if (!selectedExecutionId && executions.length) selectedExecutionId = executions[0].id;
       renderExecutionList();
@@ -374,9 +407,11 @@ import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
     el("profile-selector").addEventListener("toggle", () => { if ((el("profile-selector") as HTMLDetailsElement).open) void loadProfiles(); });
     el("profile-search").addEventListener("input", renderProfileOptions);
     el("profile-report-filter").addEventListener("change", renderProfileOptions);
-    el("profile-select-visible").addEventListener("click", () => { visibleProfiles().forEach((item) => selectedProfileIds.add(item.id)); renderProfileOptions(); renderProfileSummary(); });
-    el("profile-clear").addEventListener("click", () => { selectedProfileIds.clear(); renderProfileOptions(); renderProfileSummary(); });
+    el("profile-select-visible").addEventListener("click", () => { visibleProfiles().forEach((item) => selectedProfileIds.add(item.id)); persistProfileSelection(); renderProfileOptions(); renderProfileSummary(); });
+    el("profile-clear").addEventListener("click", () => { selectedProfileIds.clear(); persistProfileSelection(); renderProfileOptions(); renderProfileSummary(); });
     el("profile-refresh").addEventListener("click", () => void loadProfiles(true));
+    restoreProfileSelection();
+    void loadProfiles().catch((error) => { el("form-message").textContent = error instanceof Error ? error.message : "Could not load routing profiles"; });
     void refreshAll();
     document.addEventListener("visibilitychange", () => { if (!document.hidden) void refreshAll(); });
     addEventListener("beforeunload", () => { clearTimeout(pollTimer); eventSource?.close(); });
