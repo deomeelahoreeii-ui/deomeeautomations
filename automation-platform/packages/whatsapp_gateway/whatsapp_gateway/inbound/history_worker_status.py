@@ -10,6 +10,7 @@ from sqlmodel import Session
 
 from automation_core.config import Settings
 from automation_core.time import utcnow
+from whatsapp_gateway.inbound.batches import record_batch_event
 from whatsapp_gateway.models import WhatsAppInboundHistoryRequest
 
 WORKER_HISTORY_STATUSES = {
@@ -113,6 +114,18 @@ async def refresh_history_request_from_worker(
     if changed:
         item.updated_at = now
         session.add(item)
+        record_batch_event(
+            session,
+            batch_id=item.batch_id,
+            level=("error" if worker_status in {"failed", "timed_out"} else "info"),
+            event_type="history_worker_status",
+            message=f"WhatsApp Web history status: {worker_status}.",
+            details={
+                "messages_received": item.messages_received,
+                "attachments_discovered": item.attachments_discovered,
+                "error": item.error,
+            },
+        )
         session.commit()
         session.refresh(item)
     return changed

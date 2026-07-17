@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 
 from automation_core.time import utcnow
 from whatsapp_gateway.inbound_service import contact_message_filter
+from whatsapp_gateway.inbound.batches import record_batch_event
 from whatsapp_gateway.models import (
     WhatsAppDirectoryContact,
     WhatsAppInboundAttachment,
@@ -208,3 +209,17 @@ def record_history_progress(
     request.error = None
     request.updated_at = now
     session.add(request)
+    record_batch_event(
+        session,
+        batch_id=request.batch_id,
+        event_type=("history_file_received" if has_attachment else "history_message_received"),
+        message=(
+            f"Received historical file metadata ({request.attachments_discovered} file(s), {request.messages_received} message(s))."
+            if has_attachment
+            else f"Received historical message {request.messages_received}."
+        ),
+        details={
+            "messages_received": request.messages_received,
+            "attachments_discovered": request.attachments_discovered,
+        },
+    )

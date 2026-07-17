@@ -317,3 +317,64 @@
 [data-theme="automation-dark"] .inbound-download-link strong {
   color: #67c7d6;
 }
+
+/* Bundle 4B: focused inbound workspaces and batch ledger */
+.inbound-subnav { margin-bottom: 16px; }
+.inbound-workspace-grid { display: grid; grid-template-columns: minmax(380px, .9fr) minmax(460px, 1.1fr); gap: 16px; margin-bottom: 16px; }
+.inbound-fetch-card, .inbound-live-card { min-height: 500px; }
+.inbound-batch-identity { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0 14px; border: 1px solid #dfe6ed; border-radius: 9px; padding: 10px 12px; }
+.inbound-batch-identity span, .inbound-summary-grid span, .inbound-detail-facts span, .inbound-storage-health span { display: block; color: #8491a3; font-size: 8px; }
+.inbound-batch-identity strong { display: block; margin-top: 3px; font-size: 12px; overflow-wrap: anywhere; }
+.inbound-live-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.inbound-live-metrics strong { font-size: 18px; }
+.inbound-fetch-log { height: 310px; margin-top: 14px; }
+.inbound-scan-card { margin-bottom: 16px; }
+.inbound-scan-metrics { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.inbound-results-table { margin-top: 14px; max-height: 520px; overflow: auto; }
+.inbound-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.inbound-summary-grid article { padding: 15px; }
+.inbound-summary-grid strong { display: block; margin-top: 5px; font-size: 24px; }
+.inbound-batch-toolbar { display: grid; grid-template-columns: minmax(240px, 1fr) 220px auto; gap: 10px; margin: 14px 0; }
+.inbound-batch-header { margin-bottom: 16px; }
+.inbound-batch-header h2 { margin-bottom: 4px; }
+.inbound-batch-header p { margin: 0; color: #718095; font-size: 10px; }
+.inbound-detail-actions { display: flex; align-items: center; gap: 8px; }
+.inbound-detail-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 15px; }
+.inbound-detail-facts > div, .inbound-storage-health > div { border: 1px solid #dfe6ed; border-radius: 8px; padding: 10px 12px; }
+.inbound-detail-facts strong, .inbound-storage-health strong { display: block; margin-top: 4px; font-size: 10px; overflow-wrap: anywhere; }
+.inbound-detail-summary { margin-top: 0; }
+.inbound-detail-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(320px, .7fr); gap: 16px; margin-bottom: 16px; }
+.inbound-batch-log { height: 390px; }
+.inbound-definition-list { display: grid; gap: 10px; margin: 12px 0 0; }
+.inbound-definition-list > div { border-bottom: 1px solid #e5ebef; padding-bottom: 9px; }
+.inbound-definition-list dt { color: #8491a3; font-size: 8px; }
+.inbound-definition-list dd { margin: 4px 0 0; font-size: 9px; overflow-wrap: anywhere; }
+.inbound-storage-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+.inbound-storage-health { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.inbound-help-copy { color: #718095; font-size: 10px; line-height: 1.7; }
+.inbound-command { overflow: auto; border-radius: 9px; background: #171c21; padding: 14px; color: #d9e2e8; font: 9px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+.batch-status-completed { color: #14724f; }
+.batch-status-failed, .batch-status-completed_with_errors { color: #b64242; }
+.batch-status-fetching, .batch-status-storing { color: #166f7e; }
+
+@media (max-width: 1100px) {
+  .inbound-workspace-grid, .inbound-detail-grid, .inbound-storage-grid { grid-template-columns: 1fr; }
+  .inbound-fetch-card, .inbound-live-card { min-height: 0; }
+  .inbound-scan-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .inbound-summary-grid, .inbound-detail-facts, .inbound-live-metrics, .inbound-storage-health { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .inbound-batch-toolbar { grid-template-columns: 1fr; }
+  .inbound-scan-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+[data-theme="automation-dark"] .inbound-batch-identity,
+[data-theme="automation-dark"] .inbound-detail-facts > div,
+[data-theme="automation-dark"] .inbound-storage-health > div { border-color: #334155; }
+[data-theme="automation-dark"] .inbound-definition-list > div { border-color: #334155; }
+[data-theme="automation-dark"] .inbound-help-copy,
+[data-theme="automation-dark"] .inbound-batch-header p,
+[data-theme="automation-dark"] .inbound-batch-identity span,
+[data-theme="automation-dark"] .inbound-summary-grid span,
+[data-theme="automation-dark"] .inbound-detail-facts span,
+[data-theme="automation-dark"] .inbound-storage-health span,
+[data-theme="automation-dark"] .inbound-definition-list dt { color: #94a3b8; }

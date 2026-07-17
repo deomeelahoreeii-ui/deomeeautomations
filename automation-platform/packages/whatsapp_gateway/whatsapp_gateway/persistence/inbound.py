@@ -201,6 +201,21 @@ class WhatsAppInboundBatchItem(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow, index=True)
 
 
+class WhatsAppInboundBatchEvent(SQLModel, table=True):
+    __tablename__ = "whatsapp_inbound_batch_events"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    batch_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_batches.id", index=True)
+    batch_item_id: uuid.UUID | None = Field(
+        default=None, foreign_key="whatsapp_inbound_batch_items.id", index=True
+    )
+    level: str = Field(default="info", index=True)
+    event_type: str = Field(index=True)
+    message: str = Field(sa_column=Column(Text))
+    details_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
 class WhatsAppInboundExportRun(SQLModel, table=True):
     __tablename__ = "whatsapp_inbound_export_runs"
     __table_args__ = (
@@ -272,6 +287,7 @@ __all__ = [
     'WhatsAppInboundStoredObject',
     'WhatsAppInboundBatch',
     'WhatsAppInboundBatchItem',
+    'WhatsAppInboundBatchEvent',
     'WhatsAppInboundExportRun',
     'WhatsAppInboundExportItem',
 ]

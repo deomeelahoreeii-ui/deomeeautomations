@@ -510,6 +510,8 @@ def test_requests_contact_history_from_bound_worker(monkeypatch) -> None:
     monkeypatch.setattr("whatsapp_gateway.inbound_api.nats.connect", fake_connect)
     settings = Settings(
         whatsapp_nats_url="nats://127.0.0.1:4222",
+        whatsapp_inbound_history_provider="wwebjs",
+        whatsapp_web_history_subject="whatsapp.web.inbound.history",
         whatsapp_inbound_history_subject="whatsapp.worker.inbound.history",
         whatsapp_inbound_history_timeout_seconds=15,
     )
@@ -523,6 +525,6 @@ def test_requests_contact_history_from_bound_worker(monkeypatch) -> None:
         )
 
     assert result["accepted"] is True
-    assert requests[0][0] == "whatsapp.worker.inbound.history.default"
+    assert requests[0][0] == "whatsapp.web.inbound.history.default"
     assert requests[0][1]["remoteJids"] == ["923360249999@s.whatsapp.net"]
     assert requests[0][1]["count"] == 50

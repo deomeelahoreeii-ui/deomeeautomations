@@ -23,6 +23,7 @@ from whatsapp_gateway.models import (
     WhatsAppInboundAttachment,
     WhatsAppInboundBatch,
     WhatsAppInboundBatchItem,
+    WhatsAppInboundBatchEvent,
     WhatsAppInboundStoredObject,
 )
 
@@ -39,6 +40,16 @@ class FakeNatsClient:
     async def request(self, _subject, payload, timeout):
         request = json.loads(payload.decode("utf-8"))
         self.requests.append(request)
+        if request.get("action") == "history_status":
+            return FakeNatsMessage(
+                {
+                    "requestId": request["requestId"],
+                    "workerId": "default",
+                    "status": "syncing",
+                    "messagesReceived": 1,
+                    "attachmentsDiscovered": 1,
+                }
+            )
         return FakeNatsMessage(
             {
                 "accepted": True,
@@ -205,10 +216,19 @@ def test_history_request_creates_a_trackable_batch_and_links_files(tmp_path, mon
             assert batch["files_discovered"] == 1
             assert len(batch["items"]) == 1
             assert batch["items"][0]["original_filename"] == "complaint.pdf"
+            assert batch["contact_name"] == "Faheem Bukhari"
+
+            events_response = client.get(
+                f"/api/v1/whatsapp/inbound/batches/{history['batch_id']}/events"
+            )
+            assert events_response.status_code == 200, events_response.text
+            event_types = {item["event_type"] for item in events_response.json()["items"]}
+            assert {"batch_created", "history_request_accepted", "file_discovered", "history_file_received"}.issubset(event_types)
 
         with Session(engine) as session:
             assert len(session.exec(select(WhatsAppInboundBatch)).all()) == 1
             assert len(session.exec(select(WhatsAppInboundBatchItem)).all()) == 1
+            assert len(session.exec(select(WhatsAppInboundBatchEvent)).all()) >= 4
     finally:
         app.dependency_overrides.clear()
 

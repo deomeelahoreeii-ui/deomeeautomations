@@ -8,7 +8,14 @@ from whatsapp_gateway.inbound.accounts import (
     resolve_contact_id as _resolve_contact_id,
 )
 from whatsapp_gateway.inbound.authentication import verify_worker_token as _verify_worker_token
-from whatsapp_gateway.inbound.batch_api import list_inbound_batches, object_storage_status, read_inbound_batch
+from whatsapp_gateway.inbound.batch_api import (
+    download_inbound_batch_item,
+    list_inbound_batch_events,
+    list_inbound_batches,
+    object_storage_status,
+    read_inbound_batch,
+    retry_inbound_batch_storage,
+)
 from whatsapp_gateway.inbound.export_api import (
     create_inbound_export,
     list_inbound_exports,
@@ -58,6 +65,9 @@ router.get("/history/bridge/status")(history_bridge_status)
 router.get("/storage/status")(object_storage_status)
 router.get("/batches")(list_inbound_batches)
 router.get("/batches/{batch_id}")(read_inbound_batch)
+router.get("/batches/{batch_id}/events")(list_inbound_batch_events)
+router.get("/batches/{batch_id}/items/{item_id}/download")(download_inbound_batch_item)
+router.post("/batches/{batch_id}/retry-storage")(retry_inbound_batch_storage)
 router.post("/history/request", status_code=status.HTTP_202_ACCEPTED)(request_inbound_history)
 router.get("/history/requests")(list_inbound_history_requests)
 router.get("/history/requests/{request_id}")(get_inbound_history_request)

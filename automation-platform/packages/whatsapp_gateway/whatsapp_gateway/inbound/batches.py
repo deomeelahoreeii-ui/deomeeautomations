@@ -17,6 +17,7 @@ from whatsapp_gateway.models import (
     WhatsAppInboundAttachment,
     WhatsAppInboundBatch,
     WhatsAppInboundBatchItem,
+    WhatsAppInboundBatchEvent,
     WhatsAppInboundHistoryRequest,
     WhatsAppInboundMessage,
     WhatsAppInboundStoredObject,
@@ -25,6 +26,45 @@ from whatsapp_gateway.models import (
 BATCH_TERMINAL_STATUSES = {"completed", "completed_with_errors", "failed", "cancelled"}
 ITEM_STORED_STATUSES = {"stored", "already_stored"}
 ITEM_FAILED_STATUSES = {"failed", "unsupported"}
+
+
+def record_batch_event(
+    session: Session,
+    *,
+    batch_id: uuid.UUID | None,
+    event_type: str,
+    message: str,
+    level: str = "info",
+    batch_item_id: uuid.UUID | None = None,
+    details: dict[str, Any] | None = None,
+) -> WhatsAppInboundBatchEvent | None:
+    if batch_id is None or session.get(WhatsAppInboundBatch, batch_id) is None:
+        return None
+    event = WhatsAppInboundBatchEvent(
+        batch_id=batch_id,
+        batch_item_id=batch_item_id,
+        level=level,
+        event_type=event_type,
+        message=message,
+        details_json=details or {},
+        created_at=utcnow(),
+    )
+    session.add(event)
+    session.flush()
+    return event
+
+
+def serialize_batch_event(event: WhatsAppInboundBatchEvent) -> dict[str, Any]:
+    return {
+        "id": str(event.id),
+        "batch_id": str(event.batch_id),
+        "batch_item_id": str(event.batch_item_id) if event.batch_item_id else None,
+        "level": event.level,
+        "event_type": event.event_type,
+        "message": event.message,
+        "details": event.details_json or {},
+        "created_at": event.created_at,
+    }
 
 
 def new_batch_code(now: datetime | None = None, *, prefix: str = "WAB") -> str:
@@ -75,6 +115,13 @@ def create_history_batch(
     )
     session.add(batch)
     session.flush()
+    record_batch_event(
+        session,
+        batch_id=batch.id,
+        event_type="batch_created",
+        message=f"Created inbound batch {batch.batch_code} for {requested_count} older messages.",
+        details={"provider": provider, "remote_jid": remote_jid, "requested_count": requested_count},
+    )
     return batch
 
 
@@ -179,6 +226,19 @@ def register_batch_item(
     batch.updated_at = now
     session.add(batch)
     session.flush()
+    record_batch_event(
+        session,
+        batch_id=batch_id,
+        batch_item_id=item.id,
+        event_type="file_discovered",
+        message=f"Discovered file: {attachment.original_filename or attachment.message_key}",
+        details={
+            "attachment_id": str(attachment.id),
+            "message_id": str(message.id),
+            "mime_type": attachment.mime_type,
+            "message_timestamp": str(message.message_timestamp),
+        },
+    )
     return item
 
 
@@ -253,6 +313,15 @@ def store_attachment_object(
             item.updated_at = now
             session.add(item)
         session.add(attachment)
+        for item in batch_items:
+            record_batch_event(
+                session,
+                batch_id=item.batch_id,
+                batch_item_id=item.id,
+                level="warning",
+                event_type="storage_pending",
+                message=f"Archived locally; object storage is disabled: {item.original_filename or attachment.message_key}",
+            )
         return {"enabled": False, "stored": False, "reused": False}
 
     if not attachment.actual_sha256 or attachment.actual_size is None:
@@ -272,6 +341,15 @@ def store_attachment_object(
     attachment.storage_error = None
     session.add(attachment)
     session.flush()
+    for item in batch_items:
+        record_batch_event(
+            session,
+            batch_id=item.batch_id,
+            batch_item_id=item.id,
+            event_type="object_upload_started",
+            message=f"Uploading to object storage: {item.original_filename or attachment.message_key}",
+            details={"object_key": object_key, "size_bytes": attachment.actual_size},
+        )
 
     metadata = {
         "attachment_id": str(attachment.id),
@@ -305,6 +383,19 @@ def store_attachment_object(
             item.updated_at = now
             session.add(item)
         session.flush()
+        for item in batch_items:
+            record_batch_event(
+                session,
+                batch_id=item.batch_id,
+                batch_item_id=item.id,
+                event_type=("object_reused" if reused else "object_stored"),
+                message=(
+                    f"Reused existing object: {item.original_filename or attachment.message_key}"
+                    if reused
+                    else f"Stored object: {item.original_filename or attachment.message_key}"
+                ),
+                details={"bucket": result.bucket, "object_key": result.object_key, "sha256": result.sha256},
+            )
         return {
             "enabled": True,
             "stored": True,
@@ -322,6 +413,14 @@ def store_attachment_object(
             item.error = str(exc)
             item.updated_at = now
             session.add(item)
+            record_batch_event(
+                session,
+                batch_id=item.batch_id,
+                batch_item_id=item.id,
+                level="error",
+                event_type="object_storage_failed",
+                message=f"Object storage failed for {item.original_filename or attachment.message_key}: {exc}",
+            )
         raise
 
 
@@ -353,6 +452,7 @@ def reconcile_batch(
     ).first()
     items = _batch_items(session, batch.id)
     now = utcnow()
+    previous_status = batch.status
     batch.files_discovered = len(items)
     batch.files_stored = sum(item.status == "stored" for item in items)
     batch.files_reused = sum(item.status == "already_stored" for item in items)
@@ -380,6 +480,22 @@ def reconcile_batch(
     batch.updated_at = now
     session.add(batch)
     session.flush()
+    if batch.status != previous_status:
+        level = "error" if batch.status == "failed" else ("warning" if batch.status == "completed_with_errors" else "info")
+        record_batch_event(
+            session,
+            batch_id=batch.id,
+            level=level,
+            event_type="batch_status_changed",
+            message=f"Batch status changed from {previous_status} to {batch.status}.",
+            details={
+                "messages_discovered": batch.messages_discovered,
+                "files_discovered": batch.files_discovered,
+                "files_stored": batch.files_stored,
+                "files_reused": batch.files_reused,
+                "files_failed": batch.files_failed,
+            },
+        )
     if settings and batch.status in BATCH_TERMINAL_STATUSES and not batch.manifest_object_key:
         write_batch_manifest(session, batch=batch, items=items, settings=settings)
     return batch

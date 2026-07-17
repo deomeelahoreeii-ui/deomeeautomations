@@ -12,6 +12,9 @@ NODE_BIN="${NODE_BIN:-/home/ahmad/.nvm/versions/node/v24.15.0/bin}"
 API_PORT="${API_PORT:-8020}"
 WEB_PORT="${WEB_PORT:-4321}"
 pids=()
+bridge_started_by_dev=false
+WWEBJS_METADATA_PATH=""
+SNAPSHOT_MANAGER="$ROOT/scripts/manage_whatsapp_web_snapshot.py"
 
 info() {
   printf '\n==> %s\n' "$*"
@@ -32,6 +35,10 @@ cleanup() {
       kill "$pid" 2>/dev/null || true
     done
     wait "${pids[@]}" 2>/dev/null || true
+  fi
+  if [[ "$bridge_started_by_dev" == true && -n "$WWEBJS_METADATA_PATH" && -f "$SNAPSHOT_MANAGER" ]]; then
+    "$UV" run python "$SNAPSHOT_MANAGER" stop \
+      --metadata "$WWEBJS_METADATA_PATH" --timeout 8 >/dev/null 2>&1 || true
   fi
   exit "$status"
 }
@@ -349,7 +356,7 @@ stop_existing_whatsapp_web_bridge() {
   fail "The incompatible whatsapp-web.js bridge did not stop. Stop PID(s) ${bridge_pids[*]} manually."
 }
 
-check_whatsapp_web_profile_snapshot() {
+validate_whatsapp_web_profile_snapshot() {
   local mode metadata_path
   mode="$(bridge_env_value WWEBJS_MODE visible_profile)"
   [[ "$mode" == "visible_profile" ]] || {
@@ -357,8 +364,7 @@ check_whatsapp_web_profile_snapshot() {
 
 ERROR: WWEBJS_MODE=$mode is not permitted for normal historical retrieval.
 
-The browser_url implementation is preserved, but whatsapp-web.js creates another tab when it attaches,
-which caused the detached-frame failure. Use the managed one-page profile mode:
+Use the managed one-page profile mode:
   1. Set WWEBJS_MODE=visible_profile in $WWEBJS_DIR/.env
   2. Close normal Brave once and run:
        cd "$WWEBJS_DIR"
@@ -379,34 +385,23 @@ Close normal Brave once, then run:
   cd "$WWEBJS_DIR"
   ./scripts/launch-brave-debug.sh
 
-The script copies the selected Brave profile but does not launch another browser.
-After it completes, run this dev.sh again; whatsapp-web.js will launch and own one Brave page.
+After it completes, run dev.sh again; whatsapp-web.js will launch and own one Brave page.
 MSG
     exit 1
   fi
+  [[ -f "$SNAPSHOT_MANAGER" ]] || fail "Snapshot lifecycle helper was not found: $SNAPSHOT_MANAGER"
+  WWEBJS_METADATA_PATH="$metadata_path"
+  "$UV" run python "$SNAPSHOT_MANAGER" validate --metadata "$WWEBJS_METADATA_PATH"
+}
 
-  METADATA_PATH="$metadata_path" "$UV" run python - <<'PYPROFILE'
-import json
-import os
-from pathlib import Path
-
-metadata_path = Path(os.environ["METADATA_PATH"])
-data = json.loads(metadata_path.read_text(encoding="utf-8"))
-root = Path(str(data.get("userDataDir") or "")).expanduser()
-profile = str(data.get("profileDirectory") or "").strip()
-if not root.is_dir() or not profile or not (root / profile).is_dir():
-    raise SystemExit(
-        f"Visible-profile metadata points to a missing snapshot: root={root}, profile={profile!r}"
-    )
-locks = [root / name for name in ("SingletonCookie", "SingletonLock", "SingletonSocket")]
-locks = [path for path in locks if path.exists()]
-if locks:
-    raise SystemExit(
-        "The private snapshot is already open. Stop the previous bridge/managed Brave window first: "
-        + ", ".join(map(str, locks))
-    )
-print(f"Visible-profile snapshot ready: {root / profile}")
-PYPROFILE
+prepare_whatsapp_web_snapshot_for_start() {
+  [[ -n "$WWEBJS_METADATA_PATH" ]] || fail "Visible-profile metadata path was not initialized."
+  # Any browser still using this private snapshot is orphaned at this point:
+  # a healthy existing bridge was already checked and would have been reused.
+  "$UV" run python "$SNAPSHOT_MANAGER" stop \
+    --metadata "$WWEBJS_METADATA_PATH" --timeout 8
+  "$UV" run python "$SNAPSHOT_MANAGER" cleanup-stale \
+    --metadata "$WWEBJS_METADATA_PATH"
 }
 
 print_whatsapp_web_bridge_status() {
@@ -505,7 +500,7 @@ if [[ -z "$configured_bridge_token" || "$configured_bridge_token" == "change-me"
   fail "WWEBJS_PLATFORM_TOKEN is not configured. Set it to the same value as WA_PLATFORM_INGEST_TOKEN in whatsappbot/.env."
 fi
 
-check_whatsapp_web_profile_snapshot
+validate_whatsapp_web_profile_snapshot
 
 info "Synchronizing Python dependencies"
 "$UV" sync
@@ -638,16 +633,20 @@ fi
 if whatsapp_web_bridge_responder_ready; then
   echo "An existing whatsapp-web.js history bridge protocol v3 is running; it will be reused."
 else
-  if whatsapp_web_bridge_any_responder; then
-    info "Restarting an older or incompatible whatsapp-web.js history bridge"
+  mapfile -t existing_bridge_pids < <(find_running_whatsapp_web_bridge_pids)
+  if whatsapp_web_bridge_any_responder || ((${#existing_bridge_pids[@]})); then
+    info "Stopping an older, unresponsive, or incompatible whatsapp-web.js bridge"
     stop_existing_whatsapp_web_bridge
   fi
+  info "Preparing the managed WhatsApp Web browser snapshot"
+  prepare_whatsapp_web_snapshot_for_start
   info "Starting whatsapp-web.js history bridge protocol v3"
   (
     cd "$WWEBJS_DIR"
-    exec "${PNPM[@]}" start
+    exec node bridge.js
   ) &
   pids+=("$!")
+  bridge_started_by_dev=true
 fi
 
 info "Starting Astro web application"

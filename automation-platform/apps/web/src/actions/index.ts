@@ -342,6 +342,40 @@ export const server = {
       input: z.object({ id: z.string().uuid() }),
       handler: ({ id }) => api(`/api/v1/whatsapp/inbound/history/requests/${id}`),
     }),
+    inboundBatches: defineAction({
+      input: z.object({
+        contactId: z.string().uuid().optional(),
+        status: z.string().optional(),
+        search: z.string().optional(),
+        limit: z.number().int().min(1).max(200).default(50),
+      }),
+      handler: (input) => {
+        const params = new URLSearchParams({ limit: String(input.limit) });
+        if (input.contactId) params.set("contact_id", input.contactId);
+        if (input.status) params.set("status", input.status);
+        if (input.search) params.set("search", input.search);
+        return api(`/api/v1/whatsapp/inbound/batches?${params}`);
+      },
+    }),
+    inboundBatch: defineAction({
+      input: z.object({ id: z.string().uuid() }),
+      handler: ({ id }) => api(`/api/v1/whatsapp/inbound/batches/${id}`),
+    }),
+    inboundBatchEvents: defineAction({
+      input: z.object({ id: z.string().uuid(), after: z.string().optional(), limit: z.number().int().min(1).max(1000).default(250) }),
+      handler: ({ id, after, limit }) => {
+        const params = new URLSearchParams({ limit: String(limit) });
+        if (after) params.set("after", after);
+        return api(`/api/v1/whatsapp/inbound/batches/${id}/events?${params}`);
+      },
+    }),
+    retryInboundBatchStorage: defineAction({
+      input: z.object({ id: z.string().uuid() }),
+      handler: ({ id }) => api(`/api/v1/whatsapp/inbound/batches/${id}/retry-storage`, { method: "POST" }),
+    }),
+    inboundStorageStatus: defineAction({
+      handler: () => api("/api/v1/whatsapp/inbound/storage/status"),
+    }),
     inboundExportPreview: defineAction({
       input: z.object({
         contact_id: z.string().uuid(),
