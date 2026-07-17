@@ -5,8 +5,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import event
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, Session, create_engine, select
 
 import antidengue_automation.models  # noqa: F401
@@ -29,9 +30,11 @@ from whatsapp_gateway.models import (
     WhatsAppAccount,
     WhatsAppApplication,
     WhatsAppAudience,
+    WhatsAppDispatchPreview,
     WhatsAppDispatchProfile,
     WhatsAppReportType,
 )
+from whatsapp_gateway.previews.maintenance import delete_preview_records
 
 
 def seed_profile(session: Session) -> WhatsAppDispatchProfile:
@@ -80,11 +83,82 @@ def memory_engine():
     return engine
 
 
+def foreign_key_engine():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    @event.listens_for(engine, "connect")
+    def enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    SQLModel.metadata.create_all(engine)
+    return engine
+
+
 def test_postgresql_profile_selection_comparison_uses_jsonb_equality() -> None:
     clause = equivalent_profile_ids_clause("postgresql", [str(uuid.uuid4()), str(uuid.uuid4())])
     sql = str(clause.compile(dialect=postgresql.dialect()))
     assert " AS JSONB) = CAST(" in sql
     assert "dispatch_profile_ids" in sql
+
+
+def test_deleting_unapproved_preview_preserves_execution_and_clears_link() -> None:
+    engine = foreign_key_engine()
+    with Session(engine) as session:
+        profile = seed_profile(session)
+        source_job = Job(
+            type=JobType.antidengue_report.value,
+            title="Preview source",
+            status=JobStatus.succeeded.value,
+            parameters={},
+        )
+        session.add(source_job)
+        session.flush()
+        preview = WhatsAppDispatchPreview(
+            preview_key=f"AD-{uuid.uuid4()}",
+            application_id=profile.application_id,
+            source_job_id=source_job.id,
+            dispatch_profile_id=profile.id,
+            profile_version=profile.version,
+            application_name="AntiDengue",
+            report_type_name="School activity",
+            audience_name="All routes",
+            profile_name=profile.name,
+            account_name="Primary",
+        )
+        session.add(preview)
+        session.flush()
+        execution = AntiDengueScheduleExecution(
+            execution_key=f"manual:{uuid.uuid4()}",
+            execution_code=f"ADS-{uuid.uuid4().hex[:12]}",
+            trigger_type="manual_preview",
+            scheduled_for=datetime.now(UTC),
+            status="preview_ready",
+            dispatch_policy="preview_only",
+            login_mode="auto",
+            dispatch_profile_id=profile.id,
+            dispatch_profile_ids=[str(profile.id)],
+            preview_id=preview.id,
+            preview_summary={"delivery_count": 0},
+        )
+        session.add(execution)
+        session.commit()
+        preview_id, execution_id = preview.id, execution.id
+
+        delete_preview_records(session, preview)
+        session.commit()
+
+    with Session(engine) as session:
+        retained = session.get(AntiDengueScheduleExecution, execution_id)
+        assert session.get(WhatsAppDispatchPreview, preview_id) is None
+        assert retained is not None
+        assert retained.preview_id is None
+        assert retained.preview_summary == {"delivery_count": 0}
 
 
 def test_outbox_publishes_only_after_job_commit(monkeypatch) -> None:

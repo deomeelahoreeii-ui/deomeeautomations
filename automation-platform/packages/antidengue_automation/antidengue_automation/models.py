@@ -140,7 +140,13 @@ class AntiDengueScheduleExecution(SQLModel, table=True):
     source_job_id: uuid.UUID | None = Field(default=None, foreign_key="jobs.id", index=True)
     preview_job_id: uuid.UUID | None = Field(default=None, foreign_key="jobs.id", index=True)
     preview_id: uuid.UUID | None = Field(
-        default=None, foreign_key="whatsapp_dispatch_previews.id", index=True
+        default=None,
+        sa_column=Column(
+            Uuid,
+            ForeignKey("whatsapp_dispatch_previews.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
     )
     send_job_id: uuid.UUID | None = Field(default=None, foreign_key="jobs.id", index=True)
     source_summary: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
