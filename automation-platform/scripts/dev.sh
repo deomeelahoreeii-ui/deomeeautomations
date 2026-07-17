@@ -100,6 +100,58 @@ find_running_platform_worker_pids() {
   done
 }
 
+find_running_platform_stack_pids() {
+  local process_dir=""
+  local process_pid=""
+  local process_cwd=""
+  local process_args=""
+
+  for process_dir in /proc/[0-9]*; do
+    [[ -r "$process_dir/cmdline" ]] || continue
+    process_pid="${process_dir##*/}"
+    [[ "$process_pid" == "$$" ]] && continue
+    process_cwd="$(readlink "$process_dir/cwd" 2>/dev/null || true)"
+    process_args="$(tr '\0' ' ' < "$process_dir/cmdline" 2>/dev/null || true)"
+    if [[ "$process_cwd" == "$ROOT" ]]; then
+      if [[ "$process_args" == *"uvicorn automation_api.main:app"* \
+        || "$process_args" == *"antidengue_automation.scheduler_service"* \
+        || ( "$process_args" == *celery* && "$process_args" == *automation_worker.main.celery_app* ) ]]; then
+        printf '%s\n' "$process_pid"
+      fi
+    elif [[ "$process_cwd" == "$WEB_DIR" ]]; then
+      if [[ "$process_args" == *"/astro dev"* || "$process_args" == *"npm run dev"* ]]; then
+        printf '%s\n' "$process_pid"
+      fi
+    fi
+  done
+}
+
+stop_existing_platform_stack() {
+  local -a stack_pids=()
+  mapfile -t stack_pids < <(find_running_platform_stack_pids)
+  ((${#stack_pids[@]})) || return 0
+
+  echo "Restarting existing Automation Platform stack; stopping PID(s): ${stack_pids[*]}"
+  kill -TERM "${stack_pids[@]}" 2>/dev/null || true
+  for _ in {1..40}; do
+    mapfile -t stack_pids < <(find_running_platform_stack_pids)
+    if ((${#stack_pids[@]} == 0)) && ! port_in_use "$API_PORT" && ! port_in_use "$WEB_PORT"; then
+      return 0
+    fi
+    sleep 0.25
+  done
+
+  mapfile -t stack_pids < <(find_running_platform_stack_pids)
+  if ((${#stack_pids[@]})); then
+    echo "Force-stopping unresponsive Automation Platform PID(s): ${stack_pids[*]}"
+    kill -KILL "${stack_pids[@]}" 2>/dev/null || true
+  fi
+  for _ in {1..20}; do
+    ! port_in_use "$API_PORT" && ! port_in_use "$WEB_PORT" && return 0
+    sleep 0.25
+  done
+}
+
 stop_existing_platform_workers() {
   local -a stale_pids=()
   mapfile -t stale_pids < <(find_running_platform_worker_pids)
@@ -499,8 +551,9 @@ fi
 command -v node >/dev/null 2>&1 || fail "Node.js was not found in $NODE_BIN or PATH"
 command -v npm >/dev/null 2>&1 || fail "npm was not found"
 
-port_in_use "$API_PORT" && fail "API port $API_PORT is already in use. Stop the old development stack first."
-port_in_use "$WEB_PORT" && fail "Web port $WEB_PORT is already in use. Stop the old development stack first."
+stop_existing_platform_stack
+port_in_use "$API_PORT" && fail "API port $API_PORT is used by a process outside this project."
+port_in_use "$WEB_PORT" && fail "Web port $WEB_PORT is used by a process outside this project."
 
 if [[ ! -f .env ]]; then
   [[ -f .env.example ]] || fail ".env and .env.example are both missing"
@@ -690,7 +743,10 @@ fi
 info "Starting Astro web application"
 (
   cd "$WEB_DIR"
-  exec npm run dev -- --host 0.0.0.0 --port "$WEB_PORT"
+  # Astro otherwise daemonizes automatically when it detects an AI-agent
+  # environment. Keep it in the foreground so this script supervises the
+  # real web-server lifetime just as it does every other service.
+  exec env ASTRO_DEV_BACKGROUND=0 npm run dev -- --host 0.0.0.0 --port "$WEB_PORT"
 ) &
 pids+=("$!")
 

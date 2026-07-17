@@ -39,3 +39,15 @@ def test_dev_starts_server_owned_scheduler() -> None:
     source = DEV.read_text(encoding="utf-8")
     assert "antidengue_automation.scheduler_service" in source
     assert "PostgreSQL-backed AntiDengue scheduler" in source
+
+
+def test_dev_restarts_owned_stack_before_port_validation() -> None:
+    source = DEV.read_text(encoding="utf-8")
+    call = source.index("\nstop_existing_platform_stack\n")
+    api_check = source.index('port_in_use "$API_PORT" && fail')
+    web_check = source.index('port_in_use "$WEB_PORT" && fail')
+    assert call < api_check < web_check
+    assert 'process_cwd" == "$ROOT"' in source
+    assert 'process_cwd" == "$WEB_DIR"' in source
+    assert 'process_args" == *"/astro dev"*' in source
+    assert "exec env ASTRO_DEV_BACKGROUND=0 npm run dev" in source
