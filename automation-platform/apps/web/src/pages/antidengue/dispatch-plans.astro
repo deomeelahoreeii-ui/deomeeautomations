@@ -3,79 +3,124 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
 ---
 
 <AntiDengueLayout
-  title="AntiDengue dispatch plans"
-  description="Review AntiDengue-owned exact send plans backed by the shared WhatsApp preview and delivery records."
+  title="AntiDengue runs & plans"
+  description="Follow each run from report generation to its frozen WhatsApp plan and delivery outcome."
   page="dispatch-plans"
 >
-  <button class="btn btn-sm btn-ghost" id="refresh-button" type="button" slot="actions">↻ Refresh</button>
+  <div class="page-actions" slot="actions"><a class="btn btn-sm" href="/antidengue/run-history">Detailed run audit</a><button class="btn btn-sm btn-ghost" id="refresh-button" type="button">↻ Refresh</button></div>
 
-  <section class="panel">
-    <div class="panel-heading">
-      <div><p class="eyebrow">Exact send plans</p><h2>AntiDengue dispatch workspace</h2></div>
-      <span class="environment-pill" id="plan-total">Loading…</span>
+  <section class="plan-overview" aria-label="Run and plan summary">
+    <article><span>Exact plans</span><strong id="total-plans">—</strong><small>Frozen and auditable</small></article>
+    <article class="attention"><span>Need attention</span><strong id="attention-plans">—</strong><small>Blocked or failed</small></article>
+    <article><span>Ready to review</span><strong id="ready-plans">—</strong><small>Has planned deliveries</small></article>
+    <article><span>Delivered</span><strong id="delivered-total">—</strong><small>Confirmed deliveries</small></article>
+  </section>
+
+  <section class="panel plan-workspace-panel">
+    <div class="panel-heading plan-workspace-heading">
+      <div><p class="eyebrow">Execution-owned exact plans</p><h2>Runs and their next action</h2><p class="field-help">A plan can be sent only when it contains at least one delivery and has no blockers.</p></div>
+      <div class="routing-toolbar"><input class="input input-bordered input-sm" id="plan-search" type="search" placeholder="Search run or routing profile…" /><select class="select select-bordered select-sm" id="plan-filter"><option value="all">All plans</option><option value="attention">Needs attention</option><option value="ready">Ready to review</option><option value="delivery">Delivery activity</option><option value="empty">Nothing to send</option></select></div>
     </div>
-    <p class="field-help">These are the same immutable records used by the global WhatsApp Preview &amp; Approval workspace.</p>
-    <div class="table-wrap">
-      <table class="table">
-        <thead><tr><th>Execution</th><th>Routing / report</th><th>Plan</th><th>Delivery totals</th><th>Actions</th></tr></thead>
-        <tbody id="plan-list"><tr><td colspan="5">Loading exact send plans…</td></tr></tbody>
-      </table>
-    </div>
+    <div class="plan-card-list" id="plan-list"><p class="empty-state">Loading runs and exact plans…</p></div>
     <div class="form-message" id="plan-message" role="status"></div>
   </section>
 
   <script>
     const API = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
     const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-    const label = (value: string) => value.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
+    let plans: any[] = [];
+    const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString() : "—";
+    const label = (value: string) => String(value || "").replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase());
+
     async function api(path: string, init?: RequestInit) {
       const response = await fetch(`${API}${path}`, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers || {}) } });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Request failed");
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data));
       return data;
     }
-    async function loadPlans() {
-      const data = await api("/api/v1/antidengue/dispatch-plans?limit=200");
-      el("plan-total").textContent = `${data.total} plan(s)`;
-      const body = el<HTMLTableSectionElement>("plan-list"); body.replaceChildren();
-      if (!data.items.length) { body.innerHTML = '<tr><td colspan="5">No AntiDengue exact send plans yet.</td></tr>'; return; }
-      for (const item of data.items) {
-        const row = document.createElement("tr");
-        row.innerHTML = `<td><strong></strong><small></small></td><td><strong></strong><small></small></td><td><strong></strong><small></small></td><td><strong></strong><small></small></td><td><div class="schedule-card-actions"></div></td>`;
-        const cells = row.querySelectorAll("td");
-        cells[0].querySelector("strong")!.textContent = item.execution_code;
-        cells[0].querySelector("small")!.textContent = label(item.run_type);
-        cells[1].querySelector("strong")!.textContent = item.routing_profiles.map((profile: any) => profile.name).join(", ");
-        cells[1].querySelector("small")!.textContent = `${item.report} · ${item.wing}`;
-        cells[2].querySelector("strong")!.textContent = `${item.planned_deliveries} planned · ${label(item.status)}`;
-        cells[2].querySelector("small")!.textContent = `${item.warnings} warning(s) · ${item.blockers} blocker(s)`;
-        cells[3].querySelector("strong")!.textContent = `${item.sent} sent · ${item.delivered} delivered`;
-        cells[3].querySelector("small")!.textContent = `${item.failed} failed`;
-        const actions = cells[4].querySelector("div")!;
-        const links = [
-          ["Open plan", `/whatsapp/previews/${item.id}`],
-          ["Review", `/whatsapp/previews/${item.id}/issues`],
-          ["Open execution", `/antidengue/run-history?execution_id=${item.execution_id}`],
-          ["Global workspace", `/whatsapp/previews/${item.id}`],
-        ];
-        for (const [text, href] of links) { const link = document.createElement("a"); link.className = "btn btn-xs btn-ghost"; link.textContent = text; link.href = href; actions.append(link); }
-        if (item.status === "ready" && item.blockers === 0) {
-          const send = document.createElement("button"); send.className = "btn btn-xs btn-primary"; send.textContent = "Send when allowed";
-          send.addEventListener("click", async () => {
-            if (!confirm("Send the exact reviewed WhatsApp payloads in this plan?")) return;
+
+    function stateOf(item: any) {
+      if (item.planned_deliveries === 0) return { key: "empty", tone: "neutral", title: "Nothing to send", detail: item.blockers ? "The run produced no deliverable payloads. Review the blockers to understand why." : "The run found no matching records, so no WhatsApp messages were created." };
+      if (item.blockers > 0 || item.status === "blocked" || item.execution_status === "blocked") return { key: "attention", tone: "blocked", title: "Fix blockers", detail: `${item.blockers} blocking issue${item.blockers === 1 ? "" : "s"} must be resolved before this plan can be approved.` };
+      if (["failed"].includes(item.status) || item.failed > 0) return { key: "attention", tone: "failed", title: "Delivery needs attention", detail: `${item.failed} delivery attempt${item.failed === 1 ? "" : "s"} failed and can be retried without resending successful items.` };
+      if (["queued", "sending"].includes(item.status)) return { key: "delivery", tone: "running", title: item.status === "queued" ? "Queued for delivery" : "Sending", detail: "The exact approved payloads are being processed by the WhatsApp worker." };
+      if (item.status === "completed" || item.sent > 0 || item.delivered > 0) return { key: "delivery", tone: "complete", title: "Delivery complete", detail: "Review the per-recipient delivery result and retained audit trail." };
+      return { key: "ready", tone: "ready", title: "Ready to review", detail: item.warnings ? `Review ${item.warnings} warning${item.warnings === 1 ? "" : "s"}, then explicitly approve the frozen payloads.` : "Review the exact recipients, messages and attachments before approval." };
+    }
+
+    function uniqueIssueMessages(item: any) {
+      return [...new Set((item.issues || []).map((issue: any) => issue.message).filter(Boolean))].slice(0, 2);
+    }
+
+    function actionLink(text: string, href: string, primary = false) {
+      const link = document.createElement("a"); link.className = primary ? "btn btn-sm btn-primary" : "btn btn-sm btn-ghost"; link.href = href; link.textContent = text; return link;
+    }
+
+    function renderPlans() {
+      const search = el<HTMLInputElement>("plan-search").value.toLowerCase();
+      const filter = el<HTMLSelectElement>("plan-filter").value;
+      const visible = plans.filter((item) => {
+        const state = stateOf(item);
+        if (filter === "attention" && !(item.blockers > 0 || item.failed > 0 || item.status === "failed")) return false;
+        if (!["all", "attention"].includes(filter) && state.key !== filter) return false;
+        return `${item.execution_code} ${item.preview_key} ${item.routing_profiles.map((profile: any) => profile.name).join(" ")} ${item.report}`.toLowerCase().includes(search);
+      });
+      const container = el("plan-list"); container.replaceChildren();
+      if (!visible.length) { container.innerHTML = '<p class="empty-state">No plans match this view.</p>'; return; }
+      for (const item of visible) {
+        const state = stateOf(item);
+        const card = document.createElement("article"); card.className = `plan-card ${state.tone}`;
+        card.innerHTML = `<div class="plan-card-status"><span class="plan-state-icon"></span><div><strong></strong><small></small></div></div><div class="plan-card-main"><header><div><span class="plan-run-type"></span><h3></h3><p></p></div><span class="job-status"></span></header><div class="plan-route-pills"></div><div class="plan-metrics"><div><span>Planned</span><strong></strong></div><div><span>Warnings</span><strong></strong></div><div><span>Blockers</span><strong></strong></div><div><span>Delivered</span><strong></strong></div><div><span>Failed</span><strong></strong></div></div><div class="plan-issue-summary" hidden></div><div class="plan-card-actions"></div></div>`;
+        card.querySelector(".plan-card-status strong")!.textContent = state.title;
+        card.querySelector(".plan-card-status small")!.textContent = state.detail;
+        card.querySelector(".plan-run-type")!.textContent = item.run_type === "manual_send" ? "SEND NOW" : item.run_type === "manual_preview" ? "TEST RUN" : "SCHEDULED RUN";
+        card.querySelector("h3")!.textContent = item.execution_code;
+        card.querySelector("header p")!.textContent = `${formatDate(item.created_at)} · ${item.dispatch_policy === "auto_send_when_clean" ? "Auto-send when clean" : "Preview only"}`;
+        const status = card.querySelector(".job-status")!; status.className = `job-status ${item.execution_status}`; status.textContent = label(item.execution_status);
+        const pills = card.querySelector(".plan-route-pills")!;
+        for (const profile of item.routing_profiles) { const pill = document.createElement("span"); pill.textContent = profile.name; pills.append(pill); }
+        const metricValues = card.querySelectorAll(".plan-metrics strong");
+        [item.planned_deliveries, item.warnings, item.blockers, item.delivered, item.failed].forEach((value, index) => metricValues[index].textContent = String(value));
+        const messages = uniqueIssueMessages(item); const issues = card.querySelector(".plan-issue-summary") as HTMLElement;
+        if (messages.length) { issues.hidden = false; for (const message of messages) { const paragraph = document.createElement("p"); paragraph.textContent = message; issues.append(paragraph); } }
+        const actions = card.querySelector(".plan-card-actions")!;
+        if (state.key === "attention" && item.blockers > 0) actions.append(actionLink(`Review ${item.blockers} blocker${item.blockers === 1 ? "" : "s"}`, `/whatsapp/previews/${item.id}/issues`, true));
+        else if (state.key === "ready") actions.append(actionLink(`Review ${item.planned_deliveries} planned deliver${item.planned_deliveries === 1 ? "y" : "ies"}`, `/whatsapp/previews/${item.id}`, true));
+        else if (state.key === "delivery") actions.append(actionLink("View delivery results", "/whatsapp/deliveries", true));
+        else actions.append(actionLink("Review why nothing was sent", `/whatsapp/previews/${item.id}/issues`, true));
+        if (state.key === "ready" && item.planned_deliveries > 0 && item.blockers === 0) {
+          const approve = document.createElement("button"); approve.className = "btn btn-sm btn-outline"; approve.type = "button"; approve.textContent = `Approve & queue ${item.planned_deliveries}`;
+          approve.addEventListener("click", async () => {
+            const warning = item.warnings ? ` This also acknowledges ${item.warnings} warning(s).` : "";
+            if (!confirm(`Queue ${item.planned_deliveries} exact frozen WhatsApp deliveries?${warning} This can send real messages and cannot be undone.`)) return;
+            approve.disabled = true;
             try { await api(`/api/v1/whatsapp/previews/${item.id}/approve`, { method: "POST", body: JSON.stringify({ acknowledge_warnings: item.warnings > 0, approved_by: "antidengue-workspace" }) }); await loadPlans(); }
-            catch (error) { el("plan-message").textContent = error instanceof Error ? error.message : "Could not send plan"; }
-          }); actions.prepend(send);
+            catch (error) { el("plan-message").textContent = error instanceof Error ? error.message : "Could not approve this plan"; approve.disabled = false; }
+          });
+          actions.append(approve);
         }
         if (item.failed > 0) {
-          const retry = document.createElement("button"); retry.className = "btn btn-xs btn-outline"; retry.textContent = "Retry failed deliveries";
-          retry.addEventListener("click", async () => { try { await api(`/api/v1/antidengue/dispatch-plans/${item.id}/retry-failed`, { method: "POST" }); await loadPlans(); } catch (error) { el("plan-message").textContent = error instanceof Error ? error.message : "Retry failed"; } });
-          actions.prepend(retry);
+          const retry = document.createElement("button"); retry.className = "btn btn-sm btn-outline"; retry.type = "button"; retry.textContent = `Retry ${item.failed} failed`;
+          retry.addEventListener("click", async () => { if (!confirm(`Retry only the ${item.failed} failed deliveries? Successful deliveries will not be resent.`)) return; retry.disabled = true; try { await api(`/api/v1/antidengue/dispatch-plans/${item.id}/retry-failed`, { method: "POST" }); await loadPlans(); } catch (error) { el("plan-message").textContent = error instanceof Error ? error.message : "Could not retry failed deliveries"; retry.disabled = false; } });
+          actions.append(retry);
         }
-        body.append(row);
+        actions.append(actionLink("View run audit", `/antidengue/run-history?execution_id=${item.execution_id}`));
+        container.append(card);
       }
     }
-    el("refresh-button").addEventListener("click", () => void loadPlans());
-    void loadPlans().catch((error) => el("plan-message").textContent = error.message);
+
+    async function loadPlans() {
+      el("plan-message").textContent = "";
+      try {
+        const data = await api("/api/v1/antidengue/dispatch-plans?limit=200"); plans = data.items;
+        el("total-plans").textContent = String(plans.length);
+        el("attention-plans").textContent = String(plans.filter((item) => item.blockers > 0 || item.failed > 0 || item.status === "failed").length);
+        el("ready-plans").textContent = String(plans.filter((item) => stateOf(item).key === "ready").length);
+        el("delivered-total").textContent = String(plans.reduce((total, item) => total + Number(item.delivered || 0), 0));
+        renderPlans();
+      } catch (error) { el("plan-message").textContent = error instanceof Error ? error.message : "Could not load exact plans"; }
+    }
+    el("plan-search").addEventListener("input", renderPlans); el("plan-filter").addEventListener("change", renderPlans); el("refresh-button").addEventListener("click", () => void loadPlans());
+    void loadPlans();
   </script>
 </AntiDengueLayout>

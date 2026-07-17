@@ -883,9 +883,15 @@ def list_antidengue_dispatch_plans(
         }
         items.append({
             "id": str(preview.id),
+            "preview_key": preview.preview_key,
             "execution_id": str(execution.id),
             "execution_code": execution.execution_code,
+            "execution_status": execution.status,
             "run_type": execution.trigger_type,
+            "dispatch_policy": execution.dispatch_policy,
+            "created_at": execution.created_at,
+            "finished_at": execution.finished_at,
+            "error": execution.error,
             "routing_profiles": [{"id": str(item.id), "name": item.name} for item in profiles],
             "report": preview.report_type_name,
             "wing": preview.wing_name,
@@ -894,6 +900,7 @@ def list_antidengue_dispatch_plans(
             "blockers": preview.blocked_count,
             "status": preview.status if approval is None else approval.status,
             "approval_id": str(approval.id) if approval else None,
+            "issues": list(preview.issues or []),
             **totals,
         })
     return {"items": items, "total": len(items)}

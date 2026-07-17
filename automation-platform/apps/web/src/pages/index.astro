@@ -173,7 +173,7 @@ import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
       if (hasPersistedProfileSelection || selectedProfileIds.size) persistProfileSelection();
       if (!data.profiles.length) {
         el("profile-options").innerHTML = "<p>No enabled AntiDengue routing profiles.</p>";
-        el("profile-help").textContent = "Configure an enabled AntiDengue dispatch profile under WhatsApp Routing first.";
+        el("profile-help").textContent = "Configure an enabled profile in the AntiDengue Routing workspace first.";
         return;
       }
       const filter = el<HTMLSelectElement>("profile-report-filter");

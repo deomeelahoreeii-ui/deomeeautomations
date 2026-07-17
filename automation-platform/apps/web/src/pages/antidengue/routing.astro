@@ -1,0 +1,245 @@
+---
+import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
+---
+
+<AntiDengueLayout
+  title="AntiDengue routing"
+  description="Own the reports, audiences, recipient routes and WhatsApp policies used by AntiDengue runs."
+  page="routing"
+>
+  <div class="page-actions" slot="actions">
+    <button class="btn btn-sm btn-ghost" id="refresh-routing" type="button">↻ Refresh</button>
+    <button class="btn btn-sm btn-primary" id="add-route" type="button">＋ New routing profile</button>
+  </div>
+
+  <div class="notice antidengue-safety-notice">
+    Routing profiles are reusable configuration, not send commands. Every run freezes the selected versions and validates every target before delivery.
+  </div>
+
+  <section class="routing-metrics" aria-label="AntiDengue routing summary">
+    <article><span>Enabled profiles</span><strong id="enabled-count">—</strong><small id="profile-count">Loading configuration…</small></article>
+    <article><span>Routed recipients</span><strong id="target-count">—</strong><small>Across enabled profiles</small></article>
+    <article><span>WhatsApp connection</span><strong id="connection-state">—</strong><small id="connection-name">Shared gateway</small></article>
+  </section>
+
+  <section class="panel routing-workspace-panel">
+    <div class="panel-heading routing-workspace-heading">
+      <div><p class="eyebrow">Module-owned configuration</p><h2>Reporting routes</h2></div>
+      <div class="routing-toolbar">
+        <input class="input input-bordered input-sm" id="route-search" type="search" placeholder="Search report, wing or audience…" />
+        <select class="select select-bordered select-sm" id="route-status"><option value="enabled">Enabled</option><option value="all">All profiles</option><option value="archived">Archived</option></select>
+      </div>
+    </div>
+    <div class="routing-profile-grid" id="routing-list"><p class="empty-state">Loading AntiDengue routes…</p></div>
+    <div class="form-message" id="routing-message" role="status"></div>
+  </section>
+
+  <dialog class="modal" id="route-dialog">
+    <div class="modal-box master-modal wide-modal route-editor-modal">
+      <div class="modal-title"><div><span class="eyebrow">ANTIDENGUE ROUTING</span><h2 id="route-dialog-title">New routing profile</h2></div><button type="button" id="close-route">×</button></div>
+      <form class="route-editor-form" id="route-form">
+        <input id="route-id" type="hidden" />
+        <div class="route-form-section"><h3>Report and audience</h3><p>Choose what is generated and exactly which maintained audience receives it.</p>
+          <div class="route-form-grid">
+            <label><span>Profile name *</span><input class="input input-bordered" id="route-name" required /></label>
+            <label><span>Stable key *</span><input class="input input-bordered" id="route-key" pattern="[a-z0-9_]+" required /></label>
+            <label><span>Report *</span><select class="select select-bordered" id="route-report" required></select></label>
+            <label><span>Audience *</span><select class="select select-bordered" id="route-audience" required></select></label>
+            <label><span>Wing *</span><select class="select select-bordered" id="route-wing" required></select></label>
+            <label><span>Recipient channel *</span><select class="select select-bordered" id="route-channel"><option value="group">WhatsApp groups</option><option value="individual">Individuals</option></select></label>
+            <label><span>Recipient scope *</span><select class="select select-bordered" id="route-scope" required></select></label>
+            <label><span>WhatsApp connection *</span><select class="select select-bordered" id="route-account" required></select></label>
+          </div>
+        </div>
+        <div class="route-form-section"><h3>Message and delivery</h3><p>These settings are frozen into every exact plan produced from this profile.</p>
+          <div class="route-form-grid">
+            <label><span>Message template</span><select class="select select-bordered" id="route-template"><option value="">No template</option></select></label>
+            <label><span>Message detail</span><select class="select select-bordered" id="route-message-style"><option value="summary">Concise summary</option><option value="detailed">Detailed list</option></select></label>
+            <label><span>Attachments</span><select class="select select-bordered" id="route-attachments"><option value="image_excel">Image + Excel</option><option value="image">Image only</option><option value="excel">Excel only</option><option value="none">Message only</option></select></label>
+            <label><span>Image content</span><select class="select select-bordered" id="route-image-content"><option value="details">Detailed rows</option><option value="summary">Summary</option></select></label>
+            <label><span>Messages per minute</span><input class="input input-bordered" id="route-rate" type="number" min="1" max="120" value="20" /></label>
+            <label><span>Maximum retries</span><input class="input input-bordered" id="route-retries" type="number" min="0" max="10" value="5" /></label>
+            <label><span>Status</span><select class="select select-bordered" id="route-enabled"><option value="true">Enabled</option><option value="false">Archived / unavailable</option></select></label>
+            <label class="route-approval"><input class="checkbox" id="route-approval" type="checkbox" checked /><span>Require explicit approval for reviewed plans</span></label>
+          </div>
+          <label><span>Internal notes</span><textarea class="textarea textarea-bordered" id="route-notes" rows="2"></textarea></label>
+        </div>
+        <div class="form-message" id="route-form-message" role="status"></div>
+        <div class="form-actions"><button class="btn" id="cancel-route" type="button">Cancel</button><button class="btn btn-primary" id="save-route" type="submit">Save routing profile</button></div>
+      </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <script>
+    const API = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const dialog = el<HTMLDialogElement>("route-dialog");
+    let options: any = {};
+    let profiles: any[] = [];
+    let previewProfiles: any[] = [];
+    let application: any = null;
+
+    async function api(path: string, init?: RequestInit) {
+      const response = await fetch(`${API}${path}`, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers || {}) } });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data));
+      return data;
+    }
+    const value = (id: string) => el<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(id).value;
+    const setValue = (id: string, next: unknown) => { el<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(id).value = next == null ? "" : String(next); };
+    const optionHtml = (items: any[], text: (item: any) => string) => items.map((item) => `<option value="${item.id}">${text(item)}</option>`).join("");
+    const slug = (text: string) => text.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+
+    function moduleItems(key: string) {
+      return (options[key] || []).filter((item: any) => item.application_id === application?.id || item.application_key === "antidengue");
+    }
+
+    function targetCount(profile: any) {
+      return Number(previewProfiles.find((item) => item.id === profile.id)?.target_count || 0);
+    }
+
+    function populateFormOptions() {
+      el<HTMLSelectElement>("route-report").innerHTML = optionHtml(moduleItems("report_types"), (item) => item.name);
+      el<HTMLSelectElement>("route-audience").innerHTML = optionHtml(moduleItems("audiences"), (item) => item.name);
+      el<HTMLSelectElement>("route-wing").innerHTML = optionHtml(options.wings || [], (item) => item.name);
+      el<HTMLSelectElement>("route-account").innerHTML = optionHtml(options.accounts || [], (item) => `${item.name} · ${item.connected ? "connected" : item.status}`);
+      const templates = (options.templates || []).filter((item: any) => !item.application_id || item.application_id === application?.id);
+      el<HTMLSelectElement>("route-template").innerHTML = `<option value="">No template</option>${optionHtml(templates, (item) => item.name)}`;
+      populateScopes();
+    }
+
+    function populateScopes(selected = "") {
+      const channel = value("route-channel");
+      const scopes = moduleItems("recipient_scopes").filter((item: any) => item.channel === channel);
+      el<HTMLSelectElement>("route-scope").innerHTML = optionHtml(scopes, (item) => item.name);
+      setValue("route-scope", selected || scopes[0]?.id || "");
+    }
+
+    function openEditor(profile?: any) {
+      el("route-form-message").textContent = "";
+      el("route-dialog-title").textContent = profile ? "Edit routing profile" : "New routing profile";
+      setValue("route-id", profile?.id || "");
+      setValue("route-name", profile?.name || "");
+      setValue("route-key", profile?.key || "");
+      setValue("route-report", profile?.report_type_id || moduleItems("report_types")[0]?.id || "");
+      setValue("route-audience", profile?.audience_id || moduleItems("audiences")[0]?.id || "");
+      setValue("route-wing", profile?.wing_id || options.wings?.[0]?.id || "");
+      setValue("route-channel", profile?.recipient_channel || "group");
+      populateScopes(profile?.recipient_scope_id || "");
+      setValue("route-account", profile?.account_id || options.accounts?.[0]?.id || "");
+      setValue("route-template", profile?.template_id || "");
+      setValue("route-message-style", profile?.presentation_policy?.message_style || "summary");
+      setValue("route-attachments", profile?.presentation_policy?.attachment_mode || "image_excel");
+      setValue("route-image-content", profile?.presentation_policy?.image_content || "details");
+      setValue("route-rate", profile?.messages_per_minute ?? 20);
+      setValue("route-retries", profile?.max_retries ?? 5);
+      setValue("route-enabled", profile?.enabled === false ? "false" : "true");
+      setValue("route-notes", profile?.notes || "");
+      el<HTMLInputElement>("route-approval").checked = profile?.require_approval !== false;
+      dialog.showModal();
+    }
+
+    async function showRecipients(profile: any, container: HTMLElement, button: HTMLButtonElement) {
+      if (container.dataset.loaded === "true") { container.hidden = !container.hidden; button.textContent = container.hidden ? "View recipients" : "Hide recipients"; return; }
+      button.disabled = true; button.textContent = "Loading…";
+      try {
+        const data = await api(`/api/v1/whatsapp/audiences/${profile.audience_id}/members?page=1&page_size=100`);
+        container.replaceChildren();
+        if (!data.items.length) container.innerHTML = '<p class="route-empty-warning">No recipients are routed. Runs using this profile will be blocked.</p>';
+        for (const item of data.items) {
+          const row = document.createElement("div"); row.className = "route-recipient-row";
+          row.innerHTML = `<span class="status-dot-mini"></span><div><strong></strong><small></small></div>`;
+          row.querySelector("span")!.classList.toggle("enabled", item.available);
+          row.querySelector("strong")!.textContent = item.name;
+          row.querySelector("small")!.textContent = `${item.route_scope_label || "Unbound area"} · ${item.detail || item.identifier}`;
+          container.append(row);
+        }
+        const manage = document.createElement("a"); manage.className = "btn btn-xs btn-ghost"; manage.href = `/whatsapp/audiences/${profile.audience_id}`; manage.textContent = "Advanced recipient editor"; container.append(manage);
+        container.dataset.loaded = "true"; container.hidden = false; button.textContent = "Hide recipients";
+      } catch (error) { container.textContent = error instanceof Error ? error.message : "Could not load recipients"; container.hidden = false; button.textContent = "View recipients"; }
+      finally { button.disabled = false; }
+    }
+
+    function renderProfiles() {
+      const search = value("route-search").toLowerCase();
+      const status = value("route-status");
+      const visible = profiles.filter((profile) => {
+        if (status === "enabled" && !profile.enabled) return false;
+        if (status === "archived" && profile.enabled) return false;
+        return `${profile.name} ${profile.report_type_name} ${profile.audience_name} ${profile.wing_name || ""}`.toLowerCase().includes(search);
+      });
+      const list = el("routing-list"); list.replaceChildren();
+      if (!visible.length) { list.innerHTML = '<p class="empty-state">No routing profiles match this view.</p>'; return; }
+      for (const profile of visible) {
+        const count = targetCount(profile);
+        const card = document.createElement("article"); card.className = `route-profile-card${profile.enabled ? "" : " archived"}`;
+        card.innerHTML = `<header><div><span class="route-status"></span><h3></h3><p></p></div><span class="environment-pill"></span></header><div class="route-path"><div><span>Report</span><strong></strong></div><i>→</i><div><span>Audience</span><strong></strong></div><i>→</i><div><span>Recipients</span><strong></strong></div></div><div class="route-policy"><span></span><span></span><span></span></div><div class="route-card-actions"></div><div class="route-recipient-list" hidden></div>`;
+        card.querySelector(".route-status")!.textContent = profile.enabled ? "Enabled" : "Archived";
+        card.querySelector(".route-status")!.classList.add(profile.enabled ? "enabled" : "archived");
+        card.querySelector("h3")!.textContent = profile.name;
+        card.querySelector("header p")!.textContent = `${profile.wing_name || "All wings"} · ${profile.recipient_scope_name}`;
+        card.querySelector(".environment-pill")!.textContent = `v${profile.version}`;
+        const pathValues = card.querySelectorAll(".route-path strong");
+        pathValues[0].textContent = profile.report_type_name; pathValues[1].textContent = profile.audience_name; pathValues[2].textContent = `${count} target${count === 1 ? "" : "s"}`;
+        const policies = card.querySelectorAll(".route-policy span");
+        policies[0].textContent = profile.presentation_policy?.message_style === "detailed" ? "Detailed message" : "Summary message";
+        policies[1].textContent = String(profile.presentation_policy?.attachment_mode || "none").replaceAll("_", " + ");
+        policies[2].textContent = profile.require_approval ? "Approval required" : "Automatic when allowed";
+        const actions = card.querySelector(".route-card-actions")!;
+        const recipients = document.createElement("button"); recipients.className = "btn btn-xs"; recipients.type = "button"; recipients.textContent = "View recipients";
+        recipients.addEventListener("click", () => void showRecipients(profile, card.querySelector(".route-recipient-list") as HTMLElement, recipients));
+        const edit = document.createElement("button"); edit.className = "btn btn-xs btn-primary"; edit.type = "button"; edit.textContent = "Edit profile"; edit.addEventListener("click", () => openEditor(profile));
+        actions.append(edit, recipients);
+        if (profile.enabled) {
+          const archive = document.createElement("button"); archive.className = "btn btn-xs btn-ghost"; archive.type = "button"; archive.textContent = "Archive";
+          archive.addEventListener("click", async () => { if (!confirm(`Archive ${profile.name}? Existing frozen plans remain auditable.`)) return; await api(`/api/v1/whatsapp/dispatch-profiles/${profile.id}`, { method: "DELETE" }); await loadRouting(); });
+          actions.append(archive);
+        }
+        list.append(card);
+      }
+    }
+
+    async function loadRouting() {
+      el("routing-message").textContent = "";
+      try {
+        const [configuration, profileData, previewData] = await Promise.all([
+          api("/api/v1/whatsapp/configuration/options"),
+          api("/api/v1/whatsapp/dispatch-profiles?page=1&page_size=100"),
+          api("/api/v1/whatsapp/previews/options"),
+        ]);
+        options = configuration; application = options.applications.find((item: any) => item.key === "antidengue");
+        profiles = profileData.items.filter((item: any) => item.application_key === "antidengue");
+        previewProfiles = previewData.profiles.filter((item: any) => item.application_key === "antidengue");
+        populateFormOptions(); renderProfiles();
+        const enabled = profiles.filter((item) => item.enabled);
+        el("enabled-count").textContent = String(enabled.length); el("profile-count").textContent = `${profiles.length} total profile${profiles.length === 1 ? "" : "s"}`;
+        el("target-count").textContent = String(enabled.reduce((total, item) => total + targetCount(item), 0));
+        const account = options.accounts?.[0]; el("connection-state").textContent = account?.connected ? "Ready" : "Attention"; el("connection-name").textContent = account?.name || "No enabled connection";
+      } catch (error) { el("routing-message").textContent = error instanceof Error ? error.message : "Could not load routing configuration"; }
+    }
+
+    el("route-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = el<HTMLButtonElement>("save-route"); button.disabled = true; el("route-form-message").textContent = "Saving canonical routing profile…";
+      const id = value("route-id"); const template = value("route-template");
+      try {
+        await api("/api/v1/whatsapp/dispatch-profiles", { method: "POST", body: JSON.stringify({
+          ...(id ? { id } : {}), application_id: application.id, key: value("route-key"), name: value("route-name"), report_type_id: value("route-report"), audience_id: value("route-audience"), account_id: value("route-account"),
+          ...(template ? { template_id: template } : {}), wing_id: value("route-wing"), recipient_channel: value("route-channel"), recipient_scope_id: value("route-scope"), delivery_mode: value("route-channel") === "group" ? "groups" : "individuals",
+          require_approval: el<HTMLInputElement>("route-approval").checked, fallback_policy: "none", max_retries: Number(value("route-retries")), messages_per_minute: Number(value("route-rate")), enabled: value("route-enabled") === "true", notes: value("route-notes"),
+          message_style: value("route-message-style"), attachment_mode: value("route-attachments"), image_content: value("route-image-content"),
+        }) });
+        dialog.close(); await loadRouting(); el("routing-message").textContent = id ? "Routing profile updated. New runs will freeze the new version." : "Routing profile created.";
+      } catch (error) { el("route-form-message").textContent = error instanceof Error ? error.message : "Could not save routing profile"; }
+      finally { button.disabled = false; }
+    });
+    el("route-name").addEventListener("input", () => { if (!value("route-id") && !el<HTMLInputElement>("route-key").dataset.edited) setValue("route-key", slug(value("route-name"))); });
+    el("route-key").addEventListener("input", () => { el<HTMLInputElement>("route-key").dataset.edited = "true"; });
+    el("route-channel").addEventListener("change", () => populateScopes());
+    el("add-route").addEventListener("click", () => { delete el<HTMLInputElement>("route-key").dataset.edited; openEditor(); });
+    el("close-route").addEventListener("click", () => dialog.close()); el("cancel-route").addEventListener("click", () => dialog.close());
+    el("route-search").addEventListener("input", renderProfiles); el("route-status").addEventListener("change", renderProfiles); el("refresh-routing").addEventListener("click", () => void loadRouting());
+    void loadRouting();
+  </script>
+</AntiDengueLayout>

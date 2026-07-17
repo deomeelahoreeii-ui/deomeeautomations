@@ -4,15 +4,15 @@ import AppLayout from "./AppLayout.astro";
 interface Props {
   title: string;
   description: string;
-  page: "dashboard" | "schedules" | "run-history" | "dispatch-plans" | "manual-reports";
+  page: "dashboard" | "routing" | "schedules" | "run-history" | "dispatch-plans" | "manual-reports";
 }
 
 const { title, description, page } = Astro.props;
 const links = [
   ["dashboard", "Dashboard", "/"],
+  ["routing", "Routing", "/antidengue/routing"],
   ["schedules", "Schedules", "/antidengue/schedules"],
-  ["run-history", "Run History", "/antidengue/run-history"],
-  ["dispatch-plans", "Dispatch Plans", "/antidengue/dispatch-plans"],
+  ["dispatch-plans", "Runs & Plans", "/antidengue/dispatch-plans"],
   ["manual-reports", "Manual Reports", "/antidengue/manual-reports"],
 ];
 ---
@@ -20,7 +20,7 @@ const links = [
 <AppLayout title={title} eyebrow="Operations / AntiDengue" description={description} active="antidengue">
   <slot name="actions" slot="actions" />
   <nav class="section-tabs" aria-label="AntiDengue pages">
-    {links.map(([id, label, href]) => <a class:list={{ active: page === id }} href={href}>{label}</a>)}
+    {links.map(([id, label, href]) => <a class:list={{ active: page === id || (id === "dispatch-plans" && page === "run-history") }} href={href}>{label}</a>)}
   </nav>
   <slot />
 </AppLayout>

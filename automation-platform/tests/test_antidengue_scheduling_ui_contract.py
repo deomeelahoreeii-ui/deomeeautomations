@@ -4,6 +4,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "apps/web/src/pages/index.astro"
 SCHEDULES = ROOT / "apps/web/src/pages/antidengue/schedules.astro"
 HISTORY = ROOT / "apps/web/src/pages/antidengue/run-history.astro"
+ROUTING = ROOT / "apps/web/src/pages/antidengue/routing.astro"
+PLANS = ROOT / "apps/web/src/pages/antidengue/dispatch-plans.astro"
 LAYOUT = ROOT / "apps/web/src/layouts/AntiDengueLayout.astro"
 DEV = ROOT / "scripts/dev.sh"
 
@@ -31,9 +33,9 @@ def test_dashboard_persists_and_restores_profile_selection() -> None:
 
 def test_schedule_and_run_history_navigation_is_present() -> None:
     layout = LAYOUT.read_text(encoding="utf-8")
+    assert '"routing", "Routing", "/antidengue/routing"' in layout
     assert '"schedules", "Schedules", "/antidengue/schedules"' in layout
-    assert '"run-history", "Run History", "/antidengue/run-history"' in layout
-    assert '"dispatch-plans", "Dispatch Plans", "/antidengue/dispatch-plans"' in layout
+    assert '"dispatch-plans", "Runs & Plans", "/antidengue/dispatch-plans"' in layout
     schedules = SCHEDULES.read_text(encoding="utf-8")
     assert "Preview only" in schedules
     assert "Auto-send when clean" in schedules
@@ -42,6 +44,22 @@ def test_schedule_and_run_history_navigation_is_present() -> None:
     assert "scheduler.scheduler_enabled" in schedules
     history = HISTORY.read_text(encoding="utf-8")
     assert "Persistent combined activity" in history
+
+
+def test_antidengue_owns_routing_and_contextual_plan_actions() -> None:
+    routing = ROUTING.read_text(encoding="utf-8")
+    assert "New routing profile" in routing
+    assert "/api/v1/whatsapp/dispatch-profiles" in routing
+    assert "View recipients" in routing
+    assert "Advanced recipient editor" in routing
+
+    plans = PLANS.read_text(encoding="utf-8")
+    assert "Runs and their next action" in plans
+    assert "Nothing to send" in plans
+    assert "Fix blockers" in plans
+    assert "Ready to review" in plans
+    assert "item.planned_deliveries > 0" in plans
+    assert "Send when allowed" not in plans
 
 
 def test_dev_starts_server_owned_scheduler() -> None:
