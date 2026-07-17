@@ -37,11 +37,15 @@ def test_schedule_and_run_history_navigation_is_present() -> None:
     assert '"schedules", "Schedules", "/antidengue/schedules"' in layout
     assert '"dispatch-plans", "Runs & Plans", "/antidengue/dispatch-plans"' in layout
     schedules = SCHEDULES.read_text(encoding="utf-8")
-    assert "Preview only" in schedules
-    assert "Auto-send when clean" in schedules
-    assert "Run now" in schedules
+    assert "Prepare for review" in schedules
+    assert "Send only when clean" in schedules
+    assert "Run preview now" in schedules
     assert "Select all visible" in schedules
     assert "scheduler.scheduler_enabled" in schedules
+    assert "Advanced execution settings" in schedules
+    assert 'id="schedule-time-chips"' in schedules
+    assert 'id="schedule-review"' in schedules
+    assert 'toggle.textContent = item.enabled ? "Pause" : "Enable"' in schedules
     history = HISTORY.read_text(encoding="utf-8")
     assert "Persistent combined activity" in history
 
