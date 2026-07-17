@@ -376,6 +376,67 @@ export const server = {
     inboundStorageStatus: defineAction({
       handler: () => api("/api/v1/whatsapp/inbound/storage/status"),
     }),
+    createInboundProcessingRun: defineAction({
+      input: z.object({
+        batch_id: z.string().uuid(),
+        paperless_check: z.boolean().default(true),
+      }),
+      handler: (input) => api("/api/v1/whatsapp/inbound/processing-runs", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    }),
+    inboundProcessingRuns: defineAction({
+      input: z.object({
+        status: z.string().optional(),
+        category: z.string().optional(),
+        search: z.string().optional(),
+        limit: z.number().int().min(1).max(200).default(50),
+      }),
+      handler: (input) => {
+        const params = new URLSearchParams({ limit: String(input.limit) });
+        if (input.status) params.set("status", input.status);
+        if (input.category) params.set("category", input.category);
+        if (input.search) params.set("search", input.search);
+        return api(`/api/v1/whatsapp/inbound/processing-runs?${params}`);
+      },
+    }),
+    inboundProcessingRun: defineAction({
+      input: z.object({
+        id: z.string().uuid(),
+        category: z.string().optional(),
+        reviewStatus: z.string().optional(),
+      }),
+      handler: ({ id, category, reviewStatus }) => {
+        const params = new URLSearchParams();
+        if (category) params.set("category", category);
+        if (reviewStatus) params.set("review_status", reviewStatus);
+        const suffix = params.toString() ? `?${params}` : "";
+        return api(`/api/v1/whatsapp/inbound/processing-runs/${id}${suffix}`);
+      },
+    }),
+    inboundProcessingEvents: defineAction({
+      input: z.object({ id: z.string().uuid(), after: z.string().optional(), limit: z.number().int().min(1).max(2000).default(500) }),
+      handler: ({ id, after, limit }) => {
+        const params = new URLSearchParams({ limit: String(limit) });
+        if (after) params.set("after", after);
+        return api(`/api/v1/whatsapp/inbound/processing-runs/${id}/events?${params}`);
+      },
+    }),
+    reviewInboundProcessingItem: defineAction({
+      input: z.object({
+        id: z.string().uuid(),
+        decision: z.enum(["pending", "approved", "rejected", "deferred"]),
+        reviewed_by: z.string().min(1).max(100).default("web-operator"),
+        note: z.string().max(4000).nullable().optional(),
+        category: z.string().max(80).nullable().optional(),
+        complaint_number: z.string().max(40).nullable().optional(),
+      }),
+      handler: ({ id, ...body }) => api(`/api/v1/whatsapp/inbound/processing-items/${id}/review`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    }),
     inboundExportPreview: defineAction({
       input: z.object({
         contact_id: z.string().uuid(),

@@ -1,11 +1,12 @@
 ---
 interface Props {
-  active: "fetch" | "batches" | "packages" | "storage";
+  active: "fetch" | "batches" | "processing" | "packages" | "storage";
 }
 const { active } = Astro.props;
 const links = [
   ["fetch", "Fetch files", "/whatsapp/inbound-files"],
   ["batches", "Inbound batches", "/whatsapp/inbound-batches"],
+  ["processing", "Processing & review", "/whatsapp/inbound-processing"],
   ["packages", "Download packages", "/whatsapp/inbound-exports"],
   ["storage", "Object storage", "/whatsapp/inbound-storage"],
 ];

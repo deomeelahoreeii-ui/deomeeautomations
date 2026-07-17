@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+import asyncio
+import uuid
+
+from sqlalchemy import select
+from sqlmodel import Session
+
+from automation_core.celery_app import celery_app
+from automation_core.database import engine
+from automation_core.job_service import (
+    append_log, mark_job_failed, mark_job_running, mark_job_succeeded, require_job,
+)
+from automation_core.time import utcnow
+from whatsapp_gateway.dispatch.approved_delivery import _publish_approved_deliveries
+from whatsapp_gateway.models import (
+    WhatsAppDelivery, WhatsAppDispatchApproval,
+)
+from whatsapp_gateway.preview_service import compile_antidengue_preview
+
+
+@celery_app.task(
+    name="whatsapp_gateway.compile_dispatch_preview",
+    soft_time_limit=60 * 10,
+    time_limit=60 * 12,
+)
+def compile_dispatch_preview_job(job_id: str) -> dict[str, str]:
+    uuid.UUID(job_id)
+    with Session(engine) as session:
+        job = require_job(session, job_id)
+        parameters = dict(job.parameters)
+        mark_job_running(session, job_id)
+        append_log(session, job_id, "Compiling immutable AntiDengue dispatch preview.")
+
+    try:
+        with Session(engine) as session:
+            preview = compile_antidengue_preview(
+                session,
+                source_job_id=uuid.UUID(parameters["source_job_id"]),
+                dispatch_profile_id=uuid.UUID(parameters["dispatch_profile_id"]),
+                created_by=str(parameters.get("created_by") or "web"),
+            )
+            result = {"preview_id": str(preview.id), "preview_key": preview.preview_key}
+        with Session(engine) as session:
+            append_log(session, job_id, f"Frozen preview {result['preview_key']} is ready for review.")
+            mark_job_succeeded(session, job_id, result)
+        return result
+    except Exception as exc:
+        with Session(engine) as session:
+            append_log(session, job_id, str(exc), level="error")
+            mark_job_failed(session, job_id, str(exc))
+        raise
+
+
+@celery_app.task(
+    name="whatsapp_gateway.send_approved_preview",
+    soft_time_limit=60 * 15,
+    time_limit=60 * 20,
+)
+def send_approved_preview_job(job_id: str) -> dict[str, int]:
+    with Session(engine) as session:
+        job = require_job(session, job_id)
+        approval_id = uuid.UUID(str(job.parameters["approval_id"]))
+        mark_job_running(session, job_id)
+        append_log(session, job_id, "Revalidating and queueing the exact approved frozen payloads.")
+    try:
+        result = asyncio.run(_publish_approved_deliveries(approval_id, job_id))
+        with Session(engine) as session:
+            append_log(session, job_id, f"Dispatch completed: {result['delivered']} successful, {result['failed']} failed.")
+            mark_job_succeeded(session, job_id, result)
+        return result
+    except Exception as exc:
+        with Session(engine) as session:
+            approval = session.get(WhatsAppDispatchApproval, approval_id)
+            if approval:
+                approval.status = "failed"
+                approval.error = str(exc)
+                approval.completed_at = utcnow()
+                session.add(approval)
+                for delivery in session.scalars(
+                    select(WhatsAppDelivery).where(
+                        WhatsAppDelivery.approval_id == approval.id,
+                        WhatsAppDelivery.status == "queued",
+                    )
+                ):
+                    delivery.status = "failed"
+                    delivery.error = str(exc)
+                    delivery.completed_at = utcnow()
+                    session.add(delivery)
+                session.commit()
+            append_log(session, job_id, str(exc), level="error")
+            mark_job_failed(session, job_id, str(exc))
+        raise

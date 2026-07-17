@@ -169,6 +169,7 @@ class S3ObjectStorage:
         payload_hash: str | None = None,
         content_type: str | None = None,
         metadata: dict[str, str] | None = None,
+        stream: bool = False,
     ) -> requests.Response:
         endpoint = self._endpoint()
         path = "/" + quote(bucket, safe="")
@@ -198,14 +199,15 @@ class S3ObjectStorage:
             now=datetime.now(timezone.utc),
         )
         try:
-            return self.session.request(
-                method,
-                url,
-                headers=headers,
-                data=body,
-                timeout=self.timeout,
-                verify=self.verify,
-            )
+            request_kwargs: dict[str, Any] = {
+                "headers": headers,
+                "data": body,
+                "timeout": self.timeout,
+                "verify": self.verify,
+            }
+            if stream:
+                request_kwargs["stream"] = True
+            return self.session.request(method, url, **request_kwargs)
         except requests.RequestException as exc:
             raise ObjectStorageError(f"S3 request failed for {url}: {exc}") from exc
 
@@ -266,6 +268,35 @@ class S3ObjectStorage:
             "ETag": response.headers.get("etag"),
             "VersionId": response.headers.get("x-amz-version-id"),
             "Metadata": metadata,
+        }
+
+
+    def download_file(self, *, bucket: str, object_key: str, destination: Path) -> dict[str, Any]:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        response = self._request("GET", bucket=bucket, object_key=object_key, stream=True)
+        self._raise_for_response(response, f"Downloading s3://{bucket}/{object_key}")
+        temp_path = destination.with_name(destination.name + ".part")
+        size = 0
+        digest = hashlib.sha256()
+        try:
+            with temp_path.open("wb") as handle:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if not chunk:
+                        continue
+                    handle.write(chunk)
+                    digest.update(chunk)
+                    size += len(chunk)
+            temp_path.replace(destination)
+        finally:
+            response.close()
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+        return {
+            "path": str(destination),
+            "size_bytes": size,
+            "sha256": digest.hexdigest(),
+            "content_type": response.headers.get("content-type"),
+            "etag": str(response.headers.get("etag") or "").strip('"') or None,
         }
 
     def put_file_if_absent(
@@ -366,6 +397,7 @@ class S3ObjectStorage:
         buckets = [
             self.settings.object_storage_raw_bucket,
             self.settings.object_storage_manifest_bucket,
+            self.settings.object_storage_derived_bucket,
         ]
         try:
             for bucket in buckets:

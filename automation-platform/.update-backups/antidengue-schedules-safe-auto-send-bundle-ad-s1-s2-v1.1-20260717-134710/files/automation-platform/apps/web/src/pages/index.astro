@@ -1,0 +1,389 @@
+---
+import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
+---
+
+<AntiDengueLayout title="AntiDengue reporting" description="Run the existing reporting pipeline and follow its progress from the web." page="dashboard">
+  <button class="btn btn-sm btn-ghost" id="refresh-button" type="button" slot="actions">↻ Refresh</button>
+
+        <section class="metric-grid" aria-label="AntiDengue file counts">
+          <article class="metric-card">
+            <span>Raw files</span>
+            <strong id="raw-files">—</strong>
+            <small>Waiting or downloaded</small>
+          </article>
+          <article class="metric-card">
+            <span>Output files</span>
+            <strong id="output-files">—</strong>
+            <small>Generated reports</small>
+          </article>
+          <article class="metric-card">
+            <span>Archived files</span>
+            <strong id="archived-files">—</strong>
+            <small>Processed source files</small>
+          </article>
+          <article class="metric-card warning-card">
+            <span>Mapping reports</span>
+            <strong id="unmapped-reports">—</strong>
+            <small>Officer mapping audits</small>
+          </article>
+        </section>
+
+        <section class="workspace-grid">
+          <div class="left-column">
+            <article class="panel run-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">New run</p>
+                  <h2>Run AntiDengue</h2>
+                </div>
+                <span class="environment-pill">Existing pipeline</span>
+              </div>
+
+              <form id="run-form">
+                <label class="field-label" for="login-mode">Portal login</label>
+                <select class="select select-bordered w-full" id="login-mode" name="login_mode">
+                  <option value="auto">Auto sign in</option>
+                  <option value="manual">Manual sign in</option>
+                  <option value="remote_approve">Remote approval</option>
+                </select>
+
+                <label class="mode-option selected" id="dry-mode-option">
+                  <input checked class="radio radio-primary" type="radio" name="run_mode" value="dry" />
+                  <span>
+                    <strong>Dry run</strong>
+                    <small>Generate reports without sending WhatsApp messages.</small>
+                  </span>
+                </label>
+                <label class="mode-option live-option" id="live-mode-option">
+                  <input class="radio radio-error" type="radio" name="run_mode" value="live" />
+                  <span>
+                    <strong>Live send</strong>
+                    <small>Generate reports and publish WhatsApp delivery jobs.</small>
+                  </span>
+                </label>
+
+                <div class="form-message" id="form-message" role="status"></div>
+                <button class="btn btn-primary w-full" id="run-button" type="submit">▶ Start dry run</button>
+              </form>
+            </article>
+
+            <article class="panel history-panel">
+              <div class="panel-heading compact">
+                <div>
+                  <p class="eyebrow">Recent activity</p>
+                  <h2>Run history</h2>
+                </div>
+              </div>
+              <div class="history-list" id="job-list">
+                <p class="empty-state">Loading AntiDengue runs…</p>
+              </div>
+            </article>
+          </div>
+
+          <article class="panel activity-panel">
+            <div class="activity-header">
+              <div>
+                <p class="eyebrow">Selected run</p>
+                <h2 id="selected-title">Activity</h2>
+                <p id="selected-meta">Select a run to inspect its activity.</p>
+              </div>
+              <span class="job-status neutral" id="selected-status">No run</span>
+            </div>
+
+            <div class="run-result" id="run-result" hidden></div>
+
+            <div class="terminal-toolbar">
+              <span><i></i> Live output</span>
+              <button type="button" id="copy-logs">Copy logs</button>
+            </div>
+            <div class="terminal" id="terminal" aria-live="polite">
+              <p class="terminal-empty">Run activity will appear here.</p>
+            </div>
+
+            <div class="artifacts-section">
+              <div class="section-title-row">
+                <h3>Generated reports</h3>
+                <div class="artifact-heading-actions"><span id="artifact-count">0 files</span><a class="btn btn-xs btn-primary" id="plan-dispatch" href="/whatsapp/previews" hidden>Preview dispatch →</a></div>
+              </div>
+              <div class="artifact-list" id="artifact-list">
+                <p class="empty-state">No generated reports for this run.</p>
+              </div>
+              <p class="route-draft-note" id="route-draft-note" hidden></p>
+              <details class="diagnostics" id="diagnostics" hidden>
+                <summary>Diagnostics <span id="diagnostic-count"></span></summary>
+                <div class="artifact-list" id="diagnostic-list"></div>
+              </details>
+            </div>
+          </article>
+        </section>
+
+    <script>
+      const API_BASE = import.meta.env.PUBLIC_API_BASE_URL || "http://localhost:8020";
+
+      type Job = {
+        id: string;
+        type: string;
+        title: string;
+        status: string;
+        parameters: Record<string, unknown>;
+        result?: Record<string, any> | null;
+        error?: string | null;
+        created_at: string;
+        started_at?: string | null;
+        finished_at?: string | null;
+      };
+
+      type JobLog = { id: number; level: string; message: string; created_at: string };
+      type Artifact = { id: number; name: string; kind: string; size_bytes: number };
+
+      let selectedJobId: string | null = new URLSearchParams(window.location.search).get("job_id");
+      let selectedJobStatus = "";
+      let jobs: Job[] = [];
+      let pollTimer: number | undefined;
+
+      const get = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+
+      async function api<T>(path: string, init?: RequestInit): Promise<T> {
+        const response = await fetch(`${API_BASE}${path}`, {
+          headers: { "Content-Type": "application/json" },
+          ...init
+        });
+        if (!response.ok) {
+          let message = response.statusText;
+          try {
+            const body = await response.json();
+            message = body.detail || message;
+          } catch {}
+          throw new Error(message);
+        }
+        return response.json();
+      }
+
+      function formatDate(value?: string | null) {
+        return value ? new Date(value).toLocaleString() : "—";
+      }
+
+      function formatBytes(bytes: number) {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+      }
+
+      function statusLabel(status: string) {
+        return status.charAt(0).toUpperCase() + status.slice(1);
+      }
+
+      async function loadOverview() {
+        const overview = await api<any>("/api/v1/antidengue/overview");
+        get("raw-files").textContent = String(overview.counts.raw_files);
+        get("output-files").textContent = String(overview.counts.output_files);
+        get("archived-files").textContent = String(overview.counts.archived_files);
+        get("unmapped-reports").textContent = String(overview.counts.unmapped_reports);
+        get("api-status").textContent = overview.project_available
+          ? "AntiDengue project found"
+          : "AntiDengue project missing";
+        get("run-button").toggleAttribute("disabled", Boolean(overview.active_job_id));
+        if (overview.active_job_id && !selectedJobId) selectedJobId = overview.active_job_id;
+      }
+
+      function renderJobs() {
+        const list = get("job-list");
+        list.replaceChildren();
+        if (!jobs.length) {
+          list.innerHTML = '<p class="empty-state">No web runs yet. Start with a dry run.</p>';
+          return;
+        }
+        for (const job of jobs) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = `history-item ${job.id === selectedJobId ? "selected" : ""}`;
+          button.innerHTML = `
+            <span class="history-status ${job.status}"></span>
+            <span class="history-copy">
+              <strong>${job.parameters.input_source === "manual_upload" ? "Manual dry run" : job.parameters.dry_run ? "Dry run" : "Live send"}</strong>
+              <small>${formatDate(job.created_at)}</small>
+            </span>
+            <span class="job-status ${job.status}">${statusLabel(job.status)}</span>`;
+          button.addEventListener("click", () => selectJob(job.id));
+          list.append(button);
+        }
+      }
+
+      async function loadJobs() {
+        jobs = await api<Job[]>("/api/v1/jobs?job_type=antidengue.report&limit=20");
+        if (selectedJobId && !jobs.some((job) => job.id === selectedJobId)) selectedJobId = null;
+        if (!selectedJobId && jobs.length) selectedJobId = jobs[0].id;
+        renderJobs();
+        if (selectedJobId) await loadSelectedJob();
+      }
+
+      function renderResult(job: Job) {
+        const box = get("run-result");
+        const summary = job.result?.summary;
+        if (!summary && !job.error) {
+          box.hidden = true;
+          return;
+        }
+        const dormant = summary?.counts?.final_school_count ?? summary?.quality_gate?.final_school_count;
+        const delivered = summary?.whatsapp?.delivered ?? summary?.whatsapp?.delivered_count;
+        const quality = summary?.quality_gate?.passed;
+        box.hidden = false;
+        box.innerHTML = job.error
+          ? `<strong>Run failed</strong><span>${job.error}</span>`
+          : `<div><span>Dormant schools</span><strong>${dormant ?? "—"}</strong></div>
+             <div><span>Quality gate</span><strong>${quality === false ? "Blocked" : quality === true ? "Passed" : "—"}</strong></div>
+             <div><span>Delivered</span><strong>${delivered ?? "—"}</strong></div>`;
+      }
+
+      function renderLogs(logs: JobLog[]) {
+        const terminal = get("terminal");
+        terminal.replaceChildren();
+        if (!logs.length) {
+          terminal.innerHTML = '<p class="terminal-empty">Waiting for worker output…</p>';
+          return;
+        }
+        for (const log of logs) {
+          const row = document.createElement("div");
+          row.className = `log-row ${log.level.toLowerCase()}`;
+          const time = new Date(log.created_at).toLocaleTimeString([], { hour12: false });
+          row.innerHTML = `<time>${time}</time><b>${log.level.toUpperCase()}</b><span></span>`;
+          row.querySelector("span")!.textContent = log.message;
+          terminal.append(row);
+        }
+        terminal.scrollTop = terminal.scrollHeight;
+      }
+
+      function renderArtifacts(artifacts: Artifact[]) {
+        const list = get("artifact-list");
+        const isDispatchDraft = (artifact: Artifact) =>
+          artifact.kind === "dispatch_draft" || artifact.name.toLowerCase().includes("group-route-excels/");
+        const isDiagnostic = (artifact: Artifact) => {
+          const name = artifact.name.toLowerCase();
+          return ["audit", "manifest"].includes(artifact.kind) || name.includes("audit") || name.endsWith("run_summary.json");
+        };
+        const drafts = artifacts.filter(isDispatchDraft);
+        const diagnostics = artifacts.filter((artifact) => !isDispatchDraft(artifact) && isDiagnostic(artifact));
+        const reports = artifacts.filter((artifact) => !isDispatchDraft(artifact) && !isDiagnostic(artifact));
+
+        get("artifact-count").textContent = `${reports.length} ${reports.length === 1 ? "file" : "files"}`;
+        list.replaceChildren();
+        if (!reports.length) {
+          list.innerHTML = '<p class="empty-state">No generated reports for this run.</p>';
+        }
+
+        const appendArtifact = (container: HTMLElement, artifact: Artifact) => {
+          const link = document.createElement("a");
+          link.className = "artifact-item";
+          link.href = `${API_BASE}/api/v1/artifacts/${artifact.id}/download`;
+          link.innerHTML = `<span class="file-icon">↓</span><span><strong></strong><small>${artifact.kind.toUpperCase()} · ${formatBytes(artifact.size_bytes)}</small></span>`;
+          link.querySelector("strong")!.textContent = artifact.name;
+          container.append(link);
+        };
+        reports.forEach((artifact) => appendArtifact(list, artifact));
+
+        const draftNote = get("route-draft-note");
+        draftNote.hidden = drafts.length === 0;
+        draftNote.textContent = drafts.length
+          ? `${drafts.length} internal route ${drafts.length === 1 ? "draft is" : "drafts are"} reserved for Dispatch Preview and are not final reports.`
+          : "";
+
+        const diagnosticPanel = get<HTMLDetailsElement>("diagnostics");
+        const diagnosticList = get("diagnostic-list");
+        diagnosticList.replaceChildren();
+        diagnosticPanel.hidden = diagnostics.length === 0;
+        get("diagnostic-count").textContent = `(${diagnostics.length})`;
+        diagnostics.forEach((artifact) => appendArtifact(diagnosticList, artifact));
+        if (!diagnostics.length) {
+          diagnosticPanel.open = false;
+        }
+      }
+
+      async function loadSelectedJob() {
+        if (!selectedJobId) return;
+        const job = await api<Job>(`/api/v1/jobs/${selectedJobId}`);
+        selectedJobStatus = job.status;
+        const active = ["queued", "running"].includes(job.status);
+        const [logs, artifacts] = await Promise.all([
+          api<JobLog[]>(`/api/v1/jobs/${selectedJobId}/logs?limit=500`),
+          active ? Promise.resolve([] as Artifact[]) : api<Artifact[]>(`/api/v1/jobs/${selectedJobId}/artifacts`)
+        ]);
+        get("selected-title").textContent = job.parameters.input_source === "manual_upload" ? "Manual report activity" : job.parameters.dry_run ? "Dry run activity" : "Live send activity";
+        get("selected-meta").textContent = `${formatDate(job.created_at)} · ${job.id.slice(0, 8)}`;
+        const badge = get("selected-status");
+        badge.className = `job-status ${job.status}`;
+        badge.textContent = statusLabel(job.status);
+        renderResult(job);
+        renderLogs(logs);
+        renderArtifacts(artifacts);
+        const previewLink = get<HTMLAnchorElement>("plan-dispatch");
+        previewLink.hidden = job.status !== "succeeded" || !Boolean(job.parameters.dry_run);
+        previewLink.href = `/whatsapp/previews?source_job_id=${job.id}`;
+      }
+
+      async function selectJob(id: string) {
+        selectedJobId = id;
+        renderJobs();
+        await loadSelectedJob();
+      }
+
+      async function refreshAll() {
+        try {
+          await Promise.all([loadOverview(), loadJobs()]);
+        } catch (error) {
+          get("api-status").textContent = error instanceof Error ? error.message : "API unavailable";
+          get("form-message").textContent = "Could not connect to the platform API.";
+        } finally {
+          window.clearTimeout(pollTimer);
+          if (["queued", "running"].includes(selectedJobStatus)) {
+            pollTimer = window.setTimeout(refreshAll, 2500);
+          }
+        }
+      }
+
+      document.querySelectorAll<HTMLInputElement>('input[name="run_mode"]').forEach((radio) => {
+        radio.addEventListener("change", () => {
+          const isDry = radio.value === "dry" && radio.checked;
+          get("dry-mode-option").classList.toggle("selected", isDry);
+          get("live-mode-option").classList.toggle("selected", !isDry);
+          get("run-button").textContent = isDry ? "▶ Start dry run" : "▶ Start live send";
+        });
+      });
+
+      get<HTMLFormElement>("run-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const mode = new FormData(event.currentTarget).get("run_mode");
+        const dryRun = mode !== "live";
+        if (!dryRun && !confirm("This will send WhatsApp reports. Start the live AntiDengue run?")) return;
+        const runButton = get<HTMLButtonElement>("run-button");
+        const message = get("form-message");
+        runButton.disabled = true;
+        runButton.textContent = "Queueing…";
+        message.textContent = "";
+        try {
+          const job = await api<Job>("/api/v1/antidengue/runs", {
+            method: "POST",
+            body: JSON.stringify({
+              dry_run: dryRun,
+              login_mode: get<HTMLSelectElement>("login-mode").value
+            })
+          });
+          selectedJobId = job.id;
+          message.textContent = `Queued ${dryRun ? "dry run" : "live send"}.`;
+          await refreshAll();
+        } catch (error) {
+          message.textContent = error instanceof Error ? error.message : "Could not queue run";
+          runButton.disabled = false;
+        }
+      });
+
+      get("refresh-button").addEventListener("click", refreshAll);
+      get("copy-logs").addEventListener("click", async () => {
+        await navigator.clipboard.writeText(get("terminal").innerText);
+        get("copy-logs").textContent = "Copied";
+        window.setTimeout(() => (get("copy-logs").textContent = "Copy logs"), 1200);
+      });
+
+      refreshAll();
+      window.addEventListener("beforeunload", () => window.clearTimeout(pollTimer));
+    </script>
+</AntiDengueLayout>

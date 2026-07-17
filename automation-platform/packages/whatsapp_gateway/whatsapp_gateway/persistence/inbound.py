@@ -216,6 +216,105 @@ class WhatsAppInboundBatchEvent(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
+class WhatsAppInboundProcessingRun(SQLModel, table=True):
+    __tablename__ = "whatsapp_inbound_processing_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'extracting', 'checking_paperless', 'completed', 'completed_with_errors', 'failed', 'cancelled')",
+            name="ck_whatsapp_inbound_processing_runs_status",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    run_code: str = Field(unique=True, index=True)
+    batch_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_batches.id", index=True)
+    status: str = Field(default="queued", index=True)
+    classifier_version: str = Field(default="crm-classifier-v1", index=True)
+    crm_rule_version: str = Field(default="crm-104-v1", index=True)
+    paperless_check_requested: bool = Field(default=True, index=True)
+    paperless_check_status: str = Field(default="pending", index=True)
+    paperless_error: str | None = Field(default=None, sa_column=Column(Text))
+    total_items: int = 0
+    processed_items: int = 0
+    crm_complaints: int = 0
+    possible_crm: int = 0
+    supporting_documents: int = 0
+    reply_reports: int = 0
+    non_crm: int = 0
+    unknown_items: int = 0
+    duplicate_items: int = 0
+    eligible_items: int = 0
+    review_items: int = 0
+    failed_items: int = 0
+    configuration_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    error: str | None = Field(default=None, sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    started_at: datetime | None = Field(default=None, index=True)
+    finished_at: datetime | None = Field(default=None, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class WhatsAppInboundProcessingItem(SQLModel, table=True):
+    __tablename__ = "whatsapp_inbound_processing_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id", "batch_item_id",
+            name="uq_whatsapp_inbound_processing_item_batch_item",
+        ),
+        CheckConstraint(
+            "status IN ('queued', 'extracting', 'extracted', 'duplicate_in_paperless', 'eligible', 'needs_review', 'approved', 'rejected', 'deferred', 'unsupported', 'failed')",
+            name="ck_whatsapp_inbound_processing_items_status",
+        ),
+        CheckConstraint(
+            "review_status IN ('pending', 'approved', 'rejected', 'deferred')",
+            name="ck_whatsapp_inbound_processing_items_review_status",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    run_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_processing_runs.id", index=True)
+    batch_item_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_batch_items.id", index=True)
+    attachment_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_attachments.id", index=True)
+    stored_object_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_inbound_stored_objects.id", index=True)
+    status: str = Field(default="queued", index=True)
+    primary_category: str = Field(default="unknown", index=True)
+    detected_complaint_number: str | None = Field(default=None, index=True)
+    confidence: float = 0.0
+    evidence_json: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    extracted_text: str | None = Field(default=None, sa_column=Column(Text))
+    extraction_method: str | None = Field(default=None, index=True)
+    extracted_metadata_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    paperless_category: str = Field(default="not_checked", index=True)
+    paperless_reason: str | None = Field(default=None, sa_column=Column(Text))
+    paperless_document_ids: list[int | str] = Field(default_factory=list, sa_column=Column(JSON))
+    paperless_statuses: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    review_status: str = Field(default="pending", index=True)
+    reviewer_note: str | None = Field(default=None, sa_column=Column(Text))
+    reviewed_by: str | None = Field(default=None, index=True)
+    reviewed_at: datetime | None = Field(default=None, index=True)
+    derived_object_key: str | None = Field(default=None, sa_column=Column(Text))
+    error: str | None = Field(default=None, sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    started_at: datetime | None = Field(default=None, index=True)
+    finished_at: datetime | None = Field(default=None, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class WhatsAppInboundProcessingEvent(SQLModel, table=True):
+    __tablename__ = "whatsapp_inbound_processing_events"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    run_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_processing_runs.id", index=True)
+    processing_item_id: uuid.UUID | None = Field(
+        default=None, foreign_key="whatsapp_inbound_processing_items.id", index=True
+    )
+    level: str = Field(default="info", index=True)
+    event_type: str = Field(index=True)
+    message: str = Field(sa_column=Column(Text))
+    details_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
 class WhatsAppInboundExportRun(SQLModel, table=True):
     __tablename__ = "whatsapp_inbound_export_runs"
     __table_args__ = (
@@ -288,6 +387,9 @@ __all__ = [
     'WhatsAppInboundBatch',
     'WhatsAppInboundBatchItem',
     'WhatsAppInboundBatchEvent',
+    'WhatsAppInboundProcessingRun',
+    'WhatsAppInboundProcessingItem',
+    'WhatsAppInboundProcessingEvent',
     'WhatsAppInboundExportRun',
     'WhatsAppInboundExportItem',
 ]

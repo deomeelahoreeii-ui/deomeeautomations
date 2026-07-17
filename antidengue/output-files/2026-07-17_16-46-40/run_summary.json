@@ -1,0 +1,120 @@
+{
+  "dry_run": true,
+  "filter": {
+    "applied": true,
+    "available_activity_columns": [
+      "Simple Activities",
+      "Patient Activities",
+      "Vector Surveillance Activities",
+      "Larvae Case Response",
+      "Total Activities"
+    ],
+    "dormant_raw_rows": 0,
+    "missing_activity_columns": [
+      "TPV Activities"
+    ],
+    "raw_rows": 1021,
+    "strategy": "Total Activities"
+  },
+  "input": {
+    "name": "user_wise_dormancy_report.xls",
+    "path": "/home/ahmad/code/deomeeautomations/antidengue/drop-raw-files/user_wise_dormancy_report.xls",
+    "portal_duplicate_raw_check": null,
+    "sha256": "21d9a214e8e72775128070cabc3131e411a109a10409b1f261f5e6cdc6bc0bcd",
+    "size_bytes": 101056,
+    "source": "portal"
+  },
+  "lifecycle": [
+    {
+      "created_at": "2026-07-17T16:46:40",
+      "message": "Run started.",
+      "payload": {
+        "dry_run": true,
+        "file": "/home/ahmad/code/deomeeautomations/antidengue/drop-raw-files/user_wise_dormancy_report.xls",
+        "input_source": "portal"
+      },
+      "stage": "started",
+      "status": "started"
+    },
+    {
+      "created_at": "2026-07-17T16:46:40",
+      "message": "Raw report loaded with 1021 row(s).",
+      "payload": {
+        "raw_file_sha256": "21d9a214e8e72775128070cabc3131e411a109a10409b1f261f5e6cdc6bc0bcd",
+        "raw_file_size_bytes": 101056,
+        "raw_rows": 1021
+      },
+      "stage": "downloaded",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-17T16:46:40",
+      "message": "Dormant filter produced 0 row(s).",
+      "payload": {
+        "dormant_rows": 0,
+        "filter_applied": true,
+        "filter_strategy": "Total Activities"
+      },
+      "stage": "processed",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-17T16:46:40",
+      "message": "No dormant schools found after filtering.",
+      "payload": {
+        "dormant_rows": 0
+      },
+      "stage": "validated",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-17T16:46:40",
+      "message": "Dispatch skipped because there are zero inactive schools.",
+      "payload": {},
+      "stage": "dispatch_blocked",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-17T16:46:40",
+      "message": "Run summary prepared at /home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-17_16-46-40/run_summary.json.",
+      "payload": {},
+      "stage": "summary_saved",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-17T16:46:40",
+      "message": "Run completed with zero inactive schools.",
+      "payload": {},
+      "stage": "completed",
+      "status": "ok"
+    }
+  ],
+  "outputs": {
+    "activity_evidence": null,
+    "audit_dir": "/home/ahmad/code/deomeeautomations/antidengue/unmapped-officer-reports/2026-07-17_16-46-40",
+    "excel_report": null,
+    "officer_delivery_audit": null,
+    "officer_mapping_audit": null,
+    "output_dir": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-17_16-46-40"
+  },
+  "quality_gate": {
+    "errors": [],
+    "final_school_count": 0,
+    "invalid_contact_count": 0,
+    "invalid_contact_ratio": 0,
+    "master_count": 1028,
+    "master_coverage_ratio": 0,
+    "passed": true,
+    "unmapped_ratio": 0,
+    "unmapped_school_count": 0,
+    "warnings": []
+  },
+  "report_source": "unfiltered",
+  "run_started_at": "2026-07-17T16:46:40.637350",
+  "whatsapp": {
+    "dry_run": true,
+    "queued": false,
+    "skipped_reason": "zero inactive schools",
+    "total_payloads": 0
+  }
+}

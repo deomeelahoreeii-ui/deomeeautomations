@@ -41,6 +41,14 @@ from whatsapp_gateway.inbound.history_tracking import (
 )
 from whatsapp_gateway.inbound.ingestion import ingest_event
 from whatsapp_gateway.inbound.media_upload import upload_attachment_content
+from whatsapp_gateway.inbound.processing_api import (
+    create_inbound_processing_run,
+    list_inbound_processing_events,
+    list_inbound_processing_runs,
+    preview_inbound_processing_item,
+    read_inbound_processing_run,
+    review_inbound_processing_item,
+)
 from whatsapp_gateway.inbound.schemas import (
     AttachmentEvent,
     CreateInboundExportRequest,
@@ -75,6 +83,12 @@ router.post("/exports/preview")(preview_inbound_export)
 router.post("/exports", status_code=status.HTTP_202_ACCEPTED)(create_inbound_export)
 router.get("/exports")(list_inbound_exports)
 router.get("/exports/{export_id}")(read_inbound_export)
+router.post("/processing-runs", status_code=status.HTTP_202_ACCEPTED)(create_inbound_processing_run)
+router.get("/processing-runs")(list_inbound_processing_runs)
+router.get("/processing-runs/{run_id}")(read_inbound_processing_run)
+router.get("/processing-runs/{run_id}/events")(list_inbound_processing_events)
+router.post("/processing-items/{item_id}/review")(review_inbound_processing_item)
+router.get("/processing-items/{item_id}/content")(preview_inbound_processing_item)
 router.get("/status")(inbound_status)
 
 __all__ = [

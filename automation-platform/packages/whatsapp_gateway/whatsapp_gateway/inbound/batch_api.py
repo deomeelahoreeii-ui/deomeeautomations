@@ -49,9 +49,16 @@ def _batch_view(session: Session, batch: WhatsAppInboundBatch) -> dict[str, Any]
             WhatsAppInboundHistoryRequest.batch_id == batch.id
         )
     ).first()
+    push_name = session.exec(
+        select(WhatsAppInboundMessage.push_name)
+        .where(WhatsAppInboundMessage.directory_contact_id == batch.contact_id)
+        .where(WhatsAppInboundMessage.push_name.is_not(None))
+        .order_by(WhatsAppInboundMessage.message_timestamp.desc())
+        .limit(1)
+    ).first()
     return {
         **serialize_batch(batch),
-        "contact_name": (contact.display_name if contact else "") or "Unnamed contact",
+        "contact_name": (contact.display_name if contact else "") or str(push_name or "Unnamed contact"),
         "contact_identity": (
             (contact.phone_jid or contact.primary_lid_jid or contact.canonical_key)
             if contact

@@ -1,0 +1,137 @@
+{
+  "bundle": "antidengue-orchestration-reliability-bundle-ad-r1",
+  "files": [
+    {
+      "path": "automation-platform/alembic/env.py",
+      "before_sha256": "31d1195018d9c891105a0e391fa7d3d007eb1a56fd932d0f8fe9207ca8126869",
+      "after_sha256": "422190e6934fc88f6c66a9786ec47242ccd20fbde1642ccab84b33df88b1735e",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/alembic/versions/f9a2b3c4d5e6_task_outbox_antidengue_reliability.py",
+      "before_sha256": null,
+      "after_sha256": "a8fb81e2c4eae04eb646fef355d5a989ced93001566d57f99d2c60ad6f277126",
+      "before_exists": false
+    },
+    {
+      "path": "automation-platform/apps/api/automation_api/main.py",
+      "before_sha256": "9b6ea17921a3074386245930ef87c8b2d73c5bc968b3db47006d458f1a007d3a",
+      "after_sha256": "2861a9ddc5eec1c754b1a56f3d7ff4f0a967703f4e7bbf3d5d8a62b5e3dd6c16",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/apps/web/src/pages/antidengue/run-history.astro",
+      "before_sha256": "8078063dc6c02db16a7c30a70e98caefea4461caee2bdbe36c88f20c839e11ac",
+      "after_sha256": "7a10044d7ba5d0f9f9b8721c5428005795397ff2bf0ea3a0dc9767da3a61a217",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/apps/web/src/pages/index.astro",
+      "before_sha256": "8968d92d6618930331efaee3d48e5ff629fdd6733774b8132baa4b14df5d6658",
+      "after_sha256": "c3b245209188a08f38f76c8c6f4ac03f22d1378da6232172ebbe5a878816aa8f",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/packages/antidengue_automation/antidengue_automation/api.py",
+      "before_sha256": "44a1697dd6bf84c0b184f1addc9876746e02a1543860d24286b655a2b292ab03",
+      "after_sha256": "696ec890478b65adbd2b7631a1f94217e4edd2c4b129cad8d20907b8354f2a28",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/packages/antidengue_automation/antidengue_automation/scheduler_service.py",
+      "before_sha256": "bcbed1f8d058d8d19bb51d8c960c2ffadda391c0ff863da0f01f0ddfbef489f9",
+      "after_sha256": "4912af6af3ad125091bca77b983a16494b1efc8166ad72c1b5155883e50e4aa5",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/packages/antidengue_automation/antidengue_automation/scheduling.py",
+      "before_sha256": "a781d549f786e1a95b929aae2ddd61a3401668ee1a9c64cadda73e51db03c733",
+      "after_sha256": "49c39bbc6ded6934a25a610f4f25851c8a940b7935aa06a6747a03aa26e7e2e2",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/packages/antidengue_automation/antidengue_automation/tasks.py",
+      "before_sha256": "db601a0109a6f6c3279c379fe6a585747bf0f89c3a57fa09eab11fb7fafba9b0",
+      "after_sha256": "565dd826d32a712648f723af428891a149fa119053e6b0a5ec0307bc2f8fec0c",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/packages/automation_core/automation_core/celery_app.py",
+      "before_sha256": "b5bf896db6e0803261e0caab2ab7eaac8285bb21330a69559d68a3c525f8de4c",
+      "after_sha256": "63cc65bf0d6997323a4b1619b0ecd40b92d9f6999318ced4db15061efdf20ea1",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/packages/automation_core/automation_core/database_identity.py",
+      "before_sha256": null,
+      "after_sha256": "5799487ee0af21624fc1cf23dc189f4afb6c96ce2440a46c5c7183be4aa713f0",
+      "before_exists": false
+    },
+    {
+      "path": "automation-platform/packages/automation_core/automation_core/job_service.py",
+      "before_sha256": "09d8ba74e5ba33826b16828de42cb93327c8650f0adcf87330aadd1d4c317a48",
+      "after_sha256": "5fdc600fa11c9ab458c094251efc8f8b5e7145cc57fa21bf36262cbe12493e98",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/packages/automation_core/automation_core/models.py",
+      "before_sha256": "907e67b8dea907131f0ebbe4face097258c99e9284d70041850c87c2d5681a49",
+      "after_sha256": "537a0e58ac140c21d37f66e57f4745d90e9745e0f8cae44c0dc8f88a02430599",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/packages/automation_core/automation_core/task_outbox.py",
+      "before_sha256": null,
+      "after_sha256": "f31260f2c7e7deef5ba44cf05f6541afe51bbcbc5591e99d4f663f6c91354b69",
+      "before_exists": false
+    },
+    {
+      "path": "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/dispatch/task_entrypoints.py",
+      "before_sha256": "307b040e0e0337517d6953d6d60d9c403569b87e1fc4e2c214ff3142b06129e8",
+      "after_sha256": "4db589fbe1307a003f35df6673dfde5e0cfd8d83537c6964c478cad165de6b56",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/approval.py",
+      "before_sha256": "9c2bfe10593229ee19790e740e99167b367c33dcd99d5688b3e60f90a0f1af8c",
+      "after_sha256": "e4311732d11c72ba8292286a5a61443bcc673481329c5914a29cf0af2b7818f1",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/creation.py",
+      "before_sha256": "d0f485c5c16ab55a0d02aeb21f0f67c12a2594d23e3de854db6468fc58cb70ef",
+      "after_sha256": "7d3bbca2797b00b0c5affdbf63b15bb131395da8f6b047c61c52a4f7b0c9696d",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/scripts/dev.sh",
+      "before_sha256": "f8392a5bf64b81ff83a8490a522a8b47845fef581f0bc726dae436b34be451a5",
+      "after_sha256": "50dd5944c975d2eda5f5bbb99910c2b14652cbf2d718cfb7d1411e2bea36e67b",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/scripts/recover_antidengue_executions.py",
+      "before_sha256": null,
+      "after_sha256": "8b8979af91d4169dc853936e104ec85d6cb9b74305f4c6475af426b4d82604c6",
+      "before_exists": false
+    },
+    {
+      "path": "automation-platform/tests/test_antidengue_reliability.py",
+      "before_sha256": null,
+      "after_sha256": "5e4b2226ed05445f2606b0698d525981f1dd67725eb8cb0a4a3464c47588ef2d",
+      "before_exists": false
+    },
+    {
+      "path": "automation-platform/tests/test_antidengue_scheduling.py",
+      "before_sha256": "1e94ac317d28aa705eee752c854c3a1bddf75a6f5730a6cddf10b66d0daa30bb",
+      "after_sha256": "2773ef8d10107e383e9c342f0fae6e82cdc74087013788411f103092860ed576",
+      "before_exists": true
+    },
+    {
+      "path": "automation-platform/tests/test_api.py",
+      "before_sha256": "920b17faca604f577a39935615c4a67ab83b71b9f5d6b2764f42d2d683b41047",
+      "after_sha256": "d5423f7ad49f4d1eec49cd8c1734eea2a737e848f6a783d840c887fd8cc5f31f",
+      "before_exists": true
+    }
+  ]
+}
