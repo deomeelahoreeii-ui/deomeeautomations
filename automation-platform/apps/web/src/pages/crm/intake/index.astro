@@ -1,0 +1,113 @@
+---
+import CrmIntakeNav from "../../../components/CrmIntakeNav.astro";
+import CrmLayout from "../../../layouts/CrmLayout.astro";
+---
+
+<CrmLayout
+  title="WhatsApp Complaint Intake"
+  description="Capture a complainant's WhatsApp history and supporting evidence, then continue into CRM review."
+  page="intake"
+>
+  <button class="btn btn-sm" id="refresh-page" slot="actions">↻ Refresh</button>
+  <CrmIntakeNav active="intake" />
+
+  <div class="notice inbound-coverage-notice">
+    WhatsApp remains the secure capture channel. CRM owns the complaint intake, evidence review and Paperless decision. Every history request is retained as an auditable intake run.
+  </div>
+
+  <section class="inbound-workspace-grid">
+    <article class="master-card inbound-fetch-card">
+      <div class="inbound-card-heading">
+        <div><p class="eyebrow">Step 1</p><h2>Complainant and conversation scope</h2></div>
+        <span class="badge" id="inbound-bridge-state">Bridge not checked</span>
+      </div>
+
+      <div class="inbound-contact-picker">
+        <label><span>WhatsApp contact</span><input class="input input-bordered" id="inbound-contact-search" autocomplete="off" placeholder="Search name, phone JID or LID…" /></label>
+        <input type="hidden" id="inbound-contact-id" />
+        <div class="inbound-contact-results" id="inbound-contact-results" hidden></div>
+        <div class="inbound-selected-contact" id="inbound-selected-contact" hidden>
+          <div><strong id="inbound-selected-name"></strong><small id="inbound-selected-identity"></small></div>
+          <button class="btn btn-xs" type="button" id="clear-inbound-contact">Change</button>
+        </div>
+      </div>
+
+      <div class="wa-form-grid inbound-filter-grid">
+        <label><span>Date range</span><select class="select select-bordered" id="inbound-date-preset"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="today">Today</option><option value="all">All captured messages</option><option value="custom">Custom range</option></select></label>
+        <label><span>Message scope</span><select class="select select-bordered" id="inbound-chat-scope"><option value="direct">Direct chat only</option><option value="direct_and_groups">Direct chat and files sent in groups</option></select></label>
+        <label class="custom-date-field" hidden><span>From</span><input class="input input-bordered" id="inbound-date-from" type="date" /></label>
+        <label class="custom-date-field" hidden><span>To</span><input class="input input-bordered" id="inbound-date-to" type="date" /></label>
+      </div>
+
+      <fieldset class="inbound-type-options"><legend>Supporting evidence</legend><label><input type="checkbox" value="image" checked /> Images</label><label><input type="checkbox" value="pdf" checked /> PDFs</label><label><input type="checkbox" value="spreadsheet" checked /> Excel / CSV / ODS</label></fieldset>
+
+      <div class="inbound-history-request">
+        <label><span>Conversation history</span><select class="select select-bordered" id="inbound-history-count"><option value="25">25 messages</option><option value="50" selected>50 messages</option><option value="100">100 messages</option><option value="200">200 messages</option></select></label>
+        <button class="btn btn-primary" id="request-inbound-history" type="button" disabled>Start complaint intake</button>
+      </div>
+      <p class="inbound-history-help" id="inbound-bridge-detail">Select a contact to check the managed browser.</p>
+
+      <div class="inbound-primary-actions">
+        <button class="btn" id="scan-inbound-files" type="button">Scan captured evidence</button>
+        <button class="btn" id="build-inbound-export" type="button" disabled>Build evidence package</button>
+      </div>
+      <p class="inbound-form-status" id="inbound-form-status"></p>
+    </article>
+
+    <article class="master-card inbound-live-card">
+      <div class="inbound-card-heading">
+        <div><p class="eyebrow">Step 2</p><h2>Live intake activity</h2></div>
+        <span class="badge" id="current-batch-status">No intake</span>
+      </div>
+      <div class="inbound-batch-identity">
+        <div><span>Intake run</span><strong id="current-batch-code">—</strong></div>
+        <a class="btn btn-xs" id="open-current-batch" href="/crm/intake/batches" hidden>Open details</a>
+      </div>
+      <div class="inbound-metrics inbound-live-metrics">
+        <article><span>Messages</span><strong id="batch-messages">—</strong></article>
+        <article><span>Files</span><strong id="batch-files">—</strong></article>
+        <article><span>Stored</span><strong id="batch-stored">—</strong></article>
+        <article><span>Reused</span><strong id="batch-reused">—</strong></article>
+      </div>
+      <pre class="inbound-log inbound-fetch-log" id="batch-live-log">Select a complainant and start intake. Activity from the server will appear here.</pre>
+    </article>
+  </section>
+
+  <section class="master-card inbound-scan-card">
+    <div class="inbound-card-heading"><div><p class="eyebrow">Step 3</p><h2>Captured complaint evidence</h2></div><span class="badge" id="inbound-preview-state">Not scanned</span></div>
+    <div class="inbound-metrics inbound-scan-metrics">
+      <article><span>All files</span><strong id="metric-all">—</strong></article><article><span>Images</span><strong id="metric-images">—</strong></article><article><span>PDFs</span><strong id="metric-pdfs">—</strong></article><article><span>Spreadsheets</span><strong id="metric-sheets">—</strong></article><article><span>Estimated size</span><strong id="metric-size">—</strong></article><article><span>Already archived</span><strong id="metric-archived">—</strong></article>
+    </div>
+    <div class="inbound-coverage" id="inbound-coverage">Select a contact and scan to see captured history coverage.</div>
+    <div class="table-wrap inbound-results-table"><table class="table table-sm inbound-file-table"><thead><tr><th>Received</th><th>File</th><th>Type</th><th>Chat</th><th>Archive</th></tr></thead><tbody id="inbound-preview-items"><tr><td colspan="5" class="empty-cell">No scan has been run.</td></tr></tbody></table></div>
+  </section>
+
+  <script>
+    import { actions } from "astro:actions";
+    const el = <T extends HTMLElement>(id:string)=>document.getElementById(id) as T;
+    const contactSearch=el<HTMLInputElement>("inbound-contact-search"), contactId=el<HTMLInputElement>("inbound-contact-id"), contactResults=el<HTMLDivElement>("inbound-contact-results"), selectedContact=el<HTMLDivElement>("inbound-selected-contact"), historyButton=el<HTMLButtonElement>("request-inbound-history"), scanButton=el<HTMLButtonElement>("scan-inbound-files"), buildButton=el<HTMLButtonElement>("build-inbound-export"), previewItems=el<HTMLTableSectionElement>("inbound-preview-items"), log=el<HTMLPreElement>("batch-live-log");
+    let selected:any=null, latestPreview:any=null, bridgeReady=false, currentRequestId="", currentBatchId="", pollTimer:number|undefined, searchTimer:number|undefined;
+    const terminal=new Set(["completed","completed_with_errors","failed","cancelled"]);
+    const escapeHtml=(v:unknown)=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
+    const formatDate=(v:any)=>{if(!v)return"—";const d=new Date(v);return Number.isNaN(d.getTime())?String(v):d.toLocaleString();};
+    const formatBytes=(v:any)=>{const n=Number(v||0);if(!n)return"0 B";const u=["B","KB","MB","GB"];const i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),3);return`${(n/1024**i).toFixed(i?1:0)} ${u[i]}`;};
+    function status(message:string,kind=""){const node=el("inbound-form-status");node.textContent=message;node.className=`inbound-form-status ${kind}`;}
+    function selectedMediaTypes(){return Array.from(document.querySelectorAll<HTMLInputElement>(".inbound-type-options input:checked")).map(x=>x.value);}
+    function dateFilters(){const preset=el<HTMLSelectElement>("inbound-date-preset").value,now=new Date();if(preset==="all")return{date_from:null,date_to:null};if(preset==="today"){const a=new Date(now),b=new Date(now);a.setHours(0,0,0,0);b.setHours(23,59,59,999);return{date_from:a.toISOString(),date_to:b.toISOString()};}if(preset==="custom"){const a=el<HTMLInputElement>("inbound-date-from").value,b=el<HTMLInputElement>("inbound-date-to").value;return{date_from:a?new Date(`${a}T00:00:00`).toISOString():null,date_to:b?new Date(`${b}T23:59:59.999`).toISOString():null};}return{date_from:new Date(now.getTime()-Number(preset||30)*86400000).toISOString(),date_to:now.toISOString()};}
+    function filters(){if(!contactId.value)throw new Error("Select a WhatsApp contact first.");const media_types=selectedMediaTypes();if(!media_types.length)throw new Error("Select at least one file type.");return{contact_id:contactId.value,...dateFilters(),chat_scope:el<HTMLSelectElement>("inbound-chat-scope").value as "direct"|"direct_and_groups",media_types:media_types as any};}
+    async function searchContacts(){const q=contactSearch.value.trim();if(q.length<2){contactResults.hidden=true;return;}const r=await actions.whatsapp.directoryContacts({search:q,tokenStatus:"",page:1,pageSize:20});if(r.error){status(r.error.message,"error");return;}const items=(r.data as any).items||[];contactResults.innerHTML=items.length?items.map((x:any)=>`<button type="button" data-contact='${escapeHtml(JSON.stringify(x))}'><strong>${escapeHtml(x.display_name||"Unnamed contact")}</strong><small>${escapeHtml(x.phone_jid||x.primary_lid_jid||x.canonical_key||"")}</small></button>`).join(""):'<p class="empty-cell">No contacts matched.</p>';contactResults.hidden=false;}
+    function chooseContact(x:any){selected=x;contactId.value=x.id;el("inbound-selected-name").textContent=x.display_name||"Unnamed contact";el("inbound-selected-identity").textContent=x.phone_jid||x.primary_lid_jid||x.canonical_key||"";selectedContact.hidden=false;contactSearch.hidden=true;contactResults.hidden=true;latestPreview=null;buildButton.disabled=true;void loadBridge();}
+    function clearContact(){selected=null;contactId.value="";contactSearch.value="";contactSearch.hidden=false;selectedContact.hidden=true;historyButton.disabled=true;bridgeReady=false;currentRequestId="";currentBatchId="";stopPoll();resetBatch();}
+    async function loadBridge(){const r=await actions.whatsapp.inboundHistoryBridgeStatus({contactId:contactId.value});const state=el("inbound-bridge-state"),detail=el("inbound-bridge-detail");if(r.error){bridgeReady=false;state.textContent="Bridge error";detail.textContent=r.error.message;historyButton.disabled=true;return;}const d=r.data as any;bridgeReady=Boolean(d.historyReady??d.ready);state.textContent=bridgeReady?"Managed browser ready":String(d.status||"Unavailable");detail.textContent=bridgeReady?`Managed Brave page ready${d.webVersion?` · Web ${d.webVersion}`:""}.`:d.message||d.error||"Bridge is unavailable.";historyButton.disabled=!bridgeReady;}
+    function renderPreview(d:any){latestPreview=d;const c=d.counts||{},s=d.statuses||{};el("metric-all").textContent=String(d.files_found||0);el("metric-images").textContent=String(c.image||0);el("metric-pdfs").textContent=String(c.pdf||0);el("metric-sheets").textContent=String(c.spreadsheet||0);el("metric-size").textContent=formatBytes(d.declared_bytes);el("metric-archived").textContent=String(s.archived||0);el("inbound-preview-state").textContent=d.files_found?"Ready":"No matches";const cov=d.coverage||{};el("inbound-coverage").innerHTML=`<strong>Captured coverage:</strong> ${escapeHtml(formatDate(cov.earliest_message_at))} to ${escapeHtml(formatDate(cov.latest_message_at))}<br><small>${escapeHtml(cov.note||"Historical coverage may be partial.")}</small>`;const items=d.items||[];previewItems.innerHTML=items.length?items.map((x:any)=>`<tr><td>${escapeHtml(formatDate(x.timestamp))}</td><td><strong>${escapeHtml(x.filename)}</strong><small>${escapeHtml(x.caption||"")}</small></td><td><span class="badge">${escapeHtml(x.category)}</span><small>${escapeHtml(x.mime_type||"")}</small></td><td>${escapeHtml(x.chat_scope)}</td><td>${escapeHtml(x.download_status||"metadata_only")}</td></tr>`).join(""):'<tr><td colspan="5" class="empty-cell">No supported files matched.</td></tr>';buildButton.disabled=!d.files_found;}
+    async function scan(){try{scanButton.disabled=true;status("Scanning captured files…");const r=await actions.whatsapp.inboundExportPreview(filters());if(r.error)throw new Error(r.error.message);renderPreview(r.data);status(`Scan complete: ${(r.data as any).files_found} file(s).`,"success");}catch(e:any){status(e.message||String(e),"error");}finally{scanButton.disabled=false;}}
+    function resetBatch(){el("current-batch-code").textContent="—";el("current-batch-status").textContent="No intake";["batch-messages","batch-files","batch-stored","batch-reused"].forEach(id=>el(id).textContent="—");el<HTMLAnchorElement>("open-current-batch").hidden=true;log.textContent="Select a complainant and start intake. Activity from the server will appear here.";}
+    function renderBatch(b:any){currentBatchId=b.id;el("current-batch-code").textContent=b.batch_code;el("current-batch-status").textContent=b.status;el("batch-messages").textContent=String(b.messages_discovered||0);el("batch-files").textContent=String(b.files_discovered||0);el("batch-stored").textContent=String(b.files_stored||0);el("batch-reused").textContent=String(b.files_reused||0);const link=el<HTMLAnchorElement>("open-current-batch");link.href=`/crm/intake/batches/${b.id}`;link.hidden=false;}
+    async function loadBatch(){if(!currentBatchId)return;const [b,e]=await Promise.all([actions.whatsapp.inboundBatch({id:currentBatchId}),actions.whatsapp.inboundBatchEvents({id:currentBatchId,limit:500})]);if(b.data)renderBatch(b.data);if(e.data){const events=(e.data as any).items||[];log.textContent=events.length?events.map((x:any)=>`[${formatDate(x.created_at)}] ${String(x.level).toUpperCase().padEnd(7)} ${x.message}`).join("\n"):"Batch created. Waiting for WhatsApp Web activity…";log.scrollTop=log.scrollHeight;}if(b.data&&terminal.has((b.data as any).status)){stopPoll();await scan();}}
+    function startPoll(){stopPoll();void loadBatch();pollTimer=window.setInterval(()=>void loadBatch(),2000);}
+    function stopPoll(){if(pollTimer)window.clearInterval(pollTimer);pollTimer=undefined;}
+    async function requestHistory(){try{historyButton.disabled=true;const count=Number(el<HTMLSelectElement>("inbound-history-count").value||50);status(`Creating a batch and fetching up to ${count} older messages…`);const r=await actions.whatsapp.requestInboundHistory({contact_id:contactId.value,count});if(r.error)throw new Error(r.error.message);const d=r.data as any;currentRequestId=d.id;currentBatchId=d.batch_id;status(`Batch accepted: ${d.batch_id}. Live activity is shown beside the form.`,"success");startPoll();}catch(e:any){status(e.message||String(e),"error");historyButton.disabled=!bridgeReady;} }
+    async function buildPackage(){try{buildButton.disabled=true;status("Queueing evidence package…");const r=await actions.whatsapp.createInboundExport({...filters(),requested_by:"web-operator"});if(r.error)throw new Error(r.error.message);status("Package queued. Open Download packages to follow progress.","success");window.location.href="/crm/intake/packages";}catch(e:any){status(e.message||String(e),"error");buildButton.disabled=!latestPreview?.files_found;}}
+    contactSearch.addEventListener("input",()=>{if(searchTimer)clearTimeout(searchTimer);searchTimer=window.setTimeout(()=>void searchContacts(),250);});contactResults.addEventListener("click",e=>{const b=(e.target as HTMLElement).closest<HTMLButtonElement>("button[data-contact]");if(b)chooseContact(JSON.parse(b.dataset.contact||"{}"));});el("clear-inbound-contact").addEventListener("click",clearContact);el<HTMLSelectElement>("inbound-date-preset").addEventListener("change",e=>document.querySelectorAll<HTMLElement>(".custom-date-field").forEach(x=>x.hidden=(e.target as HTMLSelectElement).value!=="custom"));historyButton.addEventListener("click",()=>void requestHistory());scanButton.addEventListener("click",()=>void scan());buildButton.addEventListener("click",()=>void buildPackage());el("refresh-page").addEventListener("click",()=>{if(contactId.value)void loadBridge();if(currentBatchId)void loadBatch();});document.addEventListener("click",e=>{if(!(e.target as HTMLElement).closest(".inbound-contact-picker"))contactResults.hidden=true;});window.addEventListener("beforeunload",stopPoll);resetBatch();
+  </script>
+</CrmLayout>

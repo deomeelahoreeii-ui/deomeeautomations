@@ -1,17 +1,23 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LIST_PAGE = ROOT / "apps/web/src/pages/whatsapp/inbound-processing.astro"
-DETAIL_PAGE = ROOT / "apps/web/src/pages/whatsapp/inbound-processing/[id].astro"
-BATCH_PAGE = ROOT / "apps/web/src/pages/whatsapp/inbound-batches/[id].astro"
-NAV = ROOT / "apps/web/src/components/WhatsAppInboundNav.astro"
+LIST_PAGE = ROOT / "apps/web/src/pages/crm/intake/review/index.astro"
+DETAIL_PAGE = ROOT / "apps/web/src/pages/crm/intake/review/[id].astro"
+BATCH_PAGE = ROOT / "apps/web/src/pages/crm/intake/batches/[id].astro"
+NAV = ROOT / "apps/web/src/components/CrmIntakeNav.astro"
+LEGACY_REVIEW_PAGE = ROOT / "apps/web/src/pages/whatsapp/inbound-processing.astro"
 DEV_SCRIPT = ROOT / "scripts/dev.sh"
 
 
-def test_inbound_navigation_exposes_processing_workspace() -> None:
+def test_crm_intake_navigation_exposes_review_workspace() -> None:
     source = NAV.read_text(encoding="utf-8")
-    assert '"processing", "Processing & review"' in source
-    assert '"/whatsapp/inbound-processing"' in source
+    assert '"review", "Review queue"' in source
+    assert '"/crm/intake/review"' in source
+
+
+def test_legacy_whatsapp_review_url_redirects_to_crm() -> None:
+    source = LEGACY_REVIEW_PAGE.read_text(encoding="utf-8")
+    assert 'Astro.redirect(`/crm/intake/review${Astro.url.search}`, 308)' in source
 
 
 def test_batch_page_can_start_dry_run_processing() -> None:
@@ -19,6 +25,7 @@ def test_batch_page_can_start_dry_run_processing() -> None:
     assert 'id="process-batch"' in source
     assert "createInboundProcessingRun" in source
     assert "paperless_check:true" in source
+    assert "`/crm/intake/review/${run.id}`" in source
 
 
 def test_processing_pages_show_crm_and_paperless_dry_run_contract() -> None:

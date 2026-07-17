@@ -1,10 +1,9 @@
 ---
-import WhatsAppInboundNav from "../../components/WhatsAppInboundNav.astro";
 import WhatsAppLayout from "../../layouts/WhatsAppLayout.astro";
 ---
-<WhatsAppLayout title="Inbound Object Storage" description="Verify RustFS or another S3-compatible backend used by the WhatsApp batch archive." page="inbound-files">
+<WhatsAppLayout title="Inbound Capture Health" description="Verify the object storage used by raw WhatsApp capture and CRM complaint intake." page="inbound-health">
   <button class="btn btn-sm" id="refresh-storage" slot="actions">↻ Check storage</button>
-  <WhatsAppInboundNav active="storage" />
+  <div class="notice inbound-coverage-notice">Complaint intake and evidence review now live in <a href="/crm/intake/"><strong>CRM Complaint Intake</strong></a>. This page remains in WhatsApp because it monitors channel infrastructure.</div>
   <section class="inbound-storage-grid">
     <article class="master-card"><div class="inbound-card-heading"><div><p class="eyebrow">S3-compatible backend</p><h2>Storage health</h2></div><span class="badge" id="storage-state">Checking</span></div><div class="inbound-storage-health"><div><span>Provider</span><strong id="storage-provider">—</strong></div><div><span>Endpoint</span><strong id="storage-endpoint">—</strong></div><div><span>Raw bucket</span><strong id="storage-raw">—</strong></div><div><span>Manifest bucket</span><strong id="storage-manifest">—</strong></div></div><p class="inbound-form-status" id="storage-message"></p></article>
     <article class="master-card"><p class="eyebrow">Current deployment</p><h2>RustFS configuration</h2><p class="inbound-help-copy">Bundle 4B reads the installed RustFS credentials from <code>/etc/default/rustfs</code> during installation and writes the corresponding <code>OBJECT_STORAGE_*</code> values into <code>automation-platform/.env</code>. Credentials are never included in the patch ZIP.</p><dl class="inbound-definition-list"><div><dt>S3 service</dt><dd>http://127.0.0.1:9002</dd></div><div><dt>RustFS console</dt><dd>http://127.0.0.1:9003</dd></div><div><dt>Key layout</dt><dd>objects/sha256/aa/bb/&lt;sha256&gt;</dd></div></dl></article>

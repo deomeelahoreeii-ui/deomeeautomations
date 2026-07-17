@@ -2,25 +2,44 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FETCH_PAGE = ROOT / "apps/web/src/pages/whatsapp/inbound-files.astro"
-BATCH_PAGE = ROOT / "apps/web/src/pages/whatsapp/inbound-batches.astro"
-DETAIL_PAGE = ROOT / "apps/web/src/pages/whatsapp/inbound-batches/[id].astro"
-NAV = ROOT / "apps/web/src/components/WhatsAppInboundNav.astro"
+FETCH_PAGE = ROOT / "apps/web/src/pages/crm/intake/index.astro"
+BATCH_PAGE = ROOT / "apps/web/src/pages/crm/intake/batches/index.astro"
+DETAIL_PAGE = ROOT / "apps/web/src/pages/crm/intake/batches/[id].astro"
+NAV = ROOT / "apps/web/src/components/CrmIntakeNav.astro"
+LEGACY_FETCH_PAGE = ROOT / "apps/web/src/pages/whatsapp/inbound-files.astro"
+CRM_LAYOUT = ROOT / "apps/web/src/layouts/CrmLayout.astro"
+WHATSAPP_LAYOUT = ROOT / "apps/web/src/layouts/WhatsAppLayout.astro"
+APP_LAYOUT = ROOT / "apps/web/src/layouts/AppLayout.astro"
 
 
-def test_inbound_workspace_is_split_into_focused_subnavigation() -> None:
+def test_crm_intake_workspace_is_split_into_focused_subnavigation() -> None:
     nav = NAV.read_text(encoding="utf-8")
-    assert "Fetch files" in nav
-    assert "Inbound batches" in nav
+    assert "New intake" in nav
+    assert "Intake runs" in nav
+    assert "Review queue" in nav
     assert "Download packages" in nav
-    assert "Object storage" in nav
-    assert "/whatsapp/inbound-batches" in nav
-    assert "/whatsapp/inbound-storage" in nav
+    assert "/crm/intake/batches" in nav
+    assert "/crm/intake/review" in nav
+
+
+def test_legacy_whatsapp_intake_url_redirects_to_crm() -> None:
+    source = LEGACY_FETCH_PAGE.read_text(encoding="utf-8")
+    assert 'Astro.redirect(`/crm/intake/${Astro.url.search}`, 308)' in source
+
+
+def test_crm_owns_complaint_intake_and_whatsapp_retains_capture_health() -> None:
+    crm_layout = CRM_LAYOUT.read_text(encoding="utf-8")
+    whatsapp_layout = WHATSAPP_LAYOUT.read_text(encoding="utf-8")
+    app_layout = APP_LAYOUT.read_text(encoding="utf-8")
+    assert '["intake", "Complaint Intake", "/crm/intake/"]' in crm_layout
+    assert '["inbound-health", "Inbound Health", "/whatsapp/inbound-storage"]' in whatsapp_layout
+    assert "Inbound Files" not in whatsapp_layout
+    assert 'active === "crm" }]} href="/crm/intake/"' in app_layout
 
 
 def test_history_fetch_console_polls_persisted_batch_activity() -> None:
     source = FETCH_PAGE.read_text(encoding="utf-8")
-    assert "Live batch activity" in source
+    assert "Live intake activity" in source
     assert "actions.whatsapp.inboundBatchEvents" in source
     assert "actions.whatsapp.inboundBatch" in source
     assert "window.setInterval(()=>void loadBatch(),2000)" in source
@@ -32,7 +51,7 @@ def test_history_fetch_console_polls_persisted_batch_activity() -> None:
 def test_batch_management_pages_expose_files_activity_and_retry() -> None:
     listing = BATCH_PAGE.read_text(encoding="utf-8")
     detail = DETAIL_PAGE.read_text(encoding="utf-8")
-    assert "Historical fetch runs" in listing
+    assert "WhatsApp complaint intake history" in listing
     assert "actions.whatsapp.inboundBatches" in listing
     assert "Live server log" in detail
     assert "actions.whatsapp.inboundBatchEvents" in detail
@@ -44,4 +63,5 @@ def test_fetch_page_requires_managed_visible_profile_bridge() -> None:
     source = FETCH_PAGE.read_text(encoding="utf-8")
     assert 'state.textContent=bridgeReady?"Managed browser ready"' in source
     assert "Managed Brave page ready" in source
-    assert "Historical files are loaded by the managed whatsapp-web.js browser" in source
+    assert "WhatsApp remains the secure capture channel" in source
+    assert "CRM owns the complaint intake" in source

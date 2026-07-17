@@ -1,0 +1,15 @@
+---
+interface Props {
+  active: "intake" | "runs" | "review" | "packages";
+}
+const { active } = Astro.props;
+const links = [
+  ["intake", "New intake", "/crm/intake/"],
+  ["runs", "Intake runs", "/crm/intake/batches"],
+  ["review", "Review queue", "/crm/intake/review"],
+  ["packages", "Download packages", "/crm/intake/packages"],
+];
+---
+<nav class="directory-tabs inbound-subnav" aria-label="CRM complaint intake">
+  {links.map(([id, label, href]) => <a class:list={{ active: active === id }} href={href}>{label}</a>)}
+</nav>
