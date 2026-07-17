@@ -50,7 +50,10 @@ def test_health_endpoint() -> None:
         response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert len(payload["database_fingerprint"]) == 16
+    assert payload["database"]
 
 
 def test_audience_route_matching_uses_hierarchy_scope() -> None:
@@ -480,16 +483,14 @@ def test_antidengue_dispatch_preview_freezes_exact_payload(tmp_path) -> None:
         }
 
     try:
-        queued_task = MagicMock(id=f"preview-task-{suffix}")
-
-        def run_queued_preview(*, args: list[str], queue: str) -> MagicMock:
+        def run_queued_preview(name: str, *, args: list[str], kwargs: dict, queue: str, task_id: str) -> None:
+            assert name == "whatsapp_gateway.compile_dispatch_preview"
             assert queue == "antidengue"
             compile_dispatch_preview_job.run(args[0])
-            return queued_task
 
         with (
             patch(
-                "whatsapp_gateway.preview_api.compile_dispatch_preview_job.apply_async",
+                "automation_core.task_outbox.celery_app.send_task",
                 side_effect=run_queued_preview,
             ),
             TestClient(app) as client,
@@ -622,12 +623,12 @@ def test_audience_routes_retarget_source_data_without_legacy_destination() -> No
 
 
 def test_antidengue_dry_run_is_queued() -> None:
-    queued_task = MagicMock(id="test-celery-task")
+    published_task_ids: list[str] = []
     with (
         patch("antidengue_automation.api.get_active_job", return_value=None),
         patch(
-            "antidengue_automation.api.run_antidengue_job.apply_async",
-            return_value=queued_task,
+            "automation_core.task_outbox.celery_app.send_task",
+            side_effect=lambda name, **values: published_task_ids.append(values["task_id"]),
         ),
         TestClient(app) as client,
     ):
@@ -639,7 +640,7 @@ def test_antidengue_dry_run_is_queued() -> None:
     assert response.status_code == 202
     assert response.json()["type"] == "antidengue.report"
     assert response.json()["status"] == "queued"
-    assert response.json()["task_id"] == "test-celery-task"
+    assert response.json()["task_id"] == published_task_ids[0]
 
     job_id = uuid.UUID(response.json()["id"])
     with Session(engine) as session:
@@ -661,7 +662,7 @@ def test_manual_antidengue_report_is_validated_deduplicated_and_queued() -> None
         "Username,Simple Activities,Total Activities\n"
         f"{suffix}01.lahore.sed(Manual test school),0,0\n"
     ).encode()
-    queued_task = MagicMock(id=f"manual-task-{suffix}")
+    published_task_ids: list[str] = []
     source_id: uuid.UUID | None = None
     job_id: uuid.UUID | None = None
     stored_parent = None
@@ -670,8 +671,8 @@ def test_manual_antidengue_report_is_validated_deduplicated_and_queued() -> None
         with (
             patch("antidengue_automation.api.get_active_job", return_value=None),
             patch(
-                "antidengue_automation.api.run_antidengue_job.apply_async",
-                return_value=queued_task,
+                "automation_core.task_outbox.celery_app.send_task",
+                side_effect=lambda name, **values: published_task_ids.append(values["task_id"]),
             ),
             TestClient(app) as client,
         ):
@@ -698,7 +699,7 @@ def test_manual_antidengue_report_is_validated_deduplicated_and_queued() -> None
             job_id = uuid.UUID(process.json()["id"])
             assert process.json()["parameters"]["dry_run"] is True
             assert process.json()["parameters"]["input_source"] == "manual_upload"
-            assert process.json()["task_id"] == queued_task.id
+            assert process.json()["task_id"] == published_task_ids[0]
 
             listing = client.get("/api/v1/antidengue/manual-reports?page=1&page_size=10")
             assert listing.status_code == 200

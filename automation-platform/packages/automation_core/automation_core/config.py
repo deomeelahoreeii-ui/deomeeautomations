@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     antidengue_python_bin: Path | None = None
     antidengue_pocketbase_db_path: Path | None = None
     antidengue_submission_deadline: str = "12:30 PM"
+    antidengue_scheduler_enabled: bool = True
+    antidengue_scheduler_interval_seconds: int = 10
 
     artifact_root: Path = Path("./data/artifacts")
     source_file_max_bytes: int = 50 * 1024 * 1024
@@ -67,8 +69,15 @@ class Settings(BaseSettings):
     object_storage_auto_create_buckets: bool = True
     object_storage_raw_bucket: str = "whatsapp-inbound-raw"
     object_storage_manifest_bucket: str = "whatsapp-inbound-manifests"
+    object_storage_derived_bucket: str = "whatsapp-inbound-derived"
     object_storage_connect_timeout_seconds: float = 5.0
     object_storage_read_timeout_seconds: float = 120.0
+
+    whatsapp_processing_classifier_version: str = "crm-classifier-v1"
+    whatsapp_processing_crm_rule_version: str = "crm-104-v1"
+    crm_complaint_prefixes: str = "104"
+    crm_complaint_suffix_digits: int = 7
+    whatsapp_processing_text_limit: int = 100_000
 
     api_cors_origins: str = (
         "http://localhost:4321,http://127.0.0.1:4321,"
@@ -146,6 +155,10 @@ class Settings(BaseSettings):
     @property
     def whatsapp_inbound_export_root(self) -> Path:
         return (self.artifact_root / "whatsapp-inbound-exports").resolve()
+
+    @property
+    def crm_complaint_prefix_list(self) -> list[str]:
+        return [value.strip() for value in self.crm_complaint_prefixes.split(",") if value.strip()]
 
     @property
     def cors_origins(self) -> list[str]:

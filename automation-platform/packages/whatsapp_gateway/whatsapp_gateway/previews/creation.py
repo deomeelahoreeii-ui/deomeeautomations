@@ -11,8 +11,9 @@ from sqlalchemy import func, or_, select
 from sqlmodel import Session
 
 from automation_core.database import get_session
-from automation_core.job_service import append_log, create_job, get_job, mark_job_failed, set_task_id
+from automation_core.job_service import add_job, add_job_log, get_job
 from automation_core.models import Job, JobPublic, JobStatus, JobType
+from automation_core.task_outbox import publish_pending_tasks, stage_task
 from automation_core.time import utcnow
 from master_data.models import Officer, School, SchoolHead, Wing
 from whatsapp_gateway.models import (
@@ -50,7 +51,7 @@ def create_preview(
         raise HTTPException(status_code=422, detail="Select a successful source dry run")
     if profile is None or not profile.enabled:
         raise HTTPException(status_code=422, detail="Select an enabled dispatch profile")
-    job = create_job(
+    job = add_job(
         session,
         job_type=JobType.whatsapp_dispatch_preview.value,
         title="Compile AntiDengue dispatch preview",
@@ -60,17 +61,17 @@ def create_preview(
             "created_by": "web",
         },
     )
-    try:
-        from whatsapp_gateway import preview_api as legacy_preview_api
-        task = legacy_preview_api.compile_dispatch_preview_job.apply_async(
-            args=[str(job.id)], queue="antidengue"
-        )
-    except Exception as exc:
-        append_log(session, job.id, f"Queue unavailable: {exc}", level="error")
-        mark_job_failed(session, job.id, f"Queue unavailable: {exc}")
-        raise HTTPException(status_code=503, detail="Queue unavailable") from exc
-    set_task_id(session, job.id, task.id)
-    append_log(session, job.id, "Queued immutable dispatch preview compilation.")
+    add_job_log(session, job.id, "Committed immutable dispatch preview request to the durable task outbox.")
+    stage_task(
+        session,
+        job=job,
+        task_name="whatsapp_gateway.compile_dispatch_preview",
+        queue="antidengue",
+        args=[str(job.id)],
+        idempotency_key=f"manual-preview:{job.id}",
+    )
+    session.commit()
+    publish_pending_tasks(session, limit=10)
     queued = get_job(session, job.id)
     assert queued is not None
     return queued

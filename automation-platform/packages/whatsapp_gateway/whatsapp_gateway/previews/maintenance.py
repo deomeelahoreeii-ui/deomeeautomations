@@ -21,6 +21,15 @@ def preview_is_stale(session: Session, preview: WhatsAppDispatchPreview, *, chec
     if profile is None or profile.version != preview.profile_version or not profile.enabled:
         return True
     snapshot = preview.configuration_snapshot or {}
+    for profile_snapshot in snapshot.get("profiles") or []:
+        profile_id = profile_snapshot.get("id")
+        selected = session.get(WhatsAppDispatchProfile, uuid.UUID(profile_id)) if profile_id else None
+        if (
+            selected is None
+            or not selected.enabled
+            or selected.version != profile_snapshot.get("version")
+        ):
+            return True
     audience_snapshot = snapshot.get("audience") or {}
     audience = session.get(WhatsAppAudience, profile.audience_id)
     if audience is None or not audience.enabled:
@@ -174,4 +183,3 @@ def entity_link_details(session: Session, link: WhatsAppContactLink) -> dict[str
         "active": link.active,
         "updated_at": link.updated_at,
     }
-

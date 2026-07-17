@@ -11,8 +11,9 @@ from sqlalchemy import func, or_, select
 from sqlmodel import Session
 
 from automation_core.database import get_session
-from automation_core.job_service import append_log, create_job, get_job, mark_job_failed, set_task_id
+from automation_core.job_service import add_job, add_job_log, get_job
 from automation_core.models import Job, JobPublic, JobStatus, JobType
+from automation_core.task_outbox import publish_pending_tasks, stage_task
 from automation_core.time import utcnow
 from master_data.models import Officer, School, SchoolHead, Wing
 from whatsapp_gateway.models import (
@@ -122,7 +123,7 @@ async def approve_preview(
             })
         delivery_attachments[frozen.id] = attachments
 
-    job = create_job(
+    job = add_job(
         session,
         job_type=JobType.whatsapp_dispatch_send.value,
         title=f"Send approved preview {preview.preview_key}",
@@ -154,31 +155,22 @@ async def approve_preview(
             )
         )
     job.parameters = {**job.parameters, "approval_id": str(approval.id)}
+    add_job_log(
+        session,
+        job.id,
+        f"Approved {len(frozen_deliveries)} exact frozen deliveries and committed the dispatch outbox.",
+    )
+    stage_task(
+        session,
+        job=job,
+        task_name="whatsapp_gateway.send_approved_preview",
+        queue="antidengue",
+        args=[str(job.id)],
+        idempotency_key=f"preview-approval:{preview.id}",
+    )
     session.add(job)
     session.commit()
-
-    try:
-        from whatsapp_gateway import preview_api as legacy_preview_api
-        task = legacy_preview_api.send_approved_preview_job.apply_async(args=[str(job.id)], queue="antidengue")
-    except Exception as exc:
-        approval.status = "failed"
-        approval.error = f"Queue unavailable: {exc}"
-        approval.completed_at = utcnow()
-        session.add(approval)
-        for delivery in session.scalars(
-            select(WhatsAppDelivery).where(
-                WhatsAppDelivery.approval_id == approval.id,
-                WhatsAppDelivery.status == "queued",
-            )
-        ):
-            delivery.status = "failed"
-            delivery.error = approval.error
-            delivery.completed_at = utcnow()
-            session.add(delivery)
-        mark_job_failed(session, job.id, approval.error)
-        raise HTTPException(status_code=503, detail="Dispatch queue unavailable") from exc
-    set_task_id(session, job.id, task.id)
-    append_log(session, job.id, f"Approved {len(frozen_deliveries)} exact frozen deliveries for queueing.")
+    publish_pending_tasks(session, limit=10)
     queued = get_job(session, job.id)
     assert queued is not None
     return queued

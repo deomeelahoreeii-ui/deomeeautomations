@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import Column, JSON, Text
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, JSON, Text, UniqueConstraint, Uuid
 from sqlmodel import Field, SQLModel
 
 from automation_core.time import utcnow
@@ -47,6 +47,39 @@ class Job(JobBase, table=True):
     __tablename__ = "jobs"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+
+
+class TaskOutbox(SQLModel, table=True):
+    """Durable broker publication request committed with its owning job."""
+
+    __tablename__ = "task_outbox"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_task_outbox_idempotency_key"),
+        UniqueConstraint("task_id", name="uq_task_outbox_task_id"),
+        CheckConstraint(
+            "status IN ('pending', 'publishing', 'published', 'failed', 'cancelled')",
+            name="ck_task_outbox_status",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    job_id: uuid.UUID = Field(
+        sa_column=Column(Uuid, ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    )
+    task_name: str = Field(index=True, max_length=180)
+    queue: str = Field(index=True, max_length=80)
+    args: list[Any] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    kwargs: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    task_id: str = Field(index=True, max_length=80)
+    idempotency_key: str = Field(index=True, max_length=240)
+    status: str = Field(default="pending", index=True)
+    attempts: int = Field(default=0)
+    available_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False, index=True))
+    locked_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True, index=True))
+    published_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True, index=True))
+    last_error: str | None = Field(default=None, sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False, index=True))
+    updated_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False, index=True))
 
 
 class JobPublic(JobBase):

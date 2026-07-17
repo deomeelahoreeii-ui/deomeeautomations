@@ -12,11 +12,12 @@ from automation_core.celery_app import celery_app
 from automation_core.command_runner import append_job_log, run_streamed_command
 from automation_core.config import get_settings
 from automation_core.database import engine
+from automation_core.database_identity import database_identity
 from automation_core.job_service import (
+    claim_job_running,
+    get_job,
     mark_job_failed,
-    mark_job_running,
     mark_job_succeeded,
-    require_job,
 )
 from automation_core.models import SourceFile
 
@@ -48,9 +49,17 @@ def run_antidengue_job(job_id: str) -> dict:
     started_at = time.time()
 
     with Session(engine) as session:
-        job = require_job(session, job_id)
+        job = claim_job_running(session, job_id)
+        if job is None:
+            existing = get_job(session, job_id)
+            if existing is None:
+                identity = database_identity()
+                raise ValueError(
+                    f"Job not found after durable outbox publication: {job_id}; "
+                    f"worker_database={identity['fingerprint']} ({identity['display']})"
+                )
+            return {**dict(existing.result or {}), "deduplicated": True, "job_status": existing.status}
         parameters = dict(job.parameters)
-        mark_job_running(session, job_id)
 
     input_source = str(parameters.get("input_source") or "portal")
     if input_source == "manual_upload":

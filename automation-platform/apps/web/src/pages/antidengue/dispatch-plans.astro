@@ -1,0 +1,81 @@
+---
+import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
+---
+
+<AntiDengueLayout
+  title="AntiDengue dispatch plans"
+  description="Review AntiDengue-owned exact send plans backed by the shared WhatsApp preview and delivery records."
+  page="dispatch-plans"
+>
+  <button class="btn btn-sm btn-ghost" id="refresh-button" type="button" slot="actions">↻ Refresh</button>
+
+  <section class="panel">
+    <div class="panel-heading">
+      <div><p class="eyebrow">Exact send plans</p><h2>AntiDengue dispatch workspace</h2></div>
+      <span class="environment-pill" id="plan-total">Loading…</span>
+    </div>
+    <p class="field-help">These are the same immutable records used by the global WhatsApp Preview &amp; Approval workspace.</p>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>Execution</th><th>Routing / report</th><th>Plan</th><th>Delivery totals</th><th>Actions</th></tr></thead>
+        <tbody id="plan-list"><tr><td colspan="5">Loading exact send plans…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="form-message" id="plan-message" role="status"></div>
+  </section>
+
+  <script>
+    const API = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const label = (value: string) => value.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
+    async function api(path: string, init?: RequestInit) {
+      const response = await fetch(`${API}${path}`, { headers: { "Content-Type": "application/json" }, ...init });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Request failed");
+      return data;
+    }
+    async function loadPlans() {
+      const data = await api("/api/v1/antidengue/dispatch-plans?limit=200");
+      el("plan-total").textContent = `${data.total} plan(s)`;
+      const body = el<HTMLTableSectionElement>("plan-list"); body.replaceChildren();
+      if (!data.items.length) { body.innerHTML = '<tr><td colspan="5">No AntiDengue exact send plans yet.</td></tr>'; return; }
+      for (const item of data.items) {
+        const row = document.createElement("tr");
+        row.innerHTML = `<td><strong></strong><small></small></td><td><strong></strong><small></small></td><td><strong></strong><small></small></td><td><strong></strong><small></small></td><td><div class="schedule-card-actions"></div></td>`;
+        const cells = row.querySelectorAll("td");
+        cells[0].querySelector("strong")!.textContent = item.execution_code;
+        cells[0].querySelector("small")!.textContent = label(item.run_type);
+        cells[1].querySelector("strong")!.textContent = item.routing_profiles.map((profile: any) => profile.name).join(", ");
+        cells[1].querySelector("small")!.textContent = `${item.report} · ${item.wing}`;
+        cells[2].querySelector("strong")!.textContent = `${item.planned_deliveries} planned · ${label(item.status)}`;
+        cells[2].querySelector("small")!.textContent = `${item.warnings} warning(s) · ${item.blockers} blocker(s)`;
+        cells[3].querySelector("strong")!.textContent = `${item.sent} sent · ${item.delivered} delivered`;
+        cells[3].querySelector("small")!.textContent = `${item.failed} failed`;
+        const actions = cells[4].querySelector("div")!;
+        const links = [
+          ["Open plan", `/whatsapp/previews/${item.id}`],
+          ["Review", `/whatsapp/previews/${item.id}/issues`],
+          ["Open execution", `/antidengue/run-history?execution_id=${item.execution_id}`],
+          ["Global workspace", `/whatsapp/previews/${item.id}`],
+        ];
+        for (const [text, href] of links) { const link = document.createElement("a"); link.className = "btn btn-xs btn-ghost"; link.textContent = text; link.href = href; actions.append(link); }
+        if (item.status === "ready" && item.blockers === 0) {
+          const send = document.createElement("button"); send.className = "btn btn-xs btn-primary"; send.textContent = "Send when allowed";
+          send.addEventListener("click", async () => {
+            if (!confirm("Send the exact reviewed WhatsApp payloads in this plan?")) return;
+            try { await api(`/api/v1/whatsapp/previews/${item.id}/approve`, { method: "POST", body: JSON.stringify({ acknowledge_warnings: item.warnings > 0, approved_by: "antidengue-workspace" }) }); await loadPlans(); }
+            catch (error) { el("plan-message").textContent = error instanceof Error ? error.message : "Could not send plan"; }
+          }); actions.prepend(send);
+        }
+        if (item.failed > 0) {
+          const retry = document.createElement("button"); retry.className = "btn btn-xs btn-outline"; retry.textContent = "Retry failed deliveries";
+          retry.addEventListener("click", async () => { try { await api(`/api/v1/antidengue/dispatch-plans/${item.id}/retry-failed`, { method: "POST" }); await loadPlans(); } catch (error) { el("plan-message").textContent = error instanceof Error ? error.message : "Retry failed"; } });
+          actions.prepend(retry);
+        }
+        body.append(row);
+      }
+    }
+    el("refresh-button").addEventListener("click", () => void loadPlans());
+    void loadPlans().catch((error) => el("plan-message").textContent = error.message);
+  </script>
+</AntiDengueLayout>

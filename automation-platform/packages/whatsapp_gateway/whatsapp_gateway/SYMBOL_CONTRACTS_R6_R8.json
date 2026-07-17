@@ -100,7 +100,7 @@
     "source": "antidengue_renderer.py"
   },
   "compile_dispatch_preview_job": {
-    "ast_sha256": "35a42f41ac83ce718a3e41aea14fed1ba2a0395cac5f983633e6bfc3c1f7cc9e",
+    "ast_sha256": "1d6e9626cde4d1d0b6e0c1ce7f478efa46a5343485b76857eca4440fc68724f7",
     "destination_file": "dispatch/task_entrypoints.py",
     "source": "tasks.py"
   },
@@ -120,7 +120,7 @@
     "source": "antidengue_renderer.py"
   },
   "send_approved_preview_job": {
-    "ast_sha256": "63786d6874205bd8fc662114a3d552fe7d6834a0ee7d992a14d74ccae36e75d5",
+    "ast_sha256": "e0c199b07a3588fd6342a427228a0fde47b0e6d8ea74d15248b11a01db6b48d7",
     "destination_file": "dispatch/task_entrypoints.py",
     "source": "tasks.py"
   }

@@ -1,0 +1,200 @@
+---
+import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
+---
+
+<AntiDengueLayout
+  title="AntiDengue run history"
+  description="Audit manual and scheduled report generation, exact send plans and guarded WhatsApp deliveries as separate stages."
+  page="run-history"
+>
+  <button class="btn btn-sm btn-ghost" id="refresh-button" type="button" slot="actions">↻ Refresh</button>
+
+  <section class="history-page-grid">
+    <article class="panel execution-ledger-panel">
+      <div class="panel-heading"><div><p class="eyebrow">Execution ledger</p><h2>Runs</h2></div><span class="environment-pill" id="execution-total">Loading…</span></div>
+      <div class="execution-filters">
+        <select class="select select-bordered select-sm" id="status-filter">
+          <option value="">All statuses</option>
+          <option value="preview_ready">Preview ready</option>
+          <option value="completed">Completed</option>
+          <option value="completed_with_delivery_errors">Delivery errors</option>
+          <option value="blocked">Blocked</option>
+          <option value="failed">Failed</option>
+          <option value="skipped">Skipped</option>
+        </select>
+        <select class="select select-bordered select-sm" id="trigger-filter">
+          <option value="">All triggers</option>
+          <option value="scheduled">Scheduled</option>
+          <option value="schedule_run_now">Schedule run now</option>
+          <option value="manual_preview">Manual preview</option>
+          <option value="manual_send">Manual send</option>
+        </select>
+      </div>
+      <div class="execution-ledger" id="execution-list"><p class="empty-state">Loading executions…</p></div>
+    </article>
+
+    <article class="panel execution-detail-panel">
+      <div class="activity-header">
+        <div><p class="eyebrow">Audit detail</p><h2 id="detail-title">Select a run</h2><p id="detail-meta">Stage and delivery details will appear here.</p></div>
+        <span class="job-status neutral" id="detail-status">No run</span>
+      </div>
+      <div class="orchestration-stages" id="stage-list"></div>
+      <div class="execution-summary-grid" id="summary-grid" hidden>
+        <div><span>Preview deliveries</span><strong id="preview-deliveries">—</strong></div>
+        <div><span>Warnings / blocked</span><strong id="preview-issues">—</strong></div>
+        <div><span>Delivered / failed</span><strong id="dispatch-result">—</strong></div>
+        <div><span>Policy</span><strong id="policy">—</strong></div>
+      </div>
+      <div class="execution-error" id="execution-error" hidden></div>
+      <div class="terminal-toolbar"><span><i></i> Persistent combined activity</span><button type="button" id="copy-logs">Copy logs</button></div>
+      <div class="terminal execution-terminal" id="terminal"><p class="terminal-empty">Select an execution.</p></div>
+      <div class="execution-actions" id="detail-actions" hidden>
+        <a class="btn btn-sm btn-primary" id="open-preview" href="/whatsapp/previews">Open exact send plan</a>
+        <a class="btn btn-sm btn-ghost" id="open-source-job" href="/">Open dashboard</a>
+        <button class="btn btn-sm btn-error btn-outline" id="cancel-execution" type="button">Cancel active run</button>
+      </div>
+    </article>
+  </section>
+
+  <script>
+    const API = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    let selectedId = new URLSearchParams(location.search).get("execution_id");
+    let executions: any[] = [];
+    let selectedStatus = "";
+    let timer: number | undefined;
+    let eventSource: EventSource | undefined;
+
+    async function api(path: string) {
+      const response = await fetch(`${API}${path}`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data));
+      return data;
+    }
+    const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString() : "—";
+    const label = (value: string) => value.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
+    const terminal = new Set(["preview_ready", "completed", "completed_with_delivery_errors", "blocked", "failed", "skipped", "cancelled"]);
+
+    function renderList() {
+      const container = el("execution-list");
+      container.replaceChildren();
+      if (!executions.length) { container.innerHTML = '<p class="empty-state">No executions match these filters.</p>'; return; }
+      for (const item of executions) {
+        const button = document.createElement("button");
+        button.className = `execution-ledger-row ${item.id === selectedId ? "selected" : ""}`;
+        button.type = "button";
+        button.innerHTML = `<div><strong></strong><small></small></div><div><span></span><small></small></div><span class="job-status ${item.status}"></span>`;
+        button.querySelector("strong")!.textContent = item.execution_code;
+        button.querySelector("div:first-child small")!.textContent = item.schedule_name || label(item.trigger_type);
+        const groups = button.querySelectorAll("div");
+        groups[1].querySelector("span")!.textContent = formatDate(item.scheduled_for);
+        groups[1].querySelector("small")!.textContent = item.dispatch_policy === "auto_send_when_clean" ? "Auto-send when clean" : "Preview only";
+        button.querySelector(".job-status")!.textContent = label(item.status);
+        button.addEventListener("click", () => { selectedId = item.id; history.replaceState({}, "", `?execution_id=${item.id}`); renderList(); void loadDetail(); });
+        container.append(button);
+      }
+    }
+
+    function renderStages(stages: any[]) {
+      const container = el("stage-list"); container.replaceChildren();
+      for (const [index, stage] of stages.entries()) {
+        const row = document.createElement("div");
+        const tone = ["succeeded", "not_requested"].includes(stage.status) ? "succeeded" : stage.status === "failed" ? "failed" : ["queued", "running"].includes(stage.status) ? "running" : "pending";
+        row.className = `orchestration-stage ${tone}`;
+        row.innerHTML = `<span>${index + 1}</span><div><strong></strong><small></small></div>`;
+        row.querySelector("strong")!.textContent = stage.label;
+        row.querySelector("small")!.textContent = label(stage.status);
+        container.append(row);
+      }
+    }
+
+    function renderLogs(logs: any[]) {
+      const container = el("terminal"); container.replaceChildren();
+      if (!logs.length) { container.innerHTML = '<p class="terminal-empty">No activity has been recorded.</p>'; return; }
+      for (const item of logs) {
+        const row = document.createElement("div"); row.className = `log-row ${String(item.level).toLowerCase()}`;
+        row.innerHTML = `<time></time><b></b><span></span>`;
+        row.querySelector("time")!.textContent = new Date(item.created_at).toLocaleTimeString([], { hour12: false });
+        row.querySelector("b")!.textContent = String(item.source || item.level).toUpperCase();
+        row.querySelector("span")!.textContent = item.message;
+        container.append(row);
+      }
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function applyDetail(item: any) {
+      selectedStatus = item.status;
+      el("detail-title").textContent = item.execution_code;
+      el("detail-meta").textContent = `${item.schedule_name || label(item.trigger_type)} · ${formatDate(item.scheduled_for)}`;
+      const badge = el("detail-status"); badge.className = `job-status ${item.status}`; badge.textContent = label(item.status);
+      renderStages(item.stages || []); renderLogs(item.logs || []);
+      el("summary-grid").hidden = false;
+      el("preview-deliveries").textContent = String(item.preview_summary?.delivery_count ?? "—");
+      el("preview-issues").textContent = `${item.preview_summary?.warning_count ?? 0} / ${item.preview_summary?.blocked_count ?? 0}`;
+      el("dispatch-result").textContent = `${item.dispatch_summary?.delivered ?? "—"} / ${item.dispatch_summary?.failed ?? "—"}`;
+      el("policy").textContent = item.dispatch_policy === "auto_send_when_clean" ? "Auto-send when clean" : "Preview only";
+      const error = el("execution-error"); error.hidden = !item.error; error.textContent = item.error || "";
+      el("detail-actions").hidden = false;
+      el<HTMLAnchorElement>("open-preview").hidden = !item.preview_id;
+      el<HTMLAnchorElement>("open-preview").href = item.preview_id ? `/whatsapp/previews/${item.preview_id}` : "/whatsapp/previews";
+      el<HTMLAnchorElement>("open-source-job").href = item.source_job_id ? `/?execution_id=${item.id}` : "/";
+      el<HTMLButtonElement>("cancel-execution").hidden = terminal.has(item.status);
+    }
+
+    function connectStream() {
+      eventSource?.close();
+      eventSource = undefined;
+      if (!selectedId) return;
+      eventSource = new EventSource(`${API}/api/v1/antidengue/executions/${selectedId}/events`);
+      eventSource.addEventListener("snapshot", (event) => {
+        const item = JSON.parse((event as MessageEvent).data);
+        applyDetail(item);
+        if (item.terminal) { eventSource?.close(); eventSource = undefined; void loadAll(); }
+      });
+      eventSource.onerror = () => { eventSource?.close(); eventSource = undefined; };
+    }
+
+    async function loadDetail() {
+      if (!selectedId) return;
+      const item = await api(`/api/v1/antidengue/executions/${selectedId}`);
+      applyDetail(item);
+      if (!terminal.has(item.status)) connectStream();
+    }
+
+    async function loadAll() {
+      clearTimeout(timer);
+      const params = new URLSearchParams({ limit: "100" });
+      const status = el<HTMLSelectElement>("status-filter").value;
+      const trigger = el<HTMLSelectElement>("trigger-filter").value;
+      if (status) params.set("execution_status", status);
+      if (trigger) params.set("trigger_type", trigger);
+      const data = await api(`/api/v1/antidengue/executions?${params}`);
+      executions = data.items;
+      if (selectedId && !executions.some((item) => item.id === selectedId)) selectedId = null;
+      if (!selectedId && executions.length) selectedId = executions[0].id;
+      el("execution-total").textContent = `${data.total} run(s)`;
+      renderList();
+      await loadDetail();
+      timer = window.setTimeout(loadAll, document.hidden ? 60000 : 20000);
+    }
+
+    el("status-filter").addEventListener("change", () => void loadAll());
+    el("trigger-filter").addEventListener("change", () => void loadAll());
+    el("refresh-button").addEventListener("click", () => void loadAll());
+    el("cancel-execution").addEventListener("click", async () => {
+      if (!selectedId || !confirm("Cancel this active AntiDengue run?")) return;
+      const response = await fetch(`${API}/api/v1/antidengue/executions/${selectedId}/cancel`, { method: "POST" });
+      const item = await response.json();
+      if (!response.ok) throw new Error(item.detail || "Could not cancel execution");
+      applyDetail(item);
+      await loadAll();
+    });
+    el("copy-logs").addEventListener("click", async () => {
+      await navigator.clipboard.writeText(el("terminal").innerText);
+      el("copy-logs").textContent = "Copied"; setTimeout(() => el("copy-logs").textContent = "Copy logs", 1200);
+    });
+    void loadAll();
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) void loadAll(); });
+    addEventListener("beforeunload", () => { clearTimeout(timer); eventSource?.close(); });
+  </script>
+</AntiDengueLayout>

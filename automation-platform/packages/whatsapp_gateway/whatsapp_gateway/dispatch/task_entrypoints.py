@@ -8,11 +8,13 @@ from sqlmodel import Session
 
 from automation_core.celery_app import celery_app
 from automation_core.database import engine
+from automation_core.database_identity import database_identity
 from automation_core.job_service import (
-    append_log, mark_job_failed, mark_job_running, mark_job_succeeded, require_job,
+    append_log, claim_job_running, get_job, mark_job_failed, mark_job_succeeded,
 )
 from automation_core.time import utcnow
 from whatsapp_gateway.dispatch.approved_delivery import _publish_approved_deliveries
+from whatsapp_gateway.dispatch.retry_delivery import _publish_selected_approved_deliveries
 from whatsapp_gateway.models import (
     WhatsAppDelivery, WhatsAppDispatchApproval,
 )
@@ -27,9 +29,17 @@ from whatsapp_gateway.preview_service import compile_antidengue_preview
 def compile_dispatch_preview_job(job_id: str) -> dict[str, str]:
     uuid.UUID(job_id)
     with Session(engine) as session:
-        job = require_job(session, job_id)
+        job = claim_job_running(session, job_id)
+        if job is None:
+            existing = get_job(session, job_id)
+            if existing is None:
+                identity = database_identity()
+                raise ValueError(
+                    f"Job not found after durable outbox publication: {job_id}; "
+                    f"worker_database={identity['fingerprint']} ({identity['display']})"
+                )
+            return {**dict(existing.result or {}), "deduplicated": True, "job_status": existing.status}
         parameters = dict(job.parameters)
-        mark_job_running(session, job_id)
         append_log(session, job_id, "Compiling immutable AntiDengue dispatch preview.")
 
     try:
@@ -38,6 +48,9 @@ def compile_dispatch_preview_job(job_id: str) -> dict[str, str]:
                 session,
                 source_job_id=uuid.UUID(parameters["source_job_id"]),
                 dispatch_profile_id=uuid.UUID(parameters["dispatch_profile_id"]),
+                dispatch_profile_ids=[
+                    uuid.UUID(value) for value in parameters.get("dispatch_profile_ids", [])
+                ] or None,
                 created_by=str(parameters.get("created_by") or "web"),
             )
             result = {"preview_id": str(preview.id), "preview_key": preview.preview_key}
@@ -59,12 +72,25 @@ def compile_dispatch_preview_job(job_id: str) -> dict[str, str]:
 )
 def send_approved_preview_job(job_id: str) -> dict[str, int]:
     with Session(engine) as session:
-        job = require_job(session, job_id)
+        job = claim_job_running(session, job_id)
+        if job is None:
+            existing = get_job(session, job_id)
+            if existing is None:
+                identity = database_identity()
+                raise ValueError(
+                    f"Job not found after durable outbox publication: {job_id}; "
+                    f"worker_database={identity['fingerprint']} ({identity['display']})"
+                )
+            return {**dict(existing.result or {}), "deduplicated": True, "job_status": existing.status}
         approval_id = uuid.UUID(str(job.parameters["approval_id"]))
-        mark_job_running(session, job_id)
         append_log(session, job_id, "Revalidating and queueing the exact approved frozen payloads.")
     try:
-        result = asyncio.run(_publish_approved_deliveries(approval_id, job_id))
+        delivery_ids = [uuid.UUID(value) for value in job.parameters.get("retry_delivery_ids", [])]
+        result = asyncio.run(
+            _publish_selected_approved_deliveries(approval_id, job_id, delivery_ids)
+            if delivery_ids
+            else _publish_approved_deliveries(approval_id, job_id)
+        )
         with Session(engine) as session:
             append_log(session, job_id, f"Dispatch completed: {result['delivered']} successful, {result['failed']} failed.")
             mark_job_succeeded(session, job_id, result)

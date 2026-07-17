@@ -4,10 +4,25 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import update
 from sqlmodel import Session, col, select
 
 from automation_core.models import Artifact, Job, JobLog, JobStatus
 from automation_core.time import utcnow
+
+
+def add_job(
+    session: Session,
+    *,
+    job_type: str,
+    title: str,
+    parameters: dict[str, Any],
+) -> Job:
+    """Add a job to the current transaction without publishing side effects."""
+    job = Job(type=job_type, title=title, parameters=parameters)
+    session.add(job)
+    session.flush()
+    return job
 
 
 def create_job(
@@ -17,8 +32,12 @@ def create_job(
     title: str,
     parameters: dict[str, Any],
 ) -> Job:
-    job = Job(type=job_type, title=title, parameters=parameters)
-    session.add(job)
+    job = add_job(
+        session,
+        job_type=job_type,
+        title=title,
+        parameters=parameters,
+    )
     session.commit()
     session.refresh(job)
     return job
@@ -107,7 +126,8 @@ def mark_job_failed(session: Session, job_id: uuid.UUID | str, error: str) -> Jo
     return job
 
 
-def append_log(
+
+def add_job_log(
     session: Session,
     job_id: uuid.UUID | str,
     message: str,
@@ -115,9 +135,53 @@ def append_log(
     level: str = "info",
 ) -> JobLog:
     log = JobLog(job_id=uuid.UUID(str(job_id)), level=level, message=message)
+    session.add(log)
+    return log
+
+
+def claim_job_running(session: Session, job_id: uuid.UUID | str) -> Job | None:
+    """Atomically claim a queued job; duplicate broker deliveries become no-ops."""
+    identifier = uuid.UUID(str(job_id))
+    now = utcnow()
+    result = session.exec(
+        update(Job)
+        .where(Job.id == identifier, Job.status == JobStatus.queued.value)
+        .values(
+            status=JobStatus.running.value,
+            started_at=now,
+            updated_at=now,
+            error=None,
+        )
+    )
+    session.commit()
+    if not result.rowcount:
+        return None
+    return session.get(Job, identifier)
+
+
+def cancel_job(session: Session, job_id: uuid.UUID | str, reason: str) -> Job | None:
+    job = get_job(session, job_id)
+    if job is None:
+        return None
+    if job.status in {JobStatus.succeeded.value, JobStatus.failed.value, JobStatus.cancelled.value}:
+        return job
+    job.status = JobStatus.cancelled.value
+    job.error = reason
+    job.finished_at = utcnow()
+    job.updated_at = job.finished_at
+    session.add(job)
+    return job
+
+def append_log(
+    session: Session,
+    job_id: uuid.UUID | str,
+    message: str,
+    *,
+    level: str = "info",
+) -> JobLog:
+    log = add_job_log(session, job_id, message, level=level)
     job = require_job(session, job_id)
     job.updated_at = utcnow()
-    session.add(log)
     session.add(job)
     session.commit()
     session.refresh(log)

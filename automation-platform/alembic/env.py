@@ -7,7 +7,12 @@ from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
 from automation_core.config import get_settings
-from automation_core.models import Artifact, Job, JobLog, SourceFile, SourceFileRun
+from automation_core.models import Artifact, Job, JobLog, SourceFile, SourceFileRun, TaskOutbox
+from antidengue_automation.models import (
+    AntiDengueSchedule,
+    AntiDengueScheduleEvent,
+    AntiDengueScheduleExecution,
+)
 from master_data.models import (
     Department,
     District,

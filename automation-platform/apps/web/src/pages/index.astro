@@ -2,388 +2,383 @@
 import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
 ---
 
-<AntiDengueLayout title="AntiDengue reporting" description="Run the existing reporting pipeline and follow its progress from the web." page="dashboard">
+<AntiDengueLayout
+  title="AntiDengue reporting"
+  description="Generate reports, prepare the exact send plan, then review it or send when every safety gate passes."
+  page="dashboard"
+>
   <button class="btn btn-sm btn-ghost" id="refresh-button" type="button" slot="actions">↻ Refresh</button>
 
-        <section class="metric-grid" aria-label="AntiDengue file counts">
-          <article class="metric-card">
-            <span>Raw files</span>
-            <strong id="raw-files">—</strong>
-            <small>Waiting or downloaded</small>
-          </article>
-          <article class="metric-card">
-            <span>Output files</span>
-            <strong id="output-files">—</strong>
-            <small>Generated reports</small>
-          </article>
-          <article class="metric-card">
-            <span>Archived files</span>
-            <strong id="archived-files">—</strong>
-            <small>Processed source files</small>
-          </article>
-          <article class="metric-card warning-card">
-            <span>Mapping reports</span>
-            <strong id="unmapped-reports">—</strong>
-            <small>Officer mapping audits</small>
-          </article>
-        </section>
+  <div class="notice antidengue-safety-notice">
+    Direct legacy live-send is disabled. Test run never sends. Send now can send only the exact reviewed plan after every safety gate passes.
+  </div>
 
-        <section class="workspace-grid">
-          <div class="left-column">
-            <article class="panel run-panel">
-              <div class="panel-heading">
-                <div>
-                  <p class="eyebrow">New run</p>
-                  <h2>Run AntiDengue</h2>
-                </div>
-                <span class="environment-pill">Existing pipeline</span>
-              </div>
+  <section class="metric-grid" aria-label="AntiDengue overview">
+    <article class="metric-card"><span>Raw files</span><strong id="raw-files">—</strong><small>Waiting or downloaded</small></article>
+    <article class="metric-card"><span>Output files</span><strong id="output-files">—</strong><small>Generated reports</small></article>
+    <article class="metric-card"><span>Active executions</span><strong id="active-executions">—</strong><small>Dry run, preview or dispatch</small></article>
+    <article class="metric-card warning-card"><span>Next scheduled run</span><strong id="next-run">—</strong><small id="next-schedule-name">No enabled schedule</small></article>
+  </section>
 
-              <form id="run-form">
-                <label class="field-label" for="login-mode">Portal login</label>
-                <select class="select select-bordered w-full" id="login-mode" name="login_mode">
-                  <option value="auto">Auto sign in</option>
-                  <option value="manual">Manual sign in</option>
-                  <option value="remote_approve">Remote approval</option>
-                </select>
+  <section class="workspace-grid antidengue-orchestration-grid">
+    <div class="left-column">
+      <article class="panel run-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">Safe orchestration</p><h2>Run AntiDengue</h2></div>
+          <span class="environment-pill">Dry-run planner</span>
+        </div>
+        <form id="run-form">
+          <label class="field-label" for="login-mode">Portal login</label>
+          <select class="select select-bordered w-full" id="login-mode">
+            <option value="auto">Auto sign in</option>
+            <option value="manual">Manual sign in</option>
+            <option value="remote_approve">Remote approval</option>
+          </select>
 
-                <label class="mode-option selected" id="dry-mode-option">
-                  <input checked class="radio radio-primary" type="radio" name="run_mode" value="dry" />
-                  <span>
-                    <strong>Dry run</strong>
-                    <small>Generate reports without sending WhatsApp messages.</small>
-                  </span>
-                </label>
-                <label class="mode-option live-option" id="live-mode-option">
-                  <input class="radio radio-error" type="radio" name="run_mode" value="live" />
-                  <span>
-                    <strong>Live send</strong>
-                    <small>Generate reports and publish WhatsApp delivery jobs.</small>
-                  </span>
-                </label>
+          <label class="field-label" for="profile-selector">Routing profiles</label>
+          <details class="routing-profile-selector" id="profile-selector">
+            <summary class="select select-bordered w-full" id="profile-summary">Routing profiles: select profiles</summary>
+            <div class="routing-profile-popover">
+              <div class="schedule-form-row"><input class="input input-bordered" id="profile-search" type="search" placeholder="Search profiles" /><select class="select select-bordered" id="profile-report-filter"><option value="">All reports / wings</option></select></div>
+              <div class="routing-profile-tools"><button class="btn btn-xs btn-ghost" id="profile-select-visible" type="button">Select all visible</button><button class="btn btn-xs btn-ghost" id="profile-clear" type="button">Clear</button><button class="btn btn-xs btn-ghost" id="profile-refresh" type="button">Refresh</button></div>
+              <div id="profile-options" class="routing-profile-options" role="group" aria-label="AntiDengue routing profiles"><p>Open to load profiles…</p></div>
+            </div>
+          </details>
+          <div id="profile-chips" class="routing-profile-chips" aria-live="polite"></div>
+          <p class="field-help" id="profile-help">Selected profiles freeze the audiences, routing, reports and targets into one exact send plan.</p>
 
-                <div class="form-message" id="form-message" role="status"></div>
-                <button class="btn btn-primary w-full" id="run-button" type="submit">▶ Start dry run</button>
-              </form>
-            </article>
-
-            <article class="panel history-panel">
-              <div class="panel-heading compact">
-                <div>
-                  <p class="eyebrow">Recent activity</p>
-                  <h2>Run history</h2>
-                </div>
-              </div>
-              <div class="history-list" id="job-list">
-                <p class="empty-state">Loading AntiDengue runs…</p>
-              </div>
-            </article>
+          <div class="safe-run-actions">
+            <button class="btn btn-outline" id="preview-button" type="button">
+              <span>Test run</span>
+              <small>Prepare the exact plan; do not send</small>
+            </button>
+            <button class="btn btn-primary" id="send-button" type="button">
+              <span>Send now</span>
+              <small>Auto-send only when clean</small>
+            </button>
           </div>
+          <div class="form-message" id="form-message" role="status"></div>
+        </form>
+      </article>
 
-          <article class="panel activity-panel">
-            <div class="activity-header">
-              <div>
-                <p class="eyebrow">Selected run</p>
-                <h2 id="selected-title">Activity</h2>
-                <p id="selected-meta">Select a run to inspect its activity.</p>
-              </div>
-              <span class="job-status neutral" id="selected-status">No run</span>
-            </div>
+      <article class="panel history-panel">
+        <div class="panel-heading compact">
+          <div><p class="eyebrow">Recent activity</p><h2>Orchestrated runs</h2></div>
+          <a class="btn btn-xs btn-ghost" href="/antidengue/run-history">View all</a>
+        </div>
+        <div class="history-list" id="execution-list"><p class="empty-state">Loading runs…</p></div>
+      </article>
+    </div>
 
-            <div class="run-result" id="run-result" hidden></div>
+    <article class="panel activity-panel">
+      <div class="activity-header">
+        <div>
+          <p class="eyebrow">Selected execution</p>
+          <h2 id="selected-title">Activity</h2>
+          <p id="selected-meta">Select or start a run to inspect its stages.</p>
+        </div>
+        <span class="job-status neutral" id="selected-status">No run</span>
+      </div>
 
-            <div class="terminal-toolbar">
-              <span><i></i> Live output</span>
-              <button type="button" id="copy-logs">Copy logs</button>
-            </div>
-            <div class="terminal" id="terminal" aria-live="polite">
-              <p class="terminal-empty">Run activity will appear here.</p>
-            </div>
+      <div class="orchestration-stages" id="stage-list">
+        <div class="orchestration-stage pending"><span>1</span><div><strong>Generate reports</strong><small>Pending</small></div></div>
+        <div class="orchestration-stage pending"><span>2</span><div><strong>Prepare exact send plan</strong><small>Pending</small></div></div>
+        <div class="orchestration-stage pending"><span>3</span><div><strong>Send WhatsApp messages</strong><small>Pending</small></div></div>
+      </div>
 
-            <div class="artifacts-section">
-              <div class="section-title-row">
-                <h3>Generated reports</h3>
-                <div class="artifact-heading-actions"><span id="artifact-count">0 files</span><a class="btn btn-xs btn-primary" id="plan-dispatch" href="/whatsapp/previews" hidden>Preview dispatch →</a></div>
-              </div>
-              <div class="artifact-list" id="artifact-list">
-                <p class="empty-state">No generated reports for this run.</p>
-              </div>
-              <p class="route-draft-note" id="route-draft-note" hidden></p>
-              <details class="diagnostics" id="diagnostics" hidden>
-                <summary>Diagnostics <span id="diagnostic-count"></span></summary>
-                <div class="artifact-list" id="diagnostic-list"></div>
-              </details>
-            </div>
-          </article>
-        </section>
+      <div class="run-result" id="run-result" hidden></div>
 
-    <script>
-      const API_BASE = import.meta.env.PUBLIC_API_BASE_URL || "http://localhost:8020";
+      <div class="terminal-toolbar">
+        <span><i></i> Combined orchestration output</span>
+        <button type="button" id="copy-logs">Copy logs</button>
+      </div>
+      <div class="terminal" id="terminal" aria-live="polite"><p class="terminal-empty">Run activity will appear here.</p></div>
 
-      type Job = {
-        id: string;
-        type: string;
-        title: string;
-        status: string;
-        parameters: Record<string, unknown>;
-        result?: Record<string, any> | null;
-        error?: string | null;
-        created_at: string;
-        started_at?: string | null;
-        finished_at?: string | null;
+      <div class="execution-actions" id="execution-actions" hidden>
+        <a class="btn btn-sm btn-primary" id="open-preview" href="/whatsapp/previews">Open exact send plan</a>
+        <a class="btn btn-sm btn-ghost" id="open-details" href="/antidengue/run-history">Full execution details</a>
+        <button class="btn btn-sm btn-error btn-outline" id="cancel-execution" type="button">Cancel active run</button>
+      </div>
+    </article>
+  </section>
+
+  <script>
+    const API = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    let selectedExecutionId = new URLSearchParams(location.search).get("execution_id");
+    let selectedStatus = "";
+    let pollTimer: number | undefined;
+    let eventSource: EventSource | undefined;
+    let executions: any[] = [];
+    let profiles: any[] = [];
+    const selectedProfileIds = new Set<string>();
+    let profilesLoaded = false;
+
+    async function api(path: string, init?: RequestInit) {
+      const response = await fetch(`${API}${path}`, {
+        headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+        ...init,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data));
+      return data;
+    }
+
+    const terminalStatuses = new Set(["preview_ready", "completed", "completed_with_delivery_errors", "blocked", "failed", "skipped", "cancelled"]);
+    const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString() : "—";
+    const statusLabel = (value: string) => value.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
+
+    async function loadOverview() {
+      const [overview, scheduler] = await Promise.all([
+        api("/api/v1/antidengue/overview"),
+        api("/api/v1/antidengue/schedules/status"),
+      ]);
+      el("raw-files").textContent = String(overview.counts.raw_files);
+      el("output-files").textContent = String(overview.counts.output_files);
+      el("active-executions").textContent = String(scheduler.active_executions);
+      el("next-run").textContent = scheduler.next_run_at ? new Date(scheduler.next_run_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+      el("next-schedule-name").textContent = scheduler.next_run_at ? `${scheduler.next_schedule_name} · ${new Date(scheduler.next_run_at).toLocaleDateString()}` : "No enabled schedule";
+    }
+
+    async function loadProfiles(force = false) {
+      if (profilesLoaded && !force) return;
+      const data = await api("/api/v1/whatsapp/previews/options");
+      profiles = data.profiles;
+      profilesLoaded = true;
+      if (!data.profiles.length) {
+        el("profile-options").innerHTML = "<p>No enabled AntiDengue routing profiles.</p>";
+        el("profile-help").textContent = "Configure an enabled AntiDengue dispatch profile under WhatsApp Routing first.";
+        return;
+      }
+      const filter = el<HTMLSelectElement>("profile-report-filter");
+      filter.innerHTML = '<option value="">All reports / wings</option>';
+      for (const value of [...new Set(profiles.map((item) => `${item.report_type_name || "Report"} · ${item.wing_name || "All wings"}`))].sort()) filter.add(new Option(value, value));
+      renderProfileOptions();
+    }
+
+    function visibleProfiles() {
+      const search = el<HTMLInputElement>("profile-search").value.toLowerCase();
+      const report = el<HTMLSelectElement>("profile-report-filter").value;
+      return profiles.filter((item) => {
+        const category = `${item.report_type_name || "Report"} · ${item.wing_name || "All wings"}`;
+        return (!report || category === report) && `${item.name} ${item.audience_name} ${category}`.toLowerCase().includes(search);
+      });
+    }
+
+    function renderProfileOptions() {
+      const container = el("profile-options"); container.replaceChildren();
+      for (const profile of visibleProfiles()) {
+        const label = document.createElement("label"); label.className = "routing-profile-option";
+        const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.className = "checkbox checkbox-sm"; checkbox.checked = selectedProfileIds.has(profile.id);
+        checkbox.addEventListener("change", () => { checkbox.checked ? selectedProfileIds.add(profile.id) : selectedProfileIds.delete(profile.id); renderProfileOptions(); renderProfileSummary(); });
+        const text = document.createElement("span"); text.textContent = `${profile.name} · ${profile.audience_name} · ${profile.target_count} target(s)`;
+        label.append(checkbox, text); container.append(label);
+      }
+      if (!container.children.length) container.innerHTML = "<p>No profiles match the filters.</p>";
+    }
+
+    function renderProfileSummary() {
+      const selected = profiles.filter((item) => selectedProfileIds.has(item.id));
+      const targets = selected.reduce((total, item) => total + Number(item.target_count || 0), 0);
+      el("profile-summary").textContent = selected.length ? `Routing profiles: ${selected.length} selected · ${targets} targets` : "Routing profiles: select profiles";
+      const chips = el("profile-chips"); chips.replaceChildren();
+      for (const profile of selected) { const chip = document.createElement("span"); chip.className = "environment-pill"; chip.textContent = profile.name; chips.append(chip); }
+    }
+
+    function renderExecutionList() {
+      const container = el("execution-list");
+      container.replaceChildren();
+      if (!executions.length) {
+        container.innerHTML = '<p class="empty-state">No orchestrated runs yet.</p>';
+        return;
+      }
+      for (const item of executions.slice(0, 10)) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `history-item ${item.id === selectedExecutionId ? "selected" : ""}`;
+        const title = item.trigger_type === "manual_send" ? "Send now" : item.trigger_type === "manual_preview" ? "Test run" : item.schedule_name || "Scheduled run";
+        button.innerHTML = `<span class="history-status ${item.status}"></span><span class="history-copy"><strong></strong><small></small></span><span class="job-status ${item.status}"></span>`;
+        button.querySelector("strong")!.textContent = title;
+        button.querySelector("small")!.textContent = `${item.execution_code} · ${formatDate(item.created_at)}`;
+        button.querySelector(".job-status")!.textContent = statusLabel(item.status);
+        button.addEventListener("click", () => { selectedExecutionId = item.id; renderExecutionList(); void loadSelected(); });
+        container.append(button);
+      }
+    }
+
+    async function loadExecutions() {
+      const data = await api("/api/v1/antidengue/executions?limit=30");
+      executions = data.items;
+      if (selectedExecutionId && !executions.some((item) => item.id === selectedExecutionId)) selectedExecutionId = null;
+      if (!selectedExecutionId && executions.length) selectedExecutionId = executions[0].id;
+      renderExecutionList();
+      await loadSelected();
+    }
+
+    function renderStages(stages: any[]) {
+      const container = el("stage-list");
+      container.replaceChildren();
+      stages.forEach((stage, index) => {
+        const row = document.createElement("div");
+        const tone = ["succeeded", "not_requested"].includes(stage.status) ? "succeeded" : stage.status === "failed" ? "failed" : ["queued", "running"].includes(stage.status) ? "running" : "pending";
+        row.className = `orchestration-stage ${tone}`;
+        row.innerHTML = `<span>${index + 1}</span><div><strong></strong><small></small></div>`;
+        row.querySelector("strong")!.textContent = stage.label;
+        row.querySelector("small")!.textContent = statusLabel(stage.status);
+        container.append(row);
+      });
+    }
+
+    function renderLogs(logs: any[]) {
+      const terminal = el("terminal");
+      terminal.replaceChildren();
+      if (!logs.length) {
+        terminal.innerHTML = '<p class="terminal-empty">Waiting for orchestration activity…</p>';
+        return;
+      }
+      for (const log of logs) {
+        const row = document.createElement("div");
+        row.className = `log-row ${String(log.level).toLowerCase()}`;
+        row.innerHTML = `<time></time><b></b><span></span>`;
+        row.querySelector("time")!.textContent = new Date(log.created_at).toLocaleTimeString([], { hour12: false });
+        row.querySelector("b")!.textContent = String(log.source || log.level).toUpperCase();
+        row.querySelector("span")!.textContent = log.message;
+        terminal.append(row);
+      }
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+
+    function renderResult(item: any) {
+      const result = el("run-result");
+      const preview = item.preview_summary || {};
+      const dispatch = item.dispatch_summary || {};
+      if (!item.error && !Object.keys(preview).length && !Object.keys(dispatch).length) {
+        result.hidden = true;
+        return;
+      }
+      result.hidden = false;
+      result.innerHTML = item.error
+        ? `<strong>${statusLabel(item.status)}</strong><span></span>`
+        : `<div><span>Preview deliveries</span><strong>${preview.delivery_count ?? "—"}</strong></div><div><span>Warnings / blocked</span><strong>${preview.warning_count ?? 0} / ${preview.blocked_count ?? 0}</strong></div><div><span>Delivered / failed</span><strong>${dispatch.delivered ?? "—"} / ${dispatch.failed ?? "—"}</strong></div>`;
+      if (item.error) result.querySelector("span")!.textContent = item.error;
+    }
+
+    function applySelected(item: any) {
+      selectedStatus = item.status;
+      el("selected-title").textContent = item.schedule_name || (item.trigger_type === "manual_send" ? "Send now" : "Test run");
+      el("selected-meta").textContent = `${item.execution_code} · ${formatDate(item.scheduled_for)}`;
+      const badge = el("selected-status");
+      badge.className = `job-status ${item.status}`;
+      badge.textContent = statusLabel(item.status);
+      renderStages(item.stages || []);
+      renderLogs(item.logs || []);
+      renderResult(item);
+      if (item.dispatch_policy === "preview_only" && item.status === "preview_ready") el("run-result").insertAdjacentHTML("afterbegin", "<strong>Sending skipped — test mode</strong>");
+      const actions = el("execution-actions");
+      actions.hidden = false;
+      el<HTMLAnchorElement>("open-preview").hidden = !item.preview_id;
+      el<HTMLAnchorElement>("open-preview").href = item.preview_id ? `/whatsapp/previews/${item.preview_id}` : "/whatsapp/previews";
+      el<HTMLAnchorElement>("open-details").href = `/antidengue/run-history?execution_id=${item.id}`;
+      el<HTMLButtonElement>("cancel-execution").hidden = terminalStatuses.has(item.status);
+    }
+
+    function connectExecutionStream() {
+      eventSource?.close();
+      eventSource = undefined;
+      if (!selectedExecutionId) return;
+      eventSource = new EventSource(`${API}/api/v1/antidengue/executions/${selectedExecutionId}/events`);
+      eventSource.addEventListener("snapshot", (event) => {
+        const item = JSON.parse((event as MessageEvent).data);
+        applySelected(item);
+        if (item.terminal) {
+          eventSource?.close();
+          eventSource = undefined;
+          void loadExecutions();
+          void loadOverview();
+        }
+      });
+      eventSource.onerror = () => {
+        eventSource?.close();
+        eventSource = undefined;
       };
+    }
 
-      type JobLog = { id: number; level: string; message: string; created_at: string };
-      type Artifact = { id: number; name: string; kind: string; size_bytes: number };
+    async function loadSelected() {
+      if (!selectedExecutionId) return;
+      const item = await api(`/api/v1/antidengue/executions/${selectedExecutionId}`);
+      applySelected(item);
+      if (!terminalStatuses.has(item.status)) connectExecutionStream();
+    }
 
-      let selectedJobId: string | null = new URLSearchParams(window.location.search).get("job_id");
-      let selectedJobStatus = "";
-      let jobs: Job[] = [];
-      let pollTimer: number | undefined;
-
-      const get = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-
-      async function api<T>(path: string, init?: RequestInit): Promise<T> {
-        const response = await fetch(`${API_BASE}${path}`, {
-          headers: { "Content-Type": "application/json" },
-          ...init
+    async function startExecution(policy: "preview_only" | "auto_send_when_clean") {
+      const profileIds = [...selectedProfileIds];
+      const message = el("form-message");
+      if (!profileIds.length) { message.textContent = "Select at least one enabled AntiDengue routing profile."; return; }
+      if (policy === "auto_send_when_clean" && !confirm("This will send only if report generation succeeds and the exact send plan has zero warnings and zero blocking issues. Continue?")) return;
+      const buttons = [el<HTMLButtonElement>("preview-button"), el<HTMLButtonElement>("send-button")];
+      buttons.forEach((button) => button.disabled = true);
+      message.textContent = policy === "preview_only" ? "Queueing safe preview…" : "Queueing guarded build-and-send…";
+      try {
+        const requestKey = crypto.randomUUID();
+        const item = await api("/api/v1/antidengue/executions", {
+          method: "POST",
+          headers: { "Idempotency-Key": requestKey },
+          body: JSON.stringify({
+            login_mode: el<HTMLSelectElement>("login-mode").value,
+            dispatch_policy: policy,
+            dispatch_profile_ids: profileIds,
+            created_by: "web-operator",
+          }),
         });
-        if (!response.ok) {
-          let message = response.statusText;
-          try {
-            const body = await response.json();
-            message = body.detail || message;
-          } catch {}
-          throw new Error(message);
-        }
-        return response.json();
+        selectedExecutionId = item.id;
+        message.textContent = item.reused_active_execution
+          ? `${item.execution_code} is already active; the existing run was selected.`
+          : `${item.execution_code} created. The proven dry-run planner is first.`;
+        await refreshAll();
+      } catch (error) {
+        message.textContent = error instanceof Error ? error.message : "Could not create the execution";
+      } finally {
+        buttons.forEach((button) => button.disabled = false);
       }
+    }
 
-      function formatDate(value?: string | null) {
-        return value ? new Date(value).toLocaleString() : "—";
+    async function refreshAll() {
+      window.clearTimeout(pollTimer);
+      try {
+        await Promise.all([loadOverview(), loadExecutions()]);
+      } catch (error) {
+        el("form-message").textContent = error instanceof Error ? error.message : "Platform API unavailable";
+      } finally {
+        pollTimer = window.setTimeout(refreshAll, document.hidden ? 60000 : 20000);
       }
+    }
 
-      function formatBytes(bytes: number) {
-        if (bytes < 1024) return `${bytes} B`;
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-        return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    el("preview-button").addEventListener("click", () => void startExecution("preview_only"));
+    el("send-button").addEventListener("click", () => void startExecution("auto_send_when_clean"));
+    el("refresh-button").addEventListener("click", () => void refreshAll());
+    el("cancel-execution").addEventListener("click", async () => {
+      if (!selectedExecutionId || !confirm("Cancel this active AntiDengue run?")) return;
+      try {
+        const item = await api(`/api/v1/antidengue/executions/${selectedExecutionId}/cancel`, { method: "POST" });
+        applySelected(item);
+        await loadExecutions();
+      } catch (error) {
+        el("form-message").textContent = error instanceof Error ? error.message : "Could not cancel execution";
       }
-
-      function statusLabel(status: string) {
-        return status.charAt(0).toUpperCase() + status.slice(1);
-      }
-
-      async function loadOverview() {
-        const overview = await api<any>("/api/v1/antidengue/overview");
-        get("raw-files").textContent = String(overview.counts.raw_files);
-        get("output-files").textContent = String(overview.counts.output_files);
-        get("archived-files").textContent = String(overview.counts.archived_files);
-        get("unmapped-reports").textContent = String(overview.counts.unmapped_reports);
-        get("api-status").textContent = overview.project_available
-          ? "AntiDengue project found"
-          : "AntiDengue project missing";
-        get("run-button").toggleAttribute("disabled", Boolean(overview.active_job_id));
-        if (overview.active_job_id && !selectedJobId) selectedJobId = overview.active_job_id;
-      }
-
-      function renderJobs() {
-        const list = get("job-list");
-        list.replaceChildren();
-        if (!jobs.length) {
-          list.innerHTML = '<p class="empty-state">No web runs yet. Start with a dry run.</p>';
-          return;
-        }
-        for (const job of jobs) {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = `history-item ${job.id === selectedJobId ? "selected" : ""}`;
-          button.innerHTML = `
-            <span class="history-status ${job.status}"></span>
-            <span class="history-copy">
-              <strong>${job.parameters.input_source === "manual_upload" ? "Manual dry run" : job.parameters.dry_run ? "Dry run" : "Live send"}</strong>
-              <small>${formatDate(job.created_at)}</small>
-            </span>
-            <span class="job-status ${job.status}">${statusLabel(job.status)}</span>`;
-          button.addEventListener("click", () => selectJob(job.id));
-          list.append(button);
-        }
-      }
-
-      async function loadJobs() {
-        jobs = await api<Job[]>("/api/v1/jobs?job_type=antidengue.report&limit=20");
-        if (selectedJobId && !jobs.some((job) => job.id === selectedJobId)) selectedJobId = null;
-        if (!selectedJobId && jobs.length) selectedJobId = jobs[0].id;
-        renderJobs();
-        if (selectedJobId) await loadSelectedJob();
-      }
-
-      function renderResult(job: Job) {
-        const box = get("run-result");
-        const summary = job.result?.summary;
-        if (!summary && !job.error) {
-          box.hidden = true;
-          return;
-        }
-        const dormant = summary?.counts?.final_school_count ?? summary?.quality_gate?.final_school_count;
-        const delivered = summary?.whatsapp?.delivered ?? summary?.whatsapp?.delivered_count;
-        const quality = summary?.quality_gate?.passed;
-        box.hidden = false;
-        box.innerHTML = job.error
-          ? `<strong>Run failed</strong><span>${job.error}</span>`
-          : `<div><span>Dormant schools</span><strong>${dormant ?? "—"}</strong></div>
-             <div><span>Quality gate</span><strong>${quality === false ? "Blocked" : quality === true ? "Passed" : "—"}</strong></div>
-             <div><span>Delivered</span><strong>${delivered ?? "—"}</strong></div>`;
-      }
-
-      function renderLogs(logs: JobLog[]) {
-        const terminal = get("terminal");
-        terminal.replaceChildren();
-        if (!logs.length) {
-          terminal.innerHTML = '<p class="terminal-empty">Waiting for worker output…</p>';
-          return;
-        }
-        for (const log of logs) {
-          const row = document.createElement("div");
-          row.className = `log-row ${log.level.toLowerCase()}`;
-          const time = new Date(log.created_at).toLocaleTimeString([], { hour12: false });
-          row.innerHTML = `<time>${time}</time><b>${log.level.toUpperCase()}</b><span></span>`;
-          row.querySelector("span")!.textContent = log.message;
-          terminal.append(row);
-        }
-        terminal.scrollTop = terminal.scrollHeight;
-      }
-
-      function renderArtifacts(artifacts: Artifact[]) {
-        const list = get("artifact-list");
-        const isDispatchDraft = (artifact: Artifact) =>
-          artifact.kind === "dispatch_draft" || artifact.name.toLowerCase().includes("group-route-excels/");
-        const isDiagnostic = (artifact: Artifact) => {
-          const name = artifact.name.toLowerCase();
-          return ["audit", "manifest"].includes(artifact.kind) || name.includes("audit") || name.endsWith("run_summary.json");
-        };
-        const drafts = artifacts.filter(isDispatchDraft);
-        const diagnostics = artifacts.filter((artifact) => !isDispatchDraft(artifact) && isDiagnostic(artifact));
-        const reports = artifacts.filter((artifact) => !isDispatchDraft(artifact) && !isDiagnostic(artifact));
-
-        get("artifact-count").textContent = `${reports.length} ${reports.length === 1 ? "file" : "files"}`;
-        list.replaceChildren();
-        if (!reports.length) {
-          list.innerHTML = '<p class="empty-state">No generated reports for this run.</p>';
-        }
-
-        const appendArtifact = (container: HTMLElement, artifact: Artifact) => {
-          const link = document.createElement("a");
-          link.className = "artifact-item";
-          link.href = `${API_BASE}/api/v1/artifacts/${artifact.id}/download`;
-          link.innerHTML = `<span class="file-icon">↓</span><span><strong></strong><small>${artifact.kind.toUpperCase()} · ${formatBytes(artifact.size_bytes)}</small></span>`;
-          link.querySelector("strong")!.textContent = artifact.name;
-          container.append(link);
-        };
-        reports.forEach((artifact) => appendArtifact(list, artifact));
-
-        const draftNote = get("route-draft-note");
-        draftNote.hidden = drafts.length === 0;
-        draftNote.textContent = drafts.length
-          ? `${drafts.length} internal route ${drafts.length === 1 ? "draft is" : "drafts are"} reserved for Dispatch Preview and are not final reports.`
-          : "";
-
-        const diagnosticPanel = get<HTMLDetailsElement>("diagnostics");
-        const diagnosticList = get("diagnostic-list");
-        diagnosticList.replaceChildren();
-        diagnosticPanel.hidden = diagnostics.length === 0;
-        get("diagnostic-count").textContent = `(${diagnostics.length})`;
-        diagnostics.forEach((artifact) => appendArtifact(diagnosticList, artifact));
-        if (!diagnostics.length) {
-          diagnosticPanel.open = false;
-        }
-      }
-
-      async function loadSelectedJob() {
-        if (!selectedJobId) return;
-        const job = await api<Job>(`/api/v1/jobs/${selectedJobId}`);
-        selectedJobStatus = job.status;
-        const active = ["queued", "running"].includes(job.status);
-        const [logs, artifacts] = await Promise.all([
-          api<JobLog[]>(`/api/v1/jobs/${selectedJobId}/logs?limit=500`),
-          active ? Promise.resolve([] as Artifact[]) : api<Artifact[]>(`/api/v1/jobs/${selectedJobId}/artifacts`)
-        ]);
-        get("selected-title").textContent = job.parameters.input_source === "manual_upload" ? "Manual report activity" : job.parameters.dry_run ? "Dry run activity" : "Live send activity";
-        get("selected-meta").textContent = `${formatDate(job.created_at)} · ${job.id.slice(0, 8)}`;
-        const badge = get("selected-status");
-        badge.className = `job-status ${job.status}`;
-        badge.textContent = statusLabel(job.status);
-        renderResult(job);
-        renderLogs(logs);
-        renderArtifacts(artifacts);
-        const previewLink = get<HTMLAnchorElement>("plan-dispatch");
-        previewLink.hidden = job.status !== "succeeded" || !Boolean(job.parameters.dry_run);
-        previewLink.href = `/whatsapp/previews?source_job_id=${job.id}`;
-      }
-
-      async function selectJob(id: string) {
-        selectedJobId = id;
-        renderJobs();
-        await loadSelectedJob();
-      }
-
-      async function refreshAll() {
-        try {
-          await Promise.all([loadOverview(), loadJobs()]);
-        } catch (error) {
-          get("api-status").textContent = error instanceof Error ? error.message : "API unavailable";
-          get("form-message").textContent = "Could not connect to the platform API.";
-        } finally {
-          window.clearTimeout(pollTimer);
-          if (["queued", "running"].includes(selectedJobStatus)) {
-            pollTimer = window.setTimeout(refreshAll, 2500);
-          }
-        }
-      }
-
-      document.querySelectorAll<HTMLInputElement>('input[name="run_mode"]').forEach((radio) => {
-        radio.addEventListener("change", () => {
-          const isDry = radio.value === "dry" && radio.checked;
-          get("dry-mode-option").classList.toggle("selected", isDry);
-          get("live-mode-option").classList.toggle("selected", !isDry);
-          get("run-button").textContent = isDry ? "▶ Start dry run" : "▶ Start live send";
-        });
-      });
-
-      get<HTMLFormElement>("run-form").addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const mode = new FormData(event.currentTarget).get("run_mode");
-        const dryRun = mode !== "live";
-        if (!dryRun && !confirm("This will send WhatsApp reports. Start the live AntiDengue run?")) return;
-        const runButton = get<HTMLButtonElement>("run-button");
-        const message = get("form-message");
-        runButton.disabled = true;
-        runButton.textContent = "Queueing…";
-        message.textContent = "";
-        try {
-          const job = await api<Job>("/api/v1/antidengue/runs", {
-            method: "POST",
-            body: JSON.stringify({
-              dry_run: dryRun,
-              login_mode: get<HTMLSelectElement>("login-mode").value
-            })
-          });
-          selectedJobId = job.id;
-          message.textContent = `Queued ${dryRun ? "dry run" : "live send"}.`;
-          await refreshAll();
-        } catch (error) {
-          message.textContent = error instanceof Error ? error.message : "Could not queue run";
-          runButton.disabled = false;
-        }
-      });
-
-      get("refresh-button").addEventListener("click", refreshAll);
-      get("copy-logs").addEventListener("click", async () => {
-        await navigator.clipboard.writeText(get("terminal").innerText);
-        get("copy-logs").textContent = "Copied";
-        window.setTimeout(() => (get("copy-logs").textContent = "Copy logs"), 1200);
-      });
-
-      refreshAll();
-      window.addEventListener("beforeunload", () => window.clearTimeout(pollTimer));
-    </script>
+    });
+    el("copy-logs").addEventListener("click", async () => {
+      await navigator.clipboard.writeText(el("terminal").innerText);
+      el("copy-logs").textContent = "Copied";
+      setTimeout(() => el("copy-logs").textContent = "Copy logs", 1200);
+    });
+    el("profile-selector").addEventListener("toggle", () => { if ((el("profile-selector") as HTMLDetailsElement).open) void loadProfiles(); });
+    el("profile-search").addEventListener("input", renderProfileOptions);
+    el("profile-report-filter").addEventListener("change", renderProfileOptions);
+    el("profile-select-visible").addEventListener("click", () => { visibleProfiles().forEach((item) => selectedProfileIds.add(item.id)); renderProfileOptions(); renderProfileSummary(); });
+    el("profile-clear").addEventListener("click", () => { selectedProfileIds.clear(); renderProfileOptions(); renderProfileSummary(); });
+    el("profile-refresh").addEventListener("click", () => void loadProfiles(true));
+    void refreshAll();
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) void refreshAll(); });
+    addEventListener("beforeunload", () => { clearTimeout(pollTimer); eventSource?.close(); });
+  </script>
 </AntiDengueLayout>

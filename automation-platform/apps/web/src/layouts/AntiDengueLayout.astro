@@ -4,12 +4,15 @@ import AppLayout from "./AppLayout.astro";
 interface Props {
   title: string;
   description: string;
-  page: "dashboard" | "manual-reports";
+  page: "dashboard" | "schedules" | "run-history" | "dispatch-plans" | "manual-reports";
 }
 
 const { title, description, page } = Astro.props;
 const links = [
   ["dashboard", "Dashboard", "/"],
+  ["schedules", "Schedules", "/antidengue/schedules"],
+  ["run-history", "Run History", "/antidengue/run-history"],
+  ["dispatch-plans", "Dispatch Plans", "/antidengue/dispatch-plans"],
   ["manual-reports", "Manual Reports", "/antidengue/manual-reports"],
 ];
 ---

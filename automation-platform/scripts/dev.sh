@@ -82,6 +82,39 @@ wait_for_http() {
   fail "$label did not become ready at $url within ${seconds}s."
 }
 
+find_running_platform_worker_pids() {
+  local process_dir=""
+  local process_pid=""
+  local process_cwd=""
+  local process_args=""
+
+  for process_dir in /proc/[0-9]*; do
+    [[ -r "$process_dir/cmdline" ]] || continue
+    process_pid="${process_dir##*/}"
+    process_cwd="$(readlink "$process_dir/cwd" 2>/dev/null || true)"
+    [[ "$process_cwd" == "$ROOT" ]] || continue
+    process_args="$(tr '\0' ' ' < "$process_dir/cmdline" 2>/dev/null || true)"
+    if [[ "$process_args" == *celery* && "$process_args" == *automation_worker.main.celery_app* ]]; then
+      printf '%s\n' "$process_pid"
+    fi
+  done
+}
+
+stop_existing_platform_workers() {
+  local -a stale_pids=()
+  mapfile -t stale_pids < <(find_running_platform_worker_pids)
+  ((${#stale_pids[@]})) || return 0
+  echo "Stopping stale local Automation Platform Celery worker(s): ${stale_pids[*]}"
+  kill -TERM "${stale_pids[@]}" 2>/dev/null || true
+  for _ in {1..20}; do
+    mapfile -t stale_pids < <(find_running_platform_worker_pids)
+    ((${#stale_pids[@]} == 0)) && return 0
+    sleep 0.25
+  done
+  echo "Force-stopping unresponsive local Celery worker(s): ${stale_pids[*]}"
+  kill -KILL "${stale_pids[@]}" 2>/dev/null || true
+}
+
 wait_for_platform_worker() {
   local output=""
   for _ in {1..30}; do
@@ -89,13 +122,14 @@ wait_for_platform_worker() {
     if grep -q "crm_filters.run_sheet_filter_job" <<<"$output" \
       && grep -q "crm_filters.run_pdf_filter_job" <<<"$output" \
       && grep -q "crm_filters.run_sheet_to_pdf_job" <<<"$output" \
-      && grep -q "whatsapp_gateway.build_inbound_export" <<<"$output"; then
+      && grep -q "whatsapp_gateway.build_inbound_export" <<<"$output" \
+      && grep -q "whatsapp_gateway.process_inbound_batch" <<<"$output"; then
       return 0
     fi
     sleep 1
   done
   printf '%s\n' "$output" >&2
-  fail "The Celery worker did not register the CRM and WhatsApp inbound export tasks."
+  fail "The Celery worker did not register the CRM, WhatsApp export, and inbound processing tasks."
 }
 
 whatsapp_worker_health_json() {
@@ -590,11 +624,15 @@ info "Checking NATS"
 wait_for_port 4222 2 \
   || fail "NATS is not listening on port 4222. Start your NATS server before the development stack."
 
+info "Stopping stale local platform workers before durable-task recovery"
+stop_existing_platform_workers
+
 info "Applying database migrations"
 "$UV" run alembic upgrade head
 
 info "Recovering jobs left active by an earlier development process"
 "$UV" run python scripts/recover_crm_jobs.py --all-active
+"$UV" run python scripts/recover_antidengue_executions.py
 
 info "Starting FastAPI"
 "$UV" run uvicorn automation_api.main:app --reload --port "$API_PORT" &
@@ -679,9 +717,28 @@ if ! whatsapp_web_bridge_responder_ready; then
 fi
 print_whatsapp_web_bridge_status
 
+if (
+  cd "$ROOT"
+  "$UV" run python - <<'PY'
+from automation_core.config import get_settings
+raise SystemExit(0 if get_settings().antidengue_scheduler_enabled else 1)
+PY
+); then
+  info "Starting PostgreSQL-backed AntiDengue scheduler and safe dispatch orchestrator"
+  (
+    cd "$ROOT"
+    exec "$UV" run python -m antidengue_automation.scheduler_service
+  ) &
+  pids+=("$!")
+else
+  info "AntiDengue scheduler disabled by ANTIDENGUE_SCHEDULER_ENABLED=false"
+fi
+
 echo
 echo "Automation Platform is ready:"
 echo "  Web:               http://localhost:$WEB_PORT"
+echo "  AntiDengue plans: http://localhost:$WEB_PORT/antidengue/schedules"
+echo "  AntiDengue runs:  http://localhost:$WEB_PORT/antidengue/run-history"
 echo "  CRM sheets:        http://localhost:$WEB_PORT/crm/"
 echo "  CRM PDFs:          http://localhost:$WEB_PORT/crm/pdfs/"
 echo "  Sheet rows to PDF: http://localhost:$WEB_PORT/crm/convert/"
