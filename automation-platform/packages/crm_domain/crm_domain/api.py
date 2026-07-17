@@ -5,12 +5,13 @@ import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field as PydanticField
-from sqlalchemy import func, or_
+from sqlalchemy import String, cast, func, or_
 from sqlmodel import Session, select
 
 from automation_core.database import get_session
 from automation_core.celery_app import celery_app
 from automation_core.time import utcnow
+from crm_domain.identifiers import normalize_complaint_number
 from crm_domain.models import (
     ComplaintCase,
     ComplaintDocument,
@@ -40,7 +41,66 @@ class BackfillRequest(BaseModel):
     limit: int | None = PydanticField(default=None, ge=1, le=100_000)
 
 
-def _case_summary(case: ComplaintCase, document_count: int) -> dict[str, object]:
+class BatchPublicationRequest(BaseModel):
+    case_ids: list[uuid.UUID] = PydanticField(min_length=1, max_length=200)
+
+
+def _accepted_publication_documents(
+    session: Session, case: ComplaintCase
+) -> list[tuple[ComplaintDocument, ComplaintDocumentCaseLink]]:
+    return list(
+        session.exec(
+            select(ComplaintDocument, ComplaintDocumentCaseLink)
+            .join(
+                ComplaintDocumentCaseLink,
+                ComplaintDocumentCaseLink.complaint_document_id
+                == ComplaintDocument.id,
+            )
+            .where(
+                ComplaintDocumentCaseLink.complaint_case_id == case.id,
+                ComplaintDocumentCaseLink.review_state == "accepted",
+                ComplaintDocumentCaseLink.role.in_(
+                    ["main_complaint", "complaint_details", "attachment"]
+                ),
+            )
+            .order_by(
+                (ComplaintDocumentCaseLink.role == "main_complaint").desc(),
+                ComplaintDocument.created_at,
+            )
+        ).all()
+    )
+
+
+def _publication_blockers(session: Session, case: ComplaintCase) -> list[str]:
+    blockers: list[str] = []
+    normalized = normalize_complaint_number(case.complaint_number)
+    if normalized is None or normalized != case.complaint_number:
+        blockers.append("Confirm one valid complaint number")
+    if not str(case.remarks or "").strip():
+        blockers.append("Confirm the complete complaint remarks")
+    if case.canonical_paperless_document_id:
+        blockers.append(
+            f"Already linked to Paperless #{case.canonical_paperless_document_id}"
+        )
+    documents = _accepted_publication_documents(session, case)
+    main_documents = [
+        document for document, link in documents if link.role == "main_complaint"
+    ]
+    if not main_documents:
+        blockers.append("Accept one main complaint document")
+    elif len(main_documents) > 1:
+        blockers.append("Keep exactly one accepted main complaint document")
+    if any(document.review_state == "duplicate" for document in main_documents):
+        blockers.append("The main complaint cannot be a duplicate capture")
+    return blockers
+
+
+def _case_summary(
+    case: ComplaintCase,
+    document_count: int,
+    publication_blockers: list[str] | None = None,
+) -> dict[str, object]:
+    blockers = publication_blockers or []
     return {
         "id": str(case.id),
         "source_system": case.source_system,
@@ -56,6 +116,8 @@ def _case_summary(case: ComplaintCase, document_count: int) -> dict[str, object]
         "sub_category": case.sub_category,
         "paperless_document_id": case.canonical_paperless_document_id,
         "document_count": document_count,
+        "publication_ready": case.state == "fresh" and not blockers,
+        "publication_blockers": blockers,
         "created_at": case.created_at,
         "updated_at": case.updated_at,
     }
@@ -84,10 +146,25 @@ def list_complaint_cases(
         )
     total = session.exec(select(func.count()).select_from(ComplaintCase).where(*filters)).one()
     rows = session.exec(
-        select(ComplaintCase, func.count(ComplaintDocumentCaseLink.id))
+        select(
+            ComplaintCase,
+            func.count(
+                func.distinct(
+                    func.coalesce(
+                        ComplaintDocument.source_sha256,
+                        cast(ComplaintDocument.id, String),
+                    )
+                )
+            ),
+        )
         .join(
             ComplaintDocumentCaseLink,
             ComplaintDocumentCaseLink.complaint_case_id == ComplaintCase.id,
+            isouter=True,
+        )
+        .join(
+            ComplaintDocument,
+            ComplaintDocument.id == ComplaintDocumentCaseLink.complaint_document_id,
             isouter=True,
         )
         .where(*filters)
@@ -97,10 +174,98 @@ def list_complaint_cases(
         .limit(limit)
     ).all()
     return {
-        "items": [_case_summary(case, int(document_count)) for case, document_count in rows],
+        "items": [
+            _case_summary(
+                case,
+                int(document_count),
+                _publication_blockers(session, case),
+            )
+            for case, document_count in rows
+        ],
         "total": int(total),
         "limit": limit,
         "offset": offset,
+}
+
+
+@router.post("/publication-batches", status_code=202)
+def queue_case_publication_batch(
+    payload: BatchPublicationRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    case_ids = list(dict.fromkeys(payload.case_ids))
+    cases = [session.get(ComplaintCase, case_id) for case_id in case_ids]
+    missing = [str(case_id) for case_id, case in zip(case_ids, cases) if case is None]
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Complaint cases were not found: {', '.join(missing)}",
+        )
+    validation: dict[str, list[str]] = {}
+    for case in cases:
+        assert case is not None
+        blockers = _publication_blockers(session, case)
+        if case.state != "fresh":
+            blockers.insert(0, "Case is not approved for publication")
+        if blockers:
+            validation[str(case.id)] = blockers
+    if validation:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Some selected cases are not ready for Paperless publication",
+                "cases": validation,
+            },
+        )
+
+    staged: list[ComplaintCase] = []
+    for case in cases:
+        assert case is not None
+        _stage_case_publications(session, case)
+        staged.append(case)
+    session.commit()
+    tasks = [
+        celery_app.send_task(
+            "crm_domain.publish_complaint_case",
+            args=[str(case.id)],
+            queue="crm",
+        )
+        for case in staged
+    ]
+    return {
+        "queued_count": len(staged),
+        "case_ids": [str(case.id) for case in staged],
+        "task_ids": [task.id for task in tasks],
+    }
+
+
+@router.get("/statistics")
+def complaint_case_statistics(
+    session: Session = Depends(get_session),
+) -> dict[str, int]:
+    cases = list(session.exec(select(ComplaintCase)).all())
+    state_counts: dict[str, int] = {}
+    for case in cases:
+        state_counts[case.state] = state_counts.get(case.state, 0) + 1
+    approved_cases = [
+        case for case in cases if case.state in {"fresh", "publishing", "published"}
+    ]
+    awaiting_publication = [case for case in cases if case.state == "fresh"]
+    ready_to_publish = sum(
+        not _publication_blockers(session, case) for case in awaiting_publication
+    )
+    return {
+        "unique_cases": len(cases),
+        "needs_review": state_counts.get("candidate", 0)
+        + state_counts.get("review_required", 0),
+        "approved_cases": len(approved_cases),
+        "awaiting_publication": len(awaiting_publication),
+        "ready_to_publish": ready_to_publish,
+        "blocked_from_publication": len(awaiting_publication) - ready_to_publish,
+        "publishing": state_counts.get("publishing", 0),
+        "published": state_counts.get("published", 0),
+        "existing": state_counts.get("existing", 0),
+        "rejected": state_counts.get("rejected", 0),
     }
 
 
@@ -124,6 +289,15 @@ def read_complaint_case(
         ).all()
     )
     documents = [document for document, _link in document_links]
+    canonical_by_binary: dict[str, uuid.UUID] = {}
+    duplicate_of: dict[uuid.UUID, uuid.UUID] = {}
+    capture_counts: dict[uuid.UUID, int] = {}
+    for document in documents:
+        binary_key = document.source_sha256 or f"document:{document.id}"
+        canonical_id = canonical_by_binary.setdefault(binary_key, document.id)
+        capture_counts[canonical_id] = capture_counts.get(canonical_id, 0) + 1
+        if canonical_id != document.id:
+            duplicate_of[document.id] = canonical_id
     document_ids = [document.id for document in documents]
     extractions = list(
         session.exec(
@@ -155,7 +329,12 @@ def read_complaint_case(
         ).all()
     )
     return {
-        **_case_summary(case, len(documents)),
+        **_case_summary(
+            case,
+            len(canonical_by_binary),
+            _publication_blockers(session, case),
+        ),
+        "capture_count": len(documents),
         "complainant_address": case.complainant_address,
         "remarks": case.remarks,
         "documents": [
@@ -166,6 +345,12 @@ def read_complaint_case(
                 "relationship_confidence": link.confidence,
                 "relationship_reason": link.reason,
                 "source_locator": link.source_locator,
+                "duplicate_of_document_id": (
+                    str(duplicate_of[document.id])
+                    if document.id in duplicate_of
+                    else None
+                ),
+                "duplicate_capture_count": capture_counts.get(document.id, 0),
             }
             for document, link in document_links
         ],
@@ -295,6 +480,11 @@ def approve_fresh_complaint(
         raise HTTPException(status_code=404, detail="Complaint case not found")
     if case.canonical_paperless_document_id:
         raise HTTPException(status_code=409, detail="An existing Paperless complaint is already linked")
+    normalized = normalize_complaint_number(case.complaint_number)
+    if normalized is None or normalized != case.complaint_number:
+        raise HTTPException(status_code=409, detail="Confirm one valid complaint number first")
+    if not str(case.remarks or "").strip():
+        raise HTTPException(status_code=409, detail="Confirm the complete complaint remarks first")
     main = session.exec(
         select(ComplaintDocument)
         .join(ComplaintDocumentCaseLink, ComplaintDocumentCaseLink.complaint_document_id == ComplaintDocument.id)
@@ -326,6 +516,33 @@ def approve_fresh_complaint(
     return {"id": str(case.id), "state": case.state}
 
 
+def _stage_case_publications(session: Session, case: ComplaintCase) -> None:
+    document_links = _accepted_publication_documents(session, case)
+    for document, link in document_links:
+        key_source = f"{case.id}:{document.id}:{document.source_sha256 or document.id}:v{case.version}"
+        key = hashlib.sha256(key_source.encode()).hexdigest()
+        existing = session.exec(
+            select(PaperlessPublication).where(
+                PaperlessPublication.idempotency_key == key
+            )
+        ).first()
+        if existing is None:
+            session.add(
+                PaperlessPublication(
+                    complaint_case_id=case.id,
+                    complaint_document_id=document.id,
+                    idempotency_key=key,
+                    intended_fields_json={
+                        "case_version": case.version,
+                        "role": link.role,
+                    },
+                )
+            )
+    case.state = "publishing"
+    case.updated_at = utcnow()
+    session.add(case)
+
+
 @router.post("/{case_id}/publish", status_code=202)
 def queue_case_publication(
     case_id: uuid.UUID,
@@ -336,41 +553,16 @@ def queue_case_publication(
         raise HTTPException(status_code=404, detail="Complaint case not found")
     if case.state != "fresh":
         raise HTTPException(status_code=409, detail="Approve this case as fresh before publishing")
-    document_links = list(
-        session.exec(
-            select(ComplaintDocument, ComplaintDocumentCaseLink)
-            .join(ComplaintDocumentCaseLink, ComplaintDocumentCaseLink.complaint_document_id == ComplaintDocument.id)
-            .where(
-                ComplaintDocumentCaseLink.complaint_case_id == case.id,
-                ComplaintDocumentCaseLink.review_state == "accepted",
-                ComplaintDocumentCaseLink.role.in_(["main_complaint", "complaint_details", "attachment"]),
-            )
-            .order_by(
-                (ComplaintDocumentCaseLink.role == "main_complaint").desc(),
-                ComplaintDocument.created_at,
-            )
-        ).all()
-    )
-    if not document_links or document_links[0][1].role != "main_complaint":
-        raise HTTPException(status_code=409, detail="An accepted main complaint is required")
-    for document, link in document_links:
-        key_source = f"{case.id}:{document.id}:{document.source_sha256 or document.id}:v{case.version}"
-        key = hashlib.sha256(key_source.encode()).hexdigest()
-        existing = session.exec(
-            select(PaperlessPublication).where(PaperlessPublication.idempotency_key == key)
-        ).first()
-        if existing is None:
-            session.add(
-                PaperlessPublication(
-                    complaint_case_id=case.id,
-                    complaint_document_id=document.id,
-                    idempotency_key=key,
-                    intended_fields_json={"case_version": case.version, "role": link.role},
-                )
-            )
-    case.state = "publishing"
-    case.updated_at = utcnow()
-    session.add(case)
+    blockers = _publication_blockers(session, case)
+    if blockers:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Case is not ready for Paperless publication",
+                "blockers": blockers,
+            },
+        )
+    _stage_case_publications(session, case)
     session.commit()
     task = celery_app.send_task("crm_domain.publish_complaint_case", args=[str(case.id)], queue="crm")
     return {"case_id": str(case.id), "state": case.state, "task_id": task.id}

@@ -15,8 +15,18 @@ from crm_domain.fields import (
     paperless_custom_field_values,
 )
 from crm_domain.identifiers import complaint_numbers_in, normalize_complaint_number
-from crm_domain.models import ComplaintCase, ComplaintFieldObservation, ComplaintMatch
-from crm_domain.registry import promote_case_observations, record_paperless_match
+from crm_domain.models import (
+    ComplaintCase,
+    ComplaintDocumentCaseLink,
+    ComplaintFieldObservation,
+    ComplaintMatch,
+)
+from crm_domain.registry import (
+    CapturedComplaintDocument,
+    promote_case_observations,
+    record_captured_document,
+    record_paperless_match,
+)
 
 
 CRM_TEXT = """Complaint No        104-6609317
@@ -92,6 +102,33 @@ Generated on 6/29/2026
         "The complainant disputes a salary deduction. "
         "The matter requires investigation."
     )
+
+
+def test_ocr_remarks_continue_across_pages_without_parsing_prose_as_fields() -> None:
+    text = """Complaint Details
+The first page explains the unlawful fee demand under the guise of
+Generated on 7/7/2026 | Page 1
+Complaint label OCR: unreadable crop
+unreadable crop continuation
+[OCR page 2]
+CHIEF MINISTER COMPLAINT CELL
+Government of the Punjab
+holiday fees and threats of expulsion.
+The District Education Authority Lahore should investigate.
+Generated on 7/7/2026 | Page 2
+Complaint label OCR: second unreadable crop
+second crop continuation
+"""
+
+    observations = extract_field_observations(text)
+    values = {item.field_name: item.normalized_value for item in observations}
+
+    assert values["remarks"] == (
+        "The first page explains the unlawful fee demand under the guise of "
+        "holiday fees and threats of expulsion. "
+        "The District Education Authority Lahore should investigate."
+    )
+    assert "district" not in values
 
 
 def test_paperless_main_complaint_contract_uses_stable_field_names() -> None:
@@ -212,3 +249,137 @@ def test_human_approval_promotes_observed_fields_without_overwriting_reviewed_va
 
         assert case.complainant_name == "Operator corrected name"
         assert case.district == "LODHRAN"
+
+
+def test_human_approval_can_complete_an_exact_truncated_remarks_prefix() -> None:
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        prefix = "The school demanded unlawful fees under the guise of"
+        complete = prefix + " holiday charges and threatened expulsion."
+        case = ComplaintCase(complaint_number="104-6609317", remarks=prefix)
+        session.add(case)
+        session.flush()
+        session.add(
+            ComplaintFieldObservation(
+                complaint_case_id=case.id,
+                extraction_id=uuid.uuid4(),
+                field_name="remarks",
+                raw_value=complete,
+                normalized_value=complete,
+                confidence=0.95,
+            )
+        )
+        session.flush()
+
+        promote_case_observations(session, case)
+
+        assert case.remarks == complete
+
+
+def test_pdf_extractor_structured_remarks_are_retained_as_provenance() -> None:
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        prefix = "Complaint Details\nThe first page ends under the guise of"
+        complete = (
+            "The first page ends under the guise of holiday fees and the second "
+            "page requests an investigation."
+        )
+        _document, case, extraction = record_captured_document(
+            session,
+            CapturedComplaintDocument(
+                processing_item_id=uuid.uuid4(),
+                attachment_id=None,
+                message_id=None,
+                source_sha256="a" * 64,
+                original_filename="104-6609317.pdf",
+                mime_type="application/pdf",
+                category="crm_complaint",
+                complaint_number="104-6609317",
+                classification_confidence=0.95,
+                classification_evidence=["complaint_number_in_ocr_text"],
+                extraction_method="pdftotext+selective-tesseract",
+                extracted_text=prefix,
+                extraction_metadata={"remarks_text": complete},
+            ),
+        )
+        session.flush()
+
+        structured = session.exec(
+            select(ComplaintFieldObservation).where(
+                ComplaintFieldObservation.complaint_case_id == case.id,
+                ComplaintFieldObservation.extraction_id == extraction.id,
+                ComplaintFieldObservation.source_locator
+                == "metadata:pdf-extractor:remarks_text",
+            )
+        ).one()
+
+        assert structured.normalized_value == complete
+        assert structured.confidence == 0.95
+
+
+def test_identical_binary_capture_is_a_duplicate_audit_link_not_active_evidence() -> None:
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        def capture(processing_item_id: uuid.UUID) -> CapturedComplaintDocument:
+            return CapturedComplaintDocument(
+                processing_item_id=processing_item_id,
+                attachment_id=None,
+                message_id=None,
+                source_sha256="b" * 64,
+                original_filename="104-6795237.pdf",
+                mime_type="application/pdf",
+                category="crm_complaint",
+                complaint_number="104-6795237",
+                classification_confidence=1.0,
+                classification_evidence=["complaint_number_in_ocr_text"],
+                extraction_method="pdftotext+selective-tesseract",
+                extracted_text="Complaint Details\nSame complaint.",
+                extraction_metadata={"remarks_text": "Same complaint."},
+            )
+
+        canonical, case, _extraction = record_captured_document(
+            session, capture(uuid.uuid4())
+        )
+        duplicate, duplicate_case, _duplicate_extraction = record_captured_document(
+            session, capture(uuid.uuid4())
+        )
+        session.flush()
+        duplicate_link = session.exec(
+            select(ComplaintDocumentCaseLink).where(
+                ComplaintDocumentCaseLink.complaint_document_id == duplicate.id
+            )
+        ).one()
+        match = session.exec(
+            select(ComplaintMatch).where(
+                ComplaintMatch.processing_item_id
+                == duplicate.source_processing_item_id,
+                ComplaintMatch.proposed_decision == "exact_file_duplicate",
+            )
+        ).one()
+
+        assert duplicate_case.id == case.id
+        assert canonical.review_state == "proposed"
+        assert duplicate.review_state == "duplicate"
+        assert duplicate_link.review_state == "duplicate"
+        assert match.signals_json["matched_document_id"] == str(canonical.id)
+
+        # Approval can revisit captures in any order. Processing the later copy
+        # first must never cause the earlier canonical file to become a duplicate.
+        record_captured_document(
+            session, capture(duplicate.source_processing_item_id)
+        )
+        revisited_canonical, _, _ = record_captured_document(
+            session, capture(canonical.source_processing_item_id)
+        )
+        session.flush()
+        assert revisited_canonical.review_state == "proposed"
+        assert duplicate.review_state == "duplicate"

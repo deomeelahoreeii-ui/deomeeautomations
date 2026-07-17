@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     paperless_timeout_seconds: float = 15.0
     paperless_document_type_complaint: str = "Complaint"
     paperless_document_type_attachment: str = "Attachment"
+    paperless_correspondent_name: str = "CEO, (DEA), Lahore"
     paperless_task_timeout_seconds: int = 180
     paperless_max_pages: int = 10
     crm_job_stale_minutes: int = 15

@@ -98,7 +98,7 @@ def _link_case(
     confidence: float,
     reason: str | None,
     source_locator: str,
-) -> None:
+) -> ComplaintDocumentCaseLink:
     exists = session.exec(
         select(ComplaintDocumentCaseLink).where(
             ComplaintDocumentCaseLink.complaint_document_id == document.id,
@@ -106,18 +106,19 @@ def _link_case(
             ComplaintDocumentCaseLink.source_locator == source_locator,
         )
     ).first()
-    if exists is None:
-        session.add(
-            ComplaintDocumentCaseLink(
-                complaint_document_id=document.id,
-                complaint_case_id=case.id,
-                role=role,
-                review_state="proposed",
-                confidence=confidence,
-                reason=reason,
-                source_locator=source_locator,
-            )
-        )
+    if exists is not None:
+        return exists
+    link = ComplaintDocumentCaseLink(
+        complaint_document_id=document.id,
+        complaint_case_id=case.id,
+        role=role,
+        review_state="proposed",
+        confidence=confidence,
+        reason=reason,
+        source_locator=source_locator,
+    )
+    session.add(link)
+    return link
 
 
 def _canonical_field_values(
@@ -131,7 +132,7 @@ def _canonical_field_values(
 
 
 def _promote_safe_fields(case: ComplaintCase, values: dict[str, str]) -> None:
-    """Fill blank canonical values; never overwrite reviewed/existing data."""
+    """Fill blank values and safely complete a previously truncated remark."""
 
     for field_name in (
         "complainant_name",
@@ -145,8 +146,22 @@ def _promote_safe_fields(case: ComplaintCase, values: dict[str, str]) -> None:
         "sub_category",
         "remarks",
     ):
-        if not getattr(case, field_name) and values.get(field_name):
-            setattr(case, field_name, values[field_name])
+        current = getattr(case, field_name)
+        candidate = values.get(field_name)
+        if not current and candidate:
+            setattr(case, field_name, candidate)
+        elif (
+            field_name == "remarks"
+            and current
+            and candidate
+            and len(candidate) > len(current)
+            and _normalized_text(candidate).casefold().startswith(
+                _normalized_text(current).casefold()
+            )
+        ):
+            # This is not a conflicting OCR guess: it is a strict continuation
+            # of the exact canonical prefix already accepted by the operator.
+            case.remarks = candidate
     case.updated_at = utcnow()
 
 
@@ -179,25 +194,42 @@ def _record_binary_duplicate_signal(
     *,
     document: ComplaintDocument,
     case: ComplaintCase | None,
-) -> None:
-    """Record exact-file reuse without silently deciding the complaint outcome."""
+) -> ComplaintDocument | None:
+    """Return the stable canonical binary when this capture is a duplicate.
+
+    Review workflows may revisit already-persisted documents in a different
+    order from capture time.  Always elect the earliest capture (with the UUID
+    as a deterministic tie-breaker) instead of treating whichever document was
+    processed first in this transaction as canonical.
+    """
 
     if case is None or not document.source_sha256:
-        return
-    prior = session.exec(
-        select(ComplaintDocument).where(
+        return None
+    canonical = session.exec(
+        select(ComplaintDocument)
+        .join(
+            ComplaintDocumentCaseLink,
+            ComplaintDocumentCaseLink.complaint_document_id == ComplaintDocument.id,
+        )
+        .where(
+            ComplaintDocumentCaseLink.complaint_case_id == case.id,
             ComplaintDocument.source_sha256 == document.source_sha256,
-            ComplaintDocument.id != document.id,
         )
+        .order_by(ComplaintDocument.created_at, ComplaintDocument.id)
     ).first()
-    if prior is None:
-        return
-    prior_link = session.exec(
+    if canonical is None or canonical.id == document.id:
+        return None
+    canonical_link = session.exec(
         select(ComplaintDocumentCaseLink).where(
-            ComplaintDocumentCaseLink.complaint_document_id == prior.id
+            ComplaintDocumentCaseLink.complaint_document_id == canonical.id,
+            ComplaintDocumentCaseLink.complaint_case_id == case.id,
         )
     ).first()
-    matched_case_id = prior_link.complaint_case_id if prior_link else prior.complaint_case_id
+    matched_case_id = (
+        canonical_link.complaint_case_id
+        if canonical_link
+        else canonical.complaint_case_id
+    )
     existing = session.exec(
         select(ComplaintMatch).where(
             ComplaintMatch.complaint_case_id == case.id,
@@ -206,7 +238,7 @@ def _record_binary_duplicate_signal(
         )
     ).first()
     if existing is not None:
-        return
+        return canonical
     session.add(
         ComplaintMatch(
             complaint_case_id=case.id,
@@ -218,10 +250,11 @@ def _record_binary_duplicate_signal(
             signals_json={
                 "exact_source_sha256": True,
                 "source_sha256": document.source_sha256,
-                "matched_document_id": str(prior.id),
+                "matched_document_id": str(canonical.id),
             },
         )
     )
+    return canonical
 
 
 def record_captured_document(
@@ -268,8 +301,9 @@ def record_captured_document(
         document.relationship_reason = relationship_reason
         document.updated_at = utcnow()
         session.add(document)
+    link = None
     if case:
-        _link_case(
+        link = _link_case(
             session,
             document=document,
             case=case,
@@ -278,7 +312,18 @@ def record_captured_document(
             reason=relationship_reason,
             source_locator="document",
         )
-    _record_binary_duplicate_signal(session, document=document, case=case)
+    duplicate_of = _record_binary_duplicate_signal(session, document=document, case=case)
+    if duplicate_of is not None:
+        reason = f"Exact binary duplicate of complaint document {duplicate_of.id}."
+        document.review_state = "duplicate"
+        document.relationship_reason = reason
+        document.updated_at = utcnow()
+        session.add(document)
+        if link is not None:
+            link.review_state = "duplicate"
+            link.confidence = 1.0
+            link.reason = reason
+            session.add(link)
 
     content_sha256 = hashlib.sha256(captured.extracted_text.encode("utf-8")).hexdigest()
     extraction = session.exec(
@@ -315,6 +360,21 @@ def record_captured_document(
                 normalized_value=field.normalized_value,
                 confidence=field.confidence,
                 source_locator=field.source_locator,
+            )
+            observations.append(observation)
+            session.add(observation)
+        structured_remarks = _normalized_text(
+            str(captured.extraction_metadata.get("remarks_text") or "")
+        )
+        if role == "main_complaint" and structured_remarks:
+            observation = ComplaintFieldObservation(
+                complaint_case_id=case.id if case else None,
+                extraction_id=extraction.id,
+                field_name="remarks",
+                raw_value=structured_remarks,
+                normalized_value=structured_remarks,
+                confidence=min(0.95, max(0.86, captured.classification_confidence)),
+                source_locator="metadata:pdf-extractor:remarks_text",
             )
             observations.append(observation)
             session.add(observation)

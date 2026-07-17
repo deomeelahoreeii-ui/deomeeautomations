@@ -89,6 +89,31 @@ def test_publication_maps_paperless_select_labels_to_option_ids() -> None:
     ]
 
 
+def test_publication_applies_the_legacy_crm_correspondent() -> None:
+    from unittest.mock import MagicMock
+
+    from crm_filters.paperless import PaperlessClient
+
+    client = PaperlessClient(base_url="https://paperless.lab.internal", token="token")
+    client.metadata = metadata()
+    client.metadata.correspondent_id = 1
+    client.metadata.field_ids_by_name = {"status": 14}
+    response = MagicMock()
+    client._request = MagicMock(return_value=response)
+
+    client.update_document_metadata(
+        42,
+        title="CRM - 104-6609317 - Main Complaint - v1",
+        document_type_id=7,
+        correspondent_id=client.metadata.correspondent_id,
+        custom_fields={"Status": "Pending"},
+    )
+
+    payload = client._request.call_args.kwargs["json"]
+    assert payload["correspondent"] == 1
+    assert payload["custom_fields"] == [{"field": 14, "value": "102"}]
+
+
 def test_internal_paperless_tls_failure_uses_configured_fallback() -> None:
     import requests
     from unittest.mock import MagicMock

@@ -84,6 +84,10 @@ export const server = {
     }),
   },
   crm: {
+    caseStatistics: defineAction({
+      input: z.object({}),
+      handler: () => api("/api/v1/crm/cases/statistics"),
+    }),
     cases: defineAction({
       input: z.object({ search: z.string().default(""), state: z.string().default(""), limit: z.number().int().min(1).max(200).default(100) }),
       handler: (input) => {
@@ -102,6 +106,10 @@ export const server = {
     }),
     approveFreshComplaint: defineAction({ input: z.object({id:z.string().uuid()}), handler: ({id}) => api(`/api/v1/crm/cases/${id}/approve-fresh`, {method:"POST"}) }),
     publishComplaint: defineAction({ input: z.object({id:z.string().uuid()}), handler: ({id}) => api(`/api/v1/crm/cases/${id}/publish`, {method:"POST"}) }),
+    publishComplaintBatch: defineAction({
+      input: z.object({caseIds:z.array(z.string().uuid()).min(1).max(200)}),
+      handler: ({caseIds}) => api("/api/v1/crm/cases/publication-batches", {method:"POST", body:JSON.stringify({case_ids:caseIds})}),
+    }),
     backfillPaperlessCases: defineAction({ input: z.object({limit:z.number().int().positive().max(100000).optional()}), handler: ({limit}) => api("/api/v1/crm/cases/backfill-paperless", {method:"POST", body:JSON.stringify({limit})}) }),
     sheets: defineAction({
       input: z.object({

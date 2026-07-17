@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 
 from sqlmodel import Session, select
 
@@ -16,6 +17,22 @@ from whatsapp_gateway.models import (
     WhatsAppInboundProcessingItem,
     WhatsAppInboundProcessingRun,
 )
+
+
+@dataclass(frozen=True)
+class ManualItemApproval:
+    case: ComplaintCase
+    document: ComplaintDocument
+    case_created: bool
+    role: str
+
+
+MANUAL_CATEGORY_ROLES = {
+    "crm_complaint": "main_complaint",
+    "possible_crm_complaint": "complaint_details",
+    "crm_supporting_document": "attachment",
+    "crm_reply_or_report": "report",
+}
 
 
 def _source_records(
@@ -98,6 +115,14 @@ def decide_complaint_group(
     if decision not in {"approved", "rejected"}:
         raise ValueError("Complaint groups can only be approved or rejected")
 
+    existing_case = session.exec(
+        select(ComplaintCase).where(
+            ComplaintCase.source_system == "crm_portal",
+            ComplaintCase.complaint_number == normalized,
+        )
+    ).first()
+    existing_case_state = existing_case.state if existing_case is not None else None
+
     if decision == "rejected":
         for item in items:
             update_review_decision(
@@ -144,8 +169,9 @@ def decide_complaint_group(
         )
         approved.append(_persist_approved_item(session, item))
 
-    case = approved[0][1]
-    main_document_id = approved[0][0].id
+    canonical = [pair for pair in approved if pair[0].review_state != "duplicate"]
+    case = canonical[0][1] if canonical else approved[0][1]
+    main_document_id = canonical[0][0].id if canonical else None
     for document, _case in approved:
         link = session.exec(
             select(ComplaintDocumentCaseLink).where(
@@ -155,15 +181,27 @@ def decide_complaint_group(
         ).first()
         if link is None:
             continue
+        if document.review_state == "duplicate":
+            link.review_state = "duplicate"
+            link.confidence = 1.0
+            link.reason = "Exact binary duplicate; retained only in the capture audit."
+            session.add(link)
+            continue
         link.role = "main_complaint" if document.id == main_document_id else "complaint_details"
         link.review_state = "accepted"
         link.confidence = 1.0
         link.reason = "Complaint group approved by an operator."
         session.add(link)
-    case.state = "existing" if case.canonical_paperless_document_id else "fresh"
-    case.version += 1
-    case.updated_at = utcnow()
-    session.add(case)
+    if canonical:
+        case.state = "existing" if case.canonical_paperless_document_id else "fresh"
+        case.version += 1
+        case.updated_at = utcnow()
+        session.add(case)
+    elif existing_case_state is not None:
+        # Approving a repeated capture completes the review item, but it must
+        # not re-open, reject, or freshly approve the already-known case.
+        case.state = existing_case_state
+        session.add(case)
     return case
 
 
@@ -175,10 +213,20 @@ def approve_manual_item(
     category: str,
     reviewed_by: str,
     note: str | None,
-) -> ComplaintCase:
+) -> ManualItemApproval:
     normalized = normalize_complaint_number(complaint_number)
     if normalized is None:
         raise ValueError("Enter one valid complaint number, for example 104-6609317")
+    role = MANUAL_CATEGORY_ROLES.get(category)
+    if role is None:
+        raise ValueError("Choose a valid CRM complaint document type")
+    existing_case = session.exec(
+        select(ComplaintCase).where(
+            ComplaintCase.source_system == "crm_portal",
+            ComplaintCase.complaint_number == normalized,
+        )
+    ).first()
+    existing_case_state = existing_case.state if existing_case is not None else None
     update_review_decision(
         session,
         item=item,
@@ -195,21 +243,47 @@ def approve_manual_item(
             ComplaintDocumentCaseLink.complaint_document_id == document.id,
         )
     ).first()
-    if link:
-        existing_main = session.exec(
-            select(ComplaintDocumentCaseLink).where(
-                ComplaintDocumentCaseLink.complaint_case_id == case.id,
-                ComplaintDocumentCaseLink.role == "main_complaint",
-                ComplaintDocumentCaseLink.review_state == "accepted",
-            )
-        ).first()
-        link.role = "complaint_details" if existing_main else "main_complaint"
+    is_duplicate = document.review_state == "duplicate"
+    if link and is_duplicate:
+        link.review_state = "duplicate"
+        link.confidence = 1.0
+        link.reason = "Exact binary duplicate; retained only in the capture audit."
+        session.add(link)
+    elif link:
+        link.role = role
         link.review_state = "accepted"
         link.confidence = 1.0
-        link.reason = "Ambiguous evidence approved and assigned by an operator."
+        link.reason = f"Linked as {role.replace('_', ' ')} by an operator during manual review."
         session.add(link)
-    case.state = "existing" if case.canonical_paperless_document_id else "fresh"
+    document.complaint_case_id = case.id
+    if not is_duplicate:
+        document.role = role
+        document.review_state = "accepted"
+        document.relationship_confidence = 1.0
+        document.relationship_reason = f"Linked as {role.replace('_', ' ')} by an operator during manual review."
+    document.updated_at = utcnow()
+    session.add(document)
+
+    if is_duplicate:
+        role = "duplicate"
+        if existing_case_state is not None:
+            case.state = existing_case_state
+    elif role == "main_complaint":
+        case.state = "existing" if case.canonical_paperless_document_id else "fresh"
+    elif existing_case is None or existing_case_state in {"candidate", "rejected"}:
+        # An attachment can establish a case relationship, but it cannot make a
+        # complaint publishable without an accepted main complaint.
+        case.state = "review_required"
+    elif existing_case_state is not None:
+        # Reconciliation for this newly captured document may propose its own
+        # state. An attachment must not regress an established complaint.
+        case.state = existing_case_state
     case.version += 1
     case.updated_at = utcnow()
     session.add(case)
-    return case
+    return ManualItemApproval(
+        case=case,
+        document=document,
+        case_created=existing_case is None,
+        role=role,
+    )

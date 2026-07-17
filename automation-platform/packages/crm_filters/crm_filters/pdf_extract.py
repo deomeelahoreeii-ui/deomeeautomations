@@ -253,14 +253,39 @@ def build_applicant_text(fields: dict[str, str], raw_text: str) -> str:
 
 def build_remarks_text(fields: dict[str, str], raw_text: str) -> str:
     remarks = field_value(fields, "remarks")
-    if remarks:
-        return remarks
     match = re.search(
         r"(complaint\s+remarks|remarks|complaint\s+details)\s*:?\s*(.+)",
         raw_text or "",
         flags=re.IGNORECASE | re.DOTALL,
     )
-    return compact_text(match.group(2)) if match else ""
+    if not match:
+        return remarks
+    lines: list[str] = []
+    in_label_ocr = False
+    for raw_line in match.group(2).splitlines():
+        line = compact_text(raw_line)
+        folded = line.casefold()
+        if not line:
+            continue
+        if re.match(r"^\[ocr page \d+\]$", folded):
+            in_label_ocr = False
+            continue
+        if re.match(r"^complaint\s+label\s+ocr\b", folded):
+            in_label_ocr = True
+            continue
+        if in_label_ocr:
+            continue
+        if re.match(r"^generated\s+on\b", folded):
+            continue
+        if len(folded) < 80 and (
+            "chief minister complaint cell" in folded
+            or "government of the punjab" in folded
+            or re.match(r"^complaint\s+(?:id|no|number|code)\b", folded)
+        ):
+            continue
+        lines.append(line)
+    continued = compact_text(" ".join(lines))
+    return continued if len(continued) > len(remarks) else remarks
 
 
 def extract_crm_pdf(pdf_path: Path) -> ExtractedComplaint:

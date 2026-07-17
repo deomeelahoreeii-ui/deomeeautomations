@@ -78,6 +78,7 @@ class PaperlessComplaintCandidate:
 class PaperlessMetadata:
     complaint_type_id: int | str | None = None
     attachment_type_id: int | str | None = None
+    correspondent_id: int | str | None = None
     complaint_number_field_id: int | str | None = None
     source_field_id: int | str | None = None
     status_field_id: int | str | None = None
@@ -281,6 +282,7 @@ class PaperlessClient:
         timeout_seconds: float = 15,
         document_type_name: str = "Complaint",
         attachment_type_name: str = "Attachment",
+        correspondent_name: str = "CEO, (DEA), Lahore",
         max_pages: int = 10,
         task_timeout_seconds: int = 180,
     ) -> None:
@@ -294,6 +296,7 @@ class PaperlessClient:
         self.timeout_seconds = timeout_seconds
         self.document_type_name = document_type_name
         self.attachment_type_name = attachment_type_name
+        self.correspondent_name = correspondent_name
         self.max_pages = max(1, max_pages)
         self.task_timeout_seconds = max(10, task_timeout_seconds)
         self.session = requests.Session()
@@ -431,6 +434,11 @@ class PaperlessClient:
             if name == self.attachment_type_name.casefold():
                 metadata.attachment_type_id = item.get("id")
 
+        for item in self._get_all("/api/correspondents/"):
+            name = str(item.get("name", "")).strip().casefold()
+            if name == self.correspondent_name.casefold():
+                metadata.correspondent_id = item.get("id")
+
         for custom_field in self._get_all("/api/custom_fields/"):
             field_name_raw = str(custom_field.get("name", "")).strip()
             field_name = field_name_raw.casefold()
@@ -467,6 +475,10 @@ class PaperlessClient:
         if metadata.status_field_id is None:
             raise PaperlessConfigurationError(
                 f"Paperless custom field '{STATUS_FIELD_NAME}' was not found."
+            )
+        if metadata.correspondent_id is None:
+            metadata.warnings.append(
+                f"Paperless correspondent '{self.correspondent_name}' was not found."
             )
         if metadata.complaint_number_field_id is None:
             metadata.warnings.append(
@@ -507,12 +519,16 @@ class PaperlessClient:
         custom_fields: dict[str, object],
     ) -> tuple[str, int]:
         task_id, document_id = self.post_document(
-            path, title=title, document_type_id=document_type_id
+            path,
+            title=title,
+            document_type_id=document_type_id,
+            correspondent_id=self.metadata.correspondent_id if self.metadata else None,
         )
         self.update_document_metadata(
             document_id,
             title=title,
             document_type_id=document_type_id,
+            correspondent_id=self.metadata.correspondent_id if self.metadata else None,
             custom_fields=custom_fields,
         )
         return task_id, document_id
@@ -523,6 +539,7 @@ class PaperlessClient:
         *,
         title: str,
         document_type_id: int | str,
+        correspondent_id: int | str | None = None,
     ) -> tuple[str, int]:
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         with path.open("rb") as handle:
@@ -530,7 +547,15 @@ class PaperlessClient:
                 "POST",
                 f"{self.base_url}/api/documents/post_document/",
                 files={"document": (path.name, handle, content_type)},
-                data={"title": title, "document_type": str(document_type_id)},
+                data={
+                    "title": title,
+                    "document_type": str(document_type_id),
+                    **(
+                        {"correspondent": str(correspondent_id)}
+                        if correspondent_id is not None
+                        else {}
+                    ),
+                },
             )
         response.raise_for_status()
         body = response.json()
@@ -548,6 +573,7 @@ class PaperlessClient:
         *,
         title: str,
         document_type_id: int | str,
+        correspondent_id: int | str | None = None,
         custom_fields: dict[str, object],
     ) -> None:
         patch = self._request(
@@ -556,6 +582,11 @@ class PaperlessClient:
             json={
                 "title": title,
                 "document_type": document_type_id,
+                **(
+                    {"correspondent": correspondent_id}
+                    if correspondent_id is not None
+                    else {}
+                ),
                 "custom_fields": self.custom_field_payload(custom_fields),
             },
         )

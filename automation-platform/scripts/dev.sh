@@ -31,10 +31,7 @@ cleanup() {
   if ((${#pids[@]})); then
     echo
     echo "Stopping automation-platform services..."
-    for pid in "${pids[@]}"; do
-      kill "$pid" 2>/dev/null || true
-    done
-    wait "${pids[@]}" 2>/dev/null || true
+    terminate_process_trees "automation-platform services" 20 "${pids[@]}"
   fi
   if [[ "$bridge_started_by_dev" == true && -n "$WWEBJS_METADATA_PATH" && -f "$SNAPSHOT_MANAGER" ]]; then
     "$UV" run python "$SNAPSHOT_MANAGER" stop \
@@ -43,6 +40,105 @@ cleanup() {
   exit "$status"
 }
 trap cleanup EXIT INT TERM
+
+process_is_running() {
+  local pid="$1"
+  local stat=""
+  local state=""
+  [[ -r "/proc/$pid/stat" ]] || return 1
+  stat="$(<"/proc/$pid/stat")" || return 1
+  stat="${stat##*) }"
+  state="${stat%% *}"
+  [[ -n "$state" && "$state" != Z && "$state" != X ]]
+}
+
+process_is_descendant_of() {
+  local pid="$1"
+  local ancestor="$2"
+  local parent=""
+  local stat=""
+
+  while [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 ]]; do
+    [[ "$pid" == "$ancestor" ]] && return 0
+    [[ -r "/proc/$pid/stat" ]] || return 1
+    stat="$(<"/proc/$pid/stat")" || return 1
+    stat="${stat##*) }"
+    stat="${stat#* }"
+    parent="${stat%% *}"
+    [[ -n "$parent" && "$parent" != "$pid" ]] || return 1
+    pid="$parent"
+  done
+  return 1
+}
+
+collect_process_trees() {
+  local -a queue=("$@")
+  local -A seen=()
+  local pid=""
+  local child=""
+
+  while ((${#queue[@]})); do
+    pid="${queue[0]}"
+    queue=("${queue[@]:1}")
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    [[ -z "${seen[$pid]:-}" ]] || continue
+    seen["$pid"]=1
+    [[ -d "/proc/$pid" ]] || continue
+    printf '%s\n' "$pid"
+    if [[ -r "/proc/$pid/task/$pid/children" ]]; then
+      for child in $(<"/proc/$pid/task/$pid/children"); do
+        queue+=("$child")
+      done
+    fi
+  done
+}
+
+terminate_process_trees() {
+  local label="$1"
+  local grace_steps="$2"
+  shift 2
+  local -a roots=("$@")
+  local -a targets=()
+  local -a alive=()
+  local pid=""
+  local step=0
+  local any_running=false
+
+  ((${#roots[@]})) || return 0
+  mapfile -t targets < <(collect_process_trees "${roots[@]}")
+  ((${#targets[@]})) || return 0
+  kill -TERM "${targets[@]}" 2>/dev/null || true
+
+  for ((step=0; step<grace_steps; step++)); do
+    alive=()
+    for pid in "${targets[@]}"; do
+      process_is_running "$pid" && alive+=("$pid")
+    done
+    ((${#alive[@]} == 0)) && return 0
+    sleep 0.25
+  done
+
+  echo "Force-stopping unresponsive $label PID(s): ${alive[*]}"
+  kill -KILL "${alive[@]}" 2>/dev/null || true
+  for _ in {1..8}; do
+    any_running=false
+    for pid in "${alive[@]}"; do
+      if process_is_running "$pid"; then
+        any_running=true
+        break
+      fi
+    done
+    [[ "$any_running" == false ]] && return 0
+    sleep 0.25
+  done
+
+  alive=()
+  for pid in "${targets[@]}"; do
+    process_is_running "$pid" && alive+=("$pid")
+  done
+  ((${#alive[@]} == 0)) \
+    || echo "WARNING: $label PID(s) could not be stopped: ${alive[*]}" >&2
+}
 
 port_in_use() {
   local port="$1"
@@ -85,15 +181,13 @@ wait_for_http() {
 find_running_platform_worker_pids() {
   local process_dir=""
   local process_pid=""
-  local process_cwd=""
   local process_args=""
 
   for process_dir in /proc/[0-9]*; do
     [[ -r "$process_dir/cmdline" ]] || continue
     process_pid="${process_dir##*/}"
-    process_cwd="$(readlink "$process_dir/cwd" 2>/dev/null || true)"
-    [[ "$process_cwd" == "$ROOT" ]] || continue
-    process_args="$(tr '\0' ' ' < "$process_dir/cmdline" 2>/dev/null || true)"
+    [[ "$process_dir/cwd" -ef "$ROOT" ]] 2>/dev/null || continue
+    process_args="$( { tr '\0' ' ' < "$process_dir/cmdline"; } 2>/dev/null || true)"
     if [[ "$process_args" == *celery* && "$process_args" == *automation_worker.main.celery_app* ]]; then
       printf '%s\n' "$process_pid"
     fi
@@ -109,9 +203,14 @@ find_running_platform_stack_pids() {
   for process_dir in /proc/[0-9]*; do
     [[ -r "$process_dir/cmdline" ]] || continue
     process_pid="${process_dir##*/}"
-    [[ "$process_pid" == "$$" ]] && continue
-    process_cwd="$(readlink "$process_dir/cwd" 2>/dev/null || true)"
-    process_args="$(tr '\0' ' ' < "$process_dir/cmdline" 2>/dev/null || true)"
+    if [[ "$process_dir/cwd" -ef "$ROOT" ]] 2>/dev/null; then
+      process_cwd="$ROOT"
+    elif [[ "$process_dir/cwd" -ef "$WEB_DIR" ]] 2>/dev/null; then
+      process_cwd="$WEB_DIR"
+    else
+      continue
+    fi
+    process_args="$( { tr '\0' ' ' < "$process_dir/cmdline"; } 2>/dev/null || true)"
     if [[ "$process_cwd" == "$ROOT" ]]; then
       if [[ "$process_args" == *"uvicorn automation_api.main:app"* \
         || "$process_args" == *"antidengue_automation.scheduler_service"* \
@@ -126,30 +225,48 @@ find_running_platform_stack_pids() {
   done
 }
 
-stop_existing_platform_stack() {
-  local -a stack_pids=()
-  mapfile -t stack_pids < <(find_running_platform_stack_pids)
-  ((${#stack_pids[@]})) || return 0
+find_running_platform_supervisor_pids() {
+  local process_dir=""
+  local process_pid=""
 
-  echo "Restarting existing Automation Platform stack; stopping PID(s): ${stack_pids[*]}"
-  kill -TERM "${stack_pids[@]}" 2>/dev/null || true
-  for _ in {1..40}; do
+  for process_dir in /proc/[0-9]*; do
+    [[ -r "$process_dir/cmdline" ]] || continue
+    process_pid="${process_dir##*/}"
+    if ! [[ "$process_dir/cwd" -ef "$ROOT" ]] 2>/dev/null \
+      && ! [[ "$process_dir/cwd" -ef "$SCRIPT_DIR" ]] 2>/dev/null; then
+      continue
+    fi
+    [[ "$process_dir/exe" -ef "/proc/$$/exe" ]] 2>/dev/null || continue
+    if grep -Fzxq -e "./dev.sh" -e "scripts/dev.sh" -e "./scripts/dev.sh" -e "$SCRIPT_DIR/dev.sh" \
+      "$process_dir/cmdline" 2>/dev/null; then
+      process_is_descendant_of "$process_pid" "$$" && continue
+      printf '%s\n' "$process_pid"
+    fi
+  done
+}
+
+stop_existing_platform_stack() {
+  local -a supervisor_pids=()
+  local -a stack_pids=()
+  local -a roots=()
+  mapfile -t supervisor_pids < <(find_running_platform_supervisor_pids)
+  mapfile -t stack_pids < <(find_running_platform_stack_pids)
+  roots=("${supervisor_pids[@]}" "${stack_pids[@]}")
+  ((${#roots[@]})) || return 0
+
+  echo "Restarting existing Automation Platform stack; stopping PID tree(s): ${roots[*]}"
+  terminate_process_trees "Automation Platform" 20 "${roots[@]}"
+  for _ in {1..20}; do
+    mapfile -t supervisor_pids < <(find_running_platform_supervisor_pids)
     mapfile -t stack_pids < <(find_running_platform_stack_pids)
-    if ((${#stack_pids[@]} == 0)) && ! port_in_use "$API_PORT" && ! port_in_use "$WEB_PORT"; then
+    if ((${#supervisor_pids[@]} == 0 && ${#stack_pids[@]} == 0)) \
+      && ! port_in_use "$API_PORT" && ! port_in_use "$WEB_PORT"; then
       return 0
     fi
     sleep 0.25
   done
 
-  mapfile -t stack_pids < <(find_running_platform_stack_pids)
-  if ((${#stack_pids[@]})); then
-    echo "Force-stopping unresponsive Automation Platform PID(s): ${stack_pids[*]}"
-    kill -KILL "${stack_pids[@]}" 2>/dev/null || true
-  fi
-  for _ in {1..20}; do
-    ! port_in_use "$API_PORT" && ! port_in_use "$WEB_PORT" && return 0
-    sleep 0.25
-  done
+  fail "The previous Automation Platform process tree did not stop completely."
 }
 
 stop_existing_platform_workers() {
@@ -284,7 +401,7 @@ find_running_whatsapp_worker_pids() {
     process_pid="${process_dir##*/}"
     process_cwd="$(readlink "$process_dir/cwd" 2>/dev/null || true)"
     [[ "$process_cwd" == "$WHATSAPP_DIR" ]] || continue
-    process_args="$(tr '\0' ' ' < "$process_dir/cmdline" 2>/dev/null || true)"
+    process_args="$( { tr '\0' ' ' < "$process_dir/cmdline"; } 2>/dev/null || true)"
     if [[ "$process_args" == *node* && "$process_args" == *worker.js* ]]; then
       printf '%s\n' "$process_pid"
     fi
@@ -416,7 +533,7 @@ find_running_whatsapp_web_bridge_pids() {
     process_pid="${process_dir##*/}"
     process_cwd="$(readlink "$process_dir/cwd" 2>/dev/null || true)"
     [[ "$process_cwd" == "$WWEBJS_DIR" ]] || continue
-    process_args="$(tr '\0' ' ' < "$process_dir/cmdline" 2>/dev/null || true)"
+    process_args="$( { tr '\0' ' ' < "$process_dir/cmdline"; } 2>/dev/null || true)"
     if [[ "$process_args" == *node* && "$process_args" == *bridge.js* ]]; then
       printf '%s\n' "$process_pid"
     fi

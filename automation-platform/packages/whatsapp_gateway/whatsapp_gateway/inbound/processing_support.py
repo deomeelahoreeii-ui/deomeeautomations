@@ -28,6 +28,7 @@ def paperless_client(settings: Settings) -> PaperlessClient:
         timeout_seconds=settings.paperless_timeout_seconds,
         document_type_name=settings.paperless_document_type_complaint,
         attachment_type_name=settings.paperless_document_type_attachment,
+        correspondent_name=settings.paperless_correspondent_name,
         max_pages=settings.paperless_max_pages,
         task_timeout_seconds=settings.paperless_task_timeout_seconds,
     )

@@ -29,6 +29,10 @@ import CrmLayout from "../../../../layouts/CrmLayout.astro";
     <div class="crm-review-list" id="processing-list-items"><div class="crm-intake-empty"><span>◇</span><h3>Loading review queue…</h3></div></div>
   </section>
 
+  <style is:global>
+    .crm-review-source{display:grid;min-width:0;gap:.18rem}.crm-review-source strong,.crm-review-source small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.crm-review-source strong{color:#526276;font-size:.72rem}.crm-review-source small{color:#7d8999;font-size:.68rem}.crm-review-links{display:flex;align-items:center;justify-content:flex-end;gap:.45rem;flex-wrap:wrap}@media(max-width:700px){.crm-review-card>footer{align-items:stretch;flex-direction:column}.crm-review-links{justify-content:flex-start}}
+  </style>
+
   <script>
     import { actions } from "astro:actions";
     const el=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T;
@@ -39,7 +43,7 @@ import CrmLayout from "../../../../layouts/CrmLayout.astro";
     function renderReview(x:any){
       const failureLabel=x.failed_items?String(x.failed_items)+" failed":"No failures";
       const actionLabel=x.review_items?"Review decisions":"Open completed review";
-      return `<article class="crm-review-card ${x.review_items?"attention":""}"><header><div><span class="crm-run-state ${escapeHtml(x.status)}">${escapeHtml(String(x.status).replaceAll("_"," "))}</span><h3>${escapeHtml(x.contact_name)}</h3><p>${escapeHtml(x.run_code)} · ${escapeHtml(formatDate(x.started_at||x.created_at))}</p></div><div class="crm-review-attention"><strong>${x.review_items}</strong><small>need review</small></div></header><div class="crm-review-breakdown"><div><span>Complaint candidates</span><strong>${x.crm_complaints} confirmed</strong><small>${x.possible_crm} possible · ${x.supporting_documents} supporting</small></div><div><span>Paperless check</span><strong>${x.eligible_items} eligible</strong><small>${x.duplicate_items} duplicate · ${escapeHtml(x.paperless_check_status)}</small></div><div><span>Exceptions</span><strong>${failureLabel}</strong><small>${x.reply_reports} replies or reports</small></div></div><footer><span>${escapeHtml(x.contact_identity||x.batch_code)}</span><a class="btn btn-sm btn-primary" href="/crm/intake/review/${escapeHtml(x.id)}">${actionLabel} →</a></footer></article>`;
+      return `<article class="crm-review-card ${x.review_items?"attention":""}"><header><div><span class="crm-run-state ${escapeHtml(x.status)}">${escapeHtml(String(x.status).replaceAll("_"," "))}</span><h3>${escapeHtml(x.contact_name)}</h3><p>Review ${escapeHtml(x.run_code)} · ${escapeHtml(formatDate(x.started_at||x.created_at))}</p></div><div class="crm-review-attention"><strong>${x.review_items}</strong><small>need review</small></div></header><div class="crm-review-breakdown"><div><span>Complaint candidates</span><strong>${x.crm_complaints} confirmed</strong><small>${x.possible_crm} possible · ${x.supporting_documents} supporting</small></div><div><span>Paperless check</span><strong>${x.eligible_items} eligible</strong><small>${x.duplicate_items} duplicate · ${escapeHtml(x.paperless_check_status)}</small></div><div><span>Exceptions</span><strong>${failureLabel}</strong><small>${x.reply_reports} replies or reports</small></div></div><footer><div class="crm-review-source"><strong>Source intake ${escapeHtml(x.batch_code)}</strong><small>${escapeHtml(x.contact_identity||"WhatsApp identity unavailable")}</small></div><div class="crm-review-links"><a class="btn btn-sm" href="/crm/intake/batches/${escapeHtml(x.batch_id)}">Open source intake</a><a class="btn btn-sm btn-primary" href="/crm/intake/review/${escapeHtml(x.id)}">${actionLabel} →</a></div></footer></article>`;
     }
 
     async function load(){

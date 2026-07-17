@@ -50,6 +50,48 @@ def _paperless_value(values: dict[str, str], *names: str) -> str | None:
     return next((folded[name.casefold()] for name in names if name.casefold() in folded), None)
 
 
+def _validate_crm_pending_contract(metadata) -> None:
+    """Fail before upload unless the live CRM Pending view contract is available."""
+
+    required_options = {
+        "Source": ["CRM Portal"],
+        "Status": ["Pending"],
+        "Document Role": ["Main Complaint", "Complaint Details"],
+        "Direction": ["Incoming"],
+    }
+    missing: list[str] = []
+    for field_name in (
+        "Complaint Number",
+        "Revision",
+        "Remarks",
+        "Parent Case",
+        *required_options,
+    ):
+        field_id = metadata.field_ids_by_name.get(field_name.casefold())
+        if field_id is None:
+            missing.append(f"custom field {field_name!r}")
+    for field_name, option_labels in required_options.items():
+        field_id = metadata.field_ids_by_name.get(field_name.casefold())
+        if field_id is None:
+            continue
+        labels = metadata.option_labels_by_field_id.get(str(field_id), {})
+        available = {label.casefold() for label in labels.values()}
+        for option_label in option_labels:
+            if option_label.casefold() not in available:
+                missing.append(f"{field_name!r} option {option_label!r}")
+    if metadata.complaint_type_id is None:
+        missing.append("document type 'Complaint'")
+    if metadata.attachment_type_id is None:
+        missing.append("document type 'Attachment'")
+    if metadata.correspondent_id is None:
+        missing.append("correspondent 'CEO, (DEA), Lahore'")
+    if missing:
+        raise RuntimeError(
+            "Paperless is missing the CRM Pending publication contract: "
+            + ", ".join(missing)
+        )
+
+
 @celery_app.task(name="crm_domain.publish_complaint_case", soft_time_limit=900, time_limit=960)
 def publish_complaint_case(case_id: str) -> dict[str, object]:
     case_uuid = uuid.UUID(case_id)
@@ -57,6 +99,7 @@ def publish_complaint_case(case_id: str) -> dict[str, object]:
     storage = S3ObjectStorage(settings)
     client = paperless_client(settings)
     metadata = client.connect()
+    _validate_crm_pending_contract(metadata)
     with Session(engine) as session:
         case = session.get(ComplaintCase, case_uuid)
         if case is None:
@@ -150,6 +193,7 @@ def publish_complaint_case(case_id: str) -> dict[str, object]:
                             source,
                             title=title,
                             document_type_id=document_type_id,
+                            correspondent_id=metadata.correspondent_id,
                         )
                         publication.paperless_task_id = task_id
                         publication.paperless_document_id = paperless_id
@@ -161,6 +205,7 @@ def publish_complaint_case(case_id: str) -> dict[str, object]:
                         paperless_id,
                         title=title,
                         document_type_id=document_type_id,
+                        correspondent_id=metadata.correspondent_id,
                         custom_fields=fields,
                     )
                     publication.state = "completed"

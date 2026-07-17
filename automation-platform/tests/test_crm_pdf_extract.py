@@ -93,3 +93,45 @@ def test_extract_crm_pdf_ocrs_sparse_selectable_overlay(tmp_path: Path, monkeypa
     assert result.ocr_pages == (1,)
     assert "GHULAM YASEEN" in result.ocr_text
     assert result.extraction_method == "pdftotext+selective-tesseract+field"
+
+
+def test_extract_crm_pdf_preserves_remarks_continuation_across_ocr_pages(
+    tmp_path: Path, monkeypatch
+) -> None:
+    pdf = tmp_path / "two-page-complaint.pdf"
+    pdf.write_bytes(b"%PDF-1.4\ncontent\n%%EOF\n")
+    selectable = (
+        "CHIEF MINISTER COMPLAINT CELL\nComplaint ID: 104-6759557\n"
+        "Generated on 7/7/2026 | Page 1\f"
+        "CHIEF MINISTER COMPLAINT CELL\nComplaint ID: 104-6759557\n"
+        "Generated on 7/7/2026 | Page 2\f"
+    )
+    monkeypatch.setattr(pdf_extract, "extract_pdf_text", lambda _path: selectable)
+    monkeypatch.setattr(
+        pdf_extract,
+        "tesseract_ocr_first_page",
+        lambda _path: (
+            "Complaint Details\nThe school demanded unlawful fees under the guise of\n"
+            "Generated on 7/7/2026 | Page 1\nComplaint label OCR: noise"
+        ),
+    )
+    monkeypatch.setattr(
+        pdf_extract,
+        "tesseract_ocr_page",
+        lambda _path, *, page_number: (
+            "CHIEF MINISTER COMPLAINT CELL\nGovernment of the Punjab\n"
+            "holiday charges and threatened expulsion.\n"
+            "Generated on 7/7/2026 | Page 2\n"
+            "Complaint label OCR: noise\ncontinued crop noise"
+        ),
+    )
+
+    result = pdf_extract.extract_crm_pdf(pdf)
+
+    assert result.ocr_pages == (1, 2)
+    assert result.remarks_text == (
+        "The school demanded unlawful fees under the guise of holiday charges "
+        "and threatened expulsion."
+    )
+    assert "Generated on" not in result.remarks_text
+    assert "Complaint label OCR" not in result.remarks_text

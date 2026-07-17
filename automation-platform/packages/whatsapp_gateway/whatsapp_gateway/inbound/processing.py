@@ -88,10 +88,16 @@ def create_processing_run(
 ) -> WhatsAppInboundProcessingRun:
     if batch.status not in {"completed", "completed_with_errors"}:
         raise ValueError("Only a completed inbound batch can be processed")
+    # One intake batch has one canonical review unless that attempt failed or
+    # was cancelled. Reopening a completed intake must return its review, not
+    # silently create a second decision history for the same evidence.
     existing = session.exec(
         select(WhatsAppInboundProcessingRun)
         .where(WhatsAppInboundProcessingRun.batch_id == batch.id)
-        .where(WhatsAppInboundProcessingRun.status.in_(PROCESSING_ACTIVE_STATUSES))
+        .where(
+            WhatsAppInboundProcessingRun.status.notin_(["failed", "cancelled"])
+        )
+        .order_by(WhatsAppInboundProcessingRun.created_at.desc())
     ).first()
     if existing is not None:
         return existing

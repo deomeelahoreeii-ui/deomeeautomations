@@ -75,6 +75,18 @@ def create_inbound_processing_run(
     batch = session.get(WhatsAppInboundBatch, data.batch_id)
     if batch is None:
         raise HTTPException(status_code=404, detail="Inbound batch not found")
+    existing = session.exec(
+        select(WhatsAppInboundProcessingRun)
+        .where(WhatsAppInboundProcessingRun.batch_id == batch.id)
+        .where(WhatsAppInboundProcessingRun.status.notin_(["failed", "cancelled"]))
+        .order_by(WhatsAppInboundProcessingRun.created_at.desc())
+    ).first()
+    if existing is not None:
+        return {
+            "processing_run": serialize_processing_run(session, existing),
+            "task_id": None,
+            "reused": True,
+        }
     try:
         run = create_processing_run(
             session,
@@ -89,8 +101,13 @@ def create_inbound_processing_run(
             return {
                 "processing_run": serialize_processing_run(session, run),
                 "task_id": task.id,
+                "reused": False,
             }
-        return {"processing_run": serialize_processing_run(session, run), "task_id": None}
+        return {
+            "processing_run": serialize_processing_run(session, run),
+            "task_id": None,
+            "reused": False,
+        }
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -208,8 +225,9 @@ def review_inbound_processing_item(
     if item is None:
         raise HTTPException(status_code=404, detail="Processing item not found")
     try:
+        approval = None
         if data.decision == "approved":
-            approve_manual_item(
+            approval = approve_manual_item(
                 session,
                 item=item,
                 complaint_number=data.complaint_number or item.detected_complaint_number or "",
@@ -229,7 +247,16 @@ def review_inbound_processing_item(
             )
         session.commit()
         session.refresh(item)
-        return serialize_processing_item(session, item)
+        response = serialize_processing_item(session, item)
+        if approval is not None:
+            response["case_resolution"] = {
+                "case_id": str(approval.case.id),
+                "complaint_number": approval.case.complaint_number,
+                "case_state": approval.case.state,
+                "case_created": approval.case_created,
+                "document_role": approval.role,
+            }
+        return response
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

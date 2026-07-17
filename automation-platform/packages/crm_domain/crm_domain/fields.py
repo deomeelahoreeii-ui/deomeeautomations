@@ -83,6 +83,25 @@ def _normalize_value(field_name: str, value: str) -> str:
     return compact
 
 
+def _is_ocr_page_boilerplate(value: str) -> bool:
+    """Identify page scaffolding without discarding real complaint prose."""
+
+    folded = _compact(value).casefold()
+    if not folded:
+        return True
+    if re.match(r"^\[ocr page \d+\]$", folded):
+        return True
+    if re.match(r"^(?:generated\s+on|complaint\s+label\s+ocr)\b", folded):
+        return True
+    if len(folded) < 80 and (
+        "chief minister complaint cell" in folded
+        or "government of the punjab" in folded
+        or re.match(r"^complaint\s+(?:id|no|number|code)\b", folded)
+    ):
+        return True
+    return False
+
+
 def extract_field_observations(text: str) -> list[ExtractedField]:
     """Extract conservative labeled fields while retaining line provenance.
 
@@ -117,14 +136,24 @@ def extract_field_observations(text: str) -> list[ExtractedField]:
                 continue
             end = matches[position + 1].start() if position + 1 < len(matches) else len(line)
             raw_value = _compact(line[match.end() : end])
-            if field_name == "remarks" and not raw_value:
-                continuation: list[str] = []
+            if field_name == "remarks":
+                # Remarks are the terminal, free-text section in CRM complaint
+                # documents. Continue across OCR page boundaries while removing
+                # page headers/footers instead of stopping at the first footer.
+                continuation: list[str] = [raw_value] if raw_value else []
+                in_label_ocr = False
                 for following in lines[line_number:]:
                     value = _compact(following)
-                    if not value:
+                    if re.match(r"^\[ocr page \d+\]$", value, re.IGNORECASE):
+                        in_label_ocr = False
                         continue
-                    if re.match(r"^(?:generated\s+on|complaint\s+label\s+ocr)\b", value, re.IGNORECASE):
-                        break
+                    if re.match(r"^complaint\s+label\s+ocr\b", value, re.IGNORECASE):
+                        in_label_ocr = True
+                        continue
+                    if in_label_ocr:
+                        continue
+                    if _is_ocr_page_boilerplate(value):
+                        continue
                     continuation.append(value)
                 raw_value = _compact(" ".join(continuation))
             normalized_value = _normalize_value(field_name, raw_value)
@@ -140,6 +169,10 @@ def extract_field_observations(text: str) -> list[ExtractedField]:
                     source_locator=f"line:{line_number}",
                 )
             )
+            if field_name == "remarks":
+                # Do not reinterpret phrases such as "District Education
+                # Authority" inside remarks as new labeled CRM fields.
+                return observations
     return observations
 
 

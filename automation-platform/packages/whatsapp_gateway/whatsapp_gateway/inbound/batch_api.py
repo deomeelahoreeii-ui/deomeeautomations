@@ -62,9 +62,17 @@ def _batch_view(session: Session, batch: WhatsAppInboundBatch) -> dict[str, Any]
     processing_run = session.exec(
         select(WhatsAppInboundProcessingRun)
         .where(WhatsAppInboundProcessingRun.batch_id == batch.id)
+        .where(WhatsAppInboundProcessingRun.status.notin_(["failed", "cancelled"]))
         .order_by(WhatsAppInboundProcessingRun.created_at.desc())
         .limit(1)
     ).first()
+    if processing_run is None:
+        processing_run = session.exec(
+            select(WhatsAppInboundProcessingRun)
+            .where(WhatsAppInboundProcessingRun.batch_id == batch.id)
+            .order_by(WhatsAppInboundProcessingRun.created_at.desc())
+            .limit(1)
+        ).first()
     return {
         **serialize_batch(batch),
         "contact_name": (resolved_contact_name(session, contact) if contact else "") or str(push_name or "Unnamed contact"),

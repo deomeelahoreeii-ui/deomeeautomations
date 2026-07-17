@@ -13,7 +13,7 @@ import whatsapp_gateway.models  # noqa: F401
 from automation_api.main import app
 from automation_core.config import Settings, get_settings
 from automation_core.database import get_session
-from crm_domain.models import ComplaintCase
+from crm_domain.models import ComplaintCase, ComplaintDocument, ComplaintDocumentCaseLink
 from whatsapp_gateway.models import (
     WhatsAppAccount,
     WhatsAppDirectoryContact,
@@ -152,6 +152,16 @@ def test_processing_run_creation_and_manual_review(tmp_path, monkeypatch) -> Non
             assert run["run_code"].startswith("WAP-")
             assert run["contact_name"] == "Faheem Bukhari CEO Office"
             assert created["task_id"] == "task-4c"
+            assert created["reused"] is False
+
+            reopened = client.post(
+                "/api/v1/whatsapp/inbound/processing-runs",
+                json={"batch_id": str(batch_id), "paperless_check": True},
+            )
+            assert reopened.status_code == 202, reopened.text
+            assert reopened.json()["processing_run"]["id"] == run["id"]
+            assert reopened.json()["task_id"] is None
+            assert reopened.json()["reused"] is True
 
             captured_runs = client.get(
                 "/api/v1/whatsapp/inbound/batches", params={"limit": 20}
@@ -215,10 +225,168 @@ def test_processing_run_creation_and_manual_review(tmp_path, monkeypatch) -> Non
             event_types = {row["event_type"] for row in events.json()["items"]}
             assert {"processing_run_created", "review_decision_updated"}.issubset(event_types)
 
+            with Session(engine) as session:
+                completed_run = session.get(
+                    WhatsAppInboundProcessingRun, uuid.UUID(run["id"])
+                )
+                assert completed_run is not None
+                completed_run.status = "completed"
+                session.add(completed_run)
+                session.commit()
+
+            reopened_completed = client.post(
+                "/api/v1/whatsapp/inbound/processing-runs",
+                json={"batch_id": str(batch_id), "paperless_check": True},
+            )
+            assert reopened_completed.status_code == 202, reopened_completed.text
+            assert reopened_completed.json()["processing_run"]["id"] == run["id"]
+            assert reopened_completed.json()["task_id"] is None
+            assert reopened_completed.json()["reused"] is True
+
         with Session(engine) as session:
             assert len(session.exec(select(WhatsAppInboundProcessingRun)).all()) == 1
             persisted = session.exec(select(WhatsAppInboundProcessingItem)).one()
             assert persisted.reviewed_by == "Ahmad"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_duplicate_only_group_approval_completes_review_without_regressing_case(
+    tmp_path, monkeypatch
+) -> None:
+    engine, batch_id = setup_processing_app(tmp_path, monkeypatch)
+    try:
+        with TestClient(app) as client:
+            created = client.post(
+                "/api/v1/whatsapp/inbound/processing-runs",
+                json={"batch_id": str(batch_id), "paperless_check": True},
+            ).json()
+            run_id = created["processing_run"]["id"]
+            item_id = created["processing_run"]["items"][0]["id"] if created["processing_run"].get("items") else None
+            if item_id is None:
+                item_id = client.get(
+                    f"/api/v1/whatsapp/inbound/processing-runs/{run_id}"
+                ).json()["items"][0]["id"]
+
+            with Session(engine) as session:
+                item = session.get(WhatsAppInboundProcessingItem, uuid.UUID(item_id))
+                assert item is not None
+                item.status = "eligible"
+                item.primary_category = "crm_complaint"
+                item.detected_complaint_number = "104-6609317"
+                item.confidence = 1.0
+                item.extracted_text = "Complaint No 104-6609317"
+                item.extraction_method = "pdftotext"
+                item.paperless_category = "fresh"
+                session.add(item)
+                case = ComplaintCase(
+                    complaint_number="104-6609317", state="review_required"
+                )
+                session.add(case)
+                session.flush()
+                canonical = ComplaintDocument(
+                    complaint_case_id=case.id,
+                    source_processing_item_id=uuid.uuid4(),
+                    source_sha256="b" * 64,
+                    original_filename="earlier-copy.pdf",
+                    mime_type="application/pdf",
+                    role="main_complaint",
+                    review_state="proposed",
+                )
+                session.add(canonical)
+                session.flush()
+                session.add(
+                    ComplaintDocumentCaseLink(
+                        complaint_case_id=case.id,
+                        complaint_document_id=canonical.id,
+                        role="main_complaint",
+                        review_state="accepted",
+                    )
+                )
+                session.commit()
+                case_id = case.id
+
+            reviewed = client.post(
+                f"/api/v1/whatsapp/inbound/processing-runs/{run_id}/complaint-groups/104-6609317/review",
+                json={"decision": "approved", "reviewed_by": "Ahmad"},
+            )
+            assert reviewed.status_code == 200, reviewed.text
+            assert reviewed.json()["case_state"] == "review_required"
+
+            with Session(engine) as session:
+                case = session.get(ComplaintCase, case_id)
+                duplicate = session.exec(
+                    select(ComplaintDocument).where(
+                        ComplaintDocument.source_processing_item_id
+                        == uuid.UUID(item_id)
+                    )
+                ).one()
+                item = session.get(WhatsAppInboundProcessingItem, uuid.UUID(item_id))
+                assert case is not None and case.state == "review_required"
+                assert duplicate.review_state == "duplicate"
+                assert item is not None and item.review_status == "approved"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_manual_attachment_links_existing_case_and_preserves_role_and_state(
+    tmp_path, monkeypatch
+) -> None:
+    engine, batch_id = setup_processing_app(tmp_path, monkeypatch)
+    try:
+        with TestClient(app) as client:
+            run = client.post(
+                "/api/v1/whatsapp/inbound/processing-runs",
+                json={"batch_id": str(batch_id), "paperless_check": True},
+            ).json()["processing_run"]
+            detail = client.get(
+                f"/api/v1/whatsapp/inbound/processing-runs/{run['id']}"
+            ).json()
+            item_id = detail["items"][0]["id"]
+
+            with Session(engine) as session:
+                case = ComplaintCase(
+                    source_system="crm_portal",
+                    complaint_number="104-6609317",
+                    state="published",
+                    complainant_name="Existing complainant",
+                )
+                session.add(case)
+                session.commit()
+                existing_case_id = case.id
+
+            reviewed = client.post(
+                f"/api/v1/whatsapp/inbound/processing-items/{item_id}/review",
+                json={
+                    "decision": "approved",
+                    "reviewed_by": "Ahmad",
+                    "category": "crm_supporting_document",
+                    "complaint_number": "104-6609317",
+                    "note": "Verified as an attachment to the existing complaint.",
+                },
+            )
+
+            assert reviewed.status_code == 200, reviewed.text
+            resolution = reviewed.json()["case_resolution"]
+            assert resolution == {
+                "case_id": str(existing_case_id),
+                "complaint_number": "104-6609317",
+                "case_state": "published",
+                "case_created": False,
+                "document_role": "attachment",
+            }
+
+        with Session(engine) as session:
+            case = session.get(ComplaintCase, existing_case_id)
+            document = session.exec(select(ComplaintDocument)).one()
+            link = session.exec(select(ComplaintDocumentCaseLink)).one()
+            assert case is not None and case.state == "published"
+            assert document.complaint_case_id == existing_case_id
+            assert document.role == "attachment"
+            assert document.review_state == "accepted"
+            assert link.complaint_case_id == existing_case_id
+            assert link.role == "attachment"
+            assert link.review_state == "accepted"
     finally:
         app.dependency_overrides.clear()
 

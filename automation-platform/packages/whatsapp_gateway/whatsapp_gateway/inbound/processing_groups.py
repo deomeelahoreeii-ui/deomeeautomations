@@ -88,6 +88,25 @@ def complaint_group_summary(
             )
             group["district"] = group["district"] or fields.get("district")
 
+    approved_runs_by_number: dict[str, set[uuid.UUID]] = {
+        number: set() for number in groups
+    }
+    if groups:
+        approved_rows = session.exec(
+            select(
+                WhatsAppInboundProcessingItem.run_id,
+                WhatsAppInboundProcessingItem.detected_complaint_number,
+            ).where(
+                WhatsAppInboundProcessingItem.review_status == "approved",
+                WhatsAppInboundProcessingItem.detected_complaint_number.in_(
+                    list(groups)
+                ),
+            )
+        ).all()
+        for approved_run_id, approved_number in approved_rows:
+            if approved_number:
+                approved_runs_by_number[approved_number].add(approved_run_id)
+
     result: list[dict[str, Any]] = []
     for number in sorted(groups):
         group = groups[number]
@@ -113,5 +132,9 @@ def complaint_group_summary(
         ).first()
         group["case_id"] = str(complaint_case.id) if complaint_case else None
         group["case_state"] = complaint_case.state if complaint_case else None
+        group["approved_run_count"] = len(approved_runs_by_number[number])
+        group["approved_in_other_runs"] = bool(
+            approved_runs_by_number[number].difference({run_id})
+        )
         result.append(group)
     return result
