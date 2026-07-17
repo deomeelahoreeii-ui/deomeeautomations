@@ -91,6 +91,9 @@ def test_approved_cases_can_be_verified_and_batch_published_to_crm_pending() -> 
     assert "Paperless publication center" in review_source
     assert "approved_in_other_runs" in review_source
     assert "caseStatistics" in review_source
+    review_list_source = LIST_PAGE.read_text(encoding="utf-8")
+    assert "Paperless publication center" in review_list_source
+    assert "publication-publishing-count" in review_list_source
     assert "publication_blockers" in detail_source
     assert "Ready for CRM Pending" in detail_source
 

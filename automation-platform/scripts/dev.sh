@@ -292,13 +292,14 @@ wait_for_platform_worker() {
       && grep -q "crm_filters.run_pdf_filter_job" <<<"$output" \
       && grep -q "crm_filters.run_sheet_to_pdf_job" <<<"$output" \
       && grep -q "whatsapp_gateway.build_inbound_export" <<<"$output" \
-      && grep -q "whatsapp_gateway.process_inbound_batch" <<<"$output"; then
+      && grep -q "whatsapp_gateway.process_inbound_batch" <<<"$output" \
+      && grep -q "crm_domain.publish_complaint_case" <<<"$output"; then
       return 0
     fi
     sleep 1
   done
   printf '%s\n' "$output" >&2
-  fail "The Celery worker did not register the CRM, WhatsApp export, and inbound processing tasks."
+  fail "The Celery worker did not register the CRM, Paperless publication, WhatsApp export, and inbound processing tasks."
 }
 
 whatsapp_worker_health_json() {

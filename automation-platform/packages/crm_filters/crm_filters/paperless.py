@@ -85,6 +85,7 @@ class PaperlessMetadata:
     document_role_field_id: int | str | None = None
     field_ids_by_name: dict[str, int | str] = field(default_factory=dict)
     field_names_by_id: dict[str, str] = field(default_factory=dict)
+    field_data_types_by_id: dict[str, str] = field(default_factory=dict)
     status_option_ids_by_label: dict[str, int | str] = field(default_factory=dict)
     status_option_labels_by_id: dict[str, str] = field(default_factory=dict)
     option_labels_by_field_id: dict[str, dict[str, str]] = field(default_factory=dict)
@@ -403,7 +404,16 @@ class PaperlessClient:
             )
             response.raise_for_status()
             body = response.json()
-            page_results = body.get("results", []) or []
+            if isinstance(body, list):
+                page_results = body
+                next_url = None
+            elif isinstance(body, dict):
+                page_results = body.get("results", []) or []
+                next_url = body.get("next")
+            else:
+                raise requests.RequestException(
+                    f"Paperless returned an unexpected collection response: {type(body).__name__}"
+                )
             if limit is not None:
                 page_results = page_results[: max(0, limit - len(results))]
             results.extend(page_results)
@@ -411,7 +421,6 @@ class PaperlessClient:
                 page_log(pages + 1, len(results))
             if limit is not None and len(results) >= limit:
                 return results[:limit]
-            next_url = body.get("next")
             url = urljoin(self.base_url + "/", str(next_url)) if next_url else None
             pages += 1
         if url:
@@ -446,6 +455,9 @@ class PaperlessClient:
             if field_id is not None and field_name_raw:
                 metadata.field_ids_by_name[field_name] = field_id
                 metadata.field_names_by_id[str(field_id)] = field_name_raw
+                metadata.field_data_types_by_id[str(field_id)] = str(
+                    custom_field.get("data_type") or ""
+                )
             if custom_field.get("data_type") == "select" and field_id is not None:
                 labels = {
                     str(option.get("id")): str(option.get("label", "")).strip()
@@ -506,7 +518,25 @@ class PaperlessClient:
             value = raw_value
             if labels:
                 reverse = {label.casefold(): option_id for option_id, label in labels.items()}
-                value = reverse.get(str(raw_value).strip().casefold(), raw_value)
+                raw_label = str(raw_value).strip().casefold()
+                value = reverse.get(raw_label)
+                if value is None:
+                    compatible = [
+                        option_id
+                        for label, option_id in reverse.items()
+                        if label.removesuffix(" department").strip() == raw_label
+                    ]
+                    value = compatible[0] if len(compatible) == 1 else None
+                if value is None:
+                    continue
+            elif self.metadata.field_data_types_by_id.get(str(field_id)) == "select":
+                continue
+            if (
+                self.metadata.field_data_types_by_id.get(str(field_id))
+                == "documentlink"
+                and not isinstance(value, list)
+            ):
+                value = [value]
             payload.append({"field": field_id, "value": value})
         return payload
 
@@ -567,6 +597,18 @@ class PaperlessClient:
         document_id = self.wait_for_document_id(task_id)
         return task_id, document_id
 
+    def find_document_by_exact_title(self, title: str) -> int | None:
+        """Find a previously submitted upload before retrying an interrupted task."""
+
+        for document in self._get_all(
+            "/api/documents/",
+            params={"query": title},
+            limit=100,
+        ):
+            if str(document.get("title") or "") == title and document.get("id"):
+                return int(document["id"])
+        return None
+
     def update_document_metadata(
         self,
         document_id: int,
@@ -590,7 +632,11 @@ class PaperlessClient:
                 "custom_fields": self.custom_field_payload(custom_fields),
             },
         )
-        patch.raise_for_status()
+        if not patch.ok:
+            raise requests.HTTPError(
+                f"Paperless metadata update failed ({patch.status_code}): {patch.text}",
+                response=patch,
+            )
 
     def wait_for_document_id(self, task_id: str) -> int:
         deadline = time.monotonic() + self.task_timeout_seconds

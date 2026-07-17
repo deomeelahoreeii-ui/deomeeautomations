@@ -92,8 +92,7 @@ def _validate_crm_pending_contract(metadata) -> None:
         )
 
 
-@celery_app.task(name="crm_domain.publish_complaint_case", soft_time_limit=900, time_limit=960)
-def publish_complaint_case(case_id: str) -> dict[str, object]:
+def _publish_complaint_case(case_id: str) -> dict[str, object]:
     case_uuid = uuid.UUID(case_id)
     settings = get_settings()
     storage = S3ObjectStorage(settings)
@@ -106,9 +105,9 @@ def publish_complaint_case(case_id: str) -> dict[str, object]:
             raise ValueError("Complaint case was not found")
         if case.state not in {"fresh", "publishing", "published"}:
             raise ValueError("Complaint case must be approved as fresh before publishing")
-        publications = list(
+        publication_ids = list(
             session.exec(
-                select(PaperlessPublication)
+                select(PaperlessPublication.id)
                 .where(PaperlessPublication.complaint_case_id == case.id)
                 .order_by(PaperlessPublication.created_at)
             ).all()
@@ -121,7 +120,7 @@ def publish_complaint_case(case_id: str) -> dict[str, object]:
     main_document_id: int | None = None
     completed = 0
     with tempfile.TemporaryDirectory(prefix=f"crm-publish-{case_id}-") as temp_name:
-        for publication_id in [item.id for item in publications]:
+        for publication_id in publication_ids:
             with Session(engine) as session:
                 publication = session.get(PaperlessPublication, publication_id)
                 case = session.get(ComplaintCase, case_uuid)
@@ -189,13 +188,15 @@ def publish_complaint_case(case_id: str) -> dict[str, object]:
                     )
                     paperless_id = publication.paperless_document_id
                     if paperless_id is None:
-                        task_id, paperless_id = client.post_document(
-                            source,
-                            title=title,
-                            document_type_id=document_type_id,
-                            correspondent_id=metadata.correspondent_id,
-                        )
-                        publication.paperless_task_id = task_id
+                        paperless_id = client.find_document_by_exact_title(title)
+                        if paperless_id is None:
+                            task_id, paperless_id = client.post_document(
+                                source,
+                                title=title,
+                                document_type_id=document_type_id,
+                                correspondent_id=metadata.correspondent_id,
+                            )
+                            publication.paperless_task_id = task_id
                         publication.paperless_document_id = paperless_id
                         publication.state = "uploaded"
                         publication.updated_at = utcnow()
@@ -240,6 +241,40 @@ def publish_complaint_case(case_id: str) -> dict[str, object]:
         session.add(case)
         session.commit()
     return {"case_id": case_id, "status": "published", "documents": completed}
+
+
+def _record_publication_failure(case_id: uuid.UUID, error: Exception) -> None:
+    """Return a crashed publication to a retryable state with a visible reason."""
+
+    message = str(error) or error.__class__.__name__
+    with Session(engine) as session:
+        case = session.get(ComplaintCase, case_id)
+        if case is not None and case.state != "published":
+            case.state = "fresh"
+            case.updated_at = utcnow()
+            session.add(case)
+        publications = session.exec(
+            select(PaperlessPublication).where(
+                PaperlessPublication.complaint_case_id == case_id,
+                PaperlessPublication.state != "completed",
+            )
+        ).all()
+        for publication in publications:
+            publication.state = "failed"
+            publication.last_error = message
+            publication.updated_at = utcnow()
+            session.add(publication)
+        session.commit()
+
+
+@celery_app.task(name="crm_domain.publish_complaint_case", soft_time_limit=900, time_limit=960)
+def publish_complaint_case(case_id: str) -> dict[str, object]:
+    case_uuid = uuid.UUID(case_id)
+    try:
+        return _publish_complaint_case(case_id)
+    except Exception as exc:
+        _record_publication_failure(case_uuid, exc)
+        raise
 
 
 @celery_app.task(name="crm_domain.backfill_paperless_cases", soft_time_limit=1800, time_limit=1860)

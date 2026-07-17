@@ -89,6 +89,38 @@ def test_publication_maps_paperless_select_labels_to_option_ids() -> None:
     ]
 
 
+def test_publication_omits_unknown_select_values_and_maps_department_alias() -> None:
+    from crm_filters.paperless import PaperlessClient
+
+    client = PaperlessClient(base_url="https://paperless.lab.internal", token="token")
+    client.metadata = metadata()
+    client.metadata.field_ids_by_name.update({"department": 17, "tehsil": 16})
+    client.metadata.field_data_types_by_id.update({"17": "select", "16": "select"})
+    client.metadata.option_labels_by_field_id.update(
+        {
+            "17": {"school-option": "School Education Department"},
+            "16": {"lahore-option": "Model Town"},
+        }
+    )
+
+    assert client.custom_field_payload(
+        {"Department": "School Education", "Tehsil": "KEROR PAKKA"}
+    ) == [{"field": 17, "value": "school-option"}]
+
+
+def test_publication_maps_parent_case_to_document_link_list() -> None:
+    from crm_filters.paperless import PaperlessClient
+
+    client = PaperlessClient(base_url="https://paperless.lab.internal", token="token")
+    client.metadata = metadata()
+    client.metadata.field_ids_by_name["parent case"] = 9
+    client.metadata.field_data_types_by_id["9"] = "documentlink"
+
+    assert client.custom_field_payload({"Parent Case": 757}) == [
+        {"field": 9, "value": [757]}
+    ]
+
+
 def test_publication_applies_the_legacy_crm_correspondent() -> None:
     from unittest.mock import MagicMock
 
@@ -231,3 +263,42 @@ def test_targeted_index_marks_absent_numbers_fresh_without_per_number_searches()
 
     assert client.lookup_complaint("104-0000000").category == "fresh"
     assert client._get_all.call_count == 1
+
+
+def test_collection_reader_accepts_unpaginated_paperless_task_lists() -> None:
+    from unittest.mock import MagicMock
+
+    from crm_filters.paperless import PaperlessClient
+
+    client = PaperlessClient(base_url="https://paperless.lab.internal", token="token")
+    response = MagicMock()
+    response.json.return_value = [
+        {"task_id": "task-1", "status": "SUCCESS", "related_document": 42}
+    ]
+    client._request = MagicMock(return_value=response)
+
+    assert client._get_all("/api/tasks/") == [
+        {"task_id": "task-1", "status": "SUCCESS", "related_document": 42}
+    ]
+    assert client._request.call_count == 1
+
+
+def test_publication_retry_finds_an_exact_previously_uploaded_title() -> None:
+    from unittest.mock import MagicMock
+
+    from crm_filters.paperless import PaperlessClient
+
+    client = PaperlessClient(base_url="https://paperless.lab.internal", token="token")
+    client._get_all = MagicMock(
+        return_value=[
+            {"id": 41, "title": "CRM - 104-1234567 - Main Complaint - v10 old"},
+            {"id": 42, "title": "CRM - 104-1234567 - Main Complaint - v10"},
+        ]
+    )
+
+    assert (
+        client.find_document_by_exact_title(
+            "CRM - 104-1234567 - Main Complaint - v10"
+        )
+        == 42
+    )

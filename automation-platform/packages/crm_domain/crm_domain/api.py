@@ -99,6 +99,7 @@ def _case_summary(
     case: ComplaintCase,
     document_count: int,
     publication_blockers: list[str] | None = None,
+    publication_error: str | None = None,
 ) -> dict[str, object]:
     blockers = publication_blockers or []
     return {
@@ -118,9 +119,22 @@ def _case_summary(
         "document_count": document_count,
         "publication_ready": case.state == "fresh" and not blockers,
         "publication_blockers": blockers,
+        "publication_error": publication_error,
         "created_at": case.created_at,
         "updated_at": case.updated_at,
     }
+
+
+def _latest_publication_error(session: Session, case_id: uuid.UUID) -> str | None:
+    publication = session.exec(
+        select(PaperlessPublication)
+        .where(
+            PaperlessPublication.complaint_case_id == case_id,
+            PaperlessPublication.last_error.is_not(None),
+        )
+        .order_by(PaperlessPublication.updated_at.desc())
+    ).first()
+    return publication.last_error if publication else None
 
 
 @router.get("")
@@ -179,6 +193,7 @@ def list_complaint_cases(
                 case,
                 int(document_count),
                 _publication_blockers(session, case),
+                _latest_publication_error(session, case.id),
             )
             for case, document_count in rows
         ],

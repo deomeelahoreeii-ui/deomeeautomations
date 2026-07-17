@@ -11,6 +11,12 @@ import CrmLayout from "../../../../layouts/CrmLayout.astro";
     <div><strong>Safe review workspace</strong><small>CRM extracts evidence and checks Paperless, but never creates or uploads a Paperless document from this queue.</small></div>
   </section>
 
+  <section class="master-card crm-review-publication-center">
+    <div><p class="eyebrow">After approval</p><h2>Paperless publication center</h2><p>One durable case per complaint number. Verify approved cases, then publish selected complaint documents and attachments as CRM Pending.</p></div>
+    <div class="crm-review-publication-stats"><div><span>Unique cases</span><strong id="publication-unique-count">—</strong></div><div><span>Approved</span><strong id="publication-approved-count">—</strong></div><div><span>Ready now</span><strong id="publication-ready-count">—</strong></div><div><span>Publishing</span><strong id="publication-publishing-count">—</strong></div><div><span>Published</span><strong id="publication-published-count">—</strong></div></div>
+    <a class="btn btn-primary" href="/crm/cases/?state=fresh#complaint-cases">Open Paperless publication center →</a>
+  </section>
+
   <section class="inbound-summary-grid crm-intake-summary">
     <article class="master-card"><span>Total runs</span><strong id="processing-count-total">—</strong></article>
     <article class="master-card"><span>Active</span><strong id="processing-count-active">—</strong></article>
@@ -30,7 +36,7 @@ import CrmLayout from "../../../../layouts/CrmLayout.astro";
   </section>
 
   <style is:global>
-    .crm-review-source{display:grid;min-width:0;gap:.18rem}.crm-review-source strong,.crm-review-source small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.crm-review-source strong{color:#526276;font-size:.72rem}.crm-review-source small{color:#7d8999;font-size:.68rem}.crm-review-links{display:flex;align-items:center;justify-content:flex-end;gap:.45rem;flex-wrap:wrap}@media(max-width:700px){.crm-review-card>footer{align-items:stretch;flex-direction:column}.crm-review-links{justify-content:flex-start}}
+    .crm-review-publication-center{display:grid;grid-template-columns:minmax(18rem,1.2fr) minmax(32rem,2fr) auto;gap:1rem;align-items:center;margin:1rem 0;border-color:#9bcdd4;border-left:5px solid #16879a;background:linear-gradient(120deg,#effafb,#fff)}.crm-review-publication-center h2{margin:.15rem 0 .35rem}.crm-review-publication-center p{margin:0;color:#64748b}.crm-review-publication-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem}.crm-review-publication-stats div{padding:.65rem;border:1px solid #d8e7eb;border-radius:.6rem;background:#fff}.crm-review-publication-stats span{display:block;color:#718096;font-size:.65rem}.crm-review-publication-stats strong{display:block;margin-top:.15rem;font-size:1.2rem}.crm-review-source{display:grid;min-width:0;gap:.18rem}.crm-review-source strong,.crm-review-source small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.crm-review-source strong{color:#526276;font-size:.72rem}.crm-review-source small{color:#7d8999;font-size:.68rem}.crm-review-links{display:flex;align-items:center;justify-content:flex-end;gap:.45rem;flex-wrap:wrap}@media(max-width:1100px){.crm-review-publication-center{grid-template-columns:1fr}.crm-review-publication-stats{grid-template-columns:repeat(3,1fr)}}@media(max-width:700px){.crm-review-publication-stats{grid-template-columns:repeat(2,1fr)}.crm-review-card>footer{align-items:stretch;flex-direction:column}.crm-review-links{justify-content:flex-start}}
   </style>
 
   <script>
@@ -49,9 +55,10 @@ import CrmLayout from "../../../../layouts/CrmLayout.astro";
     async function load(){
       const search=el<HTMLInputElement>("processing-search").value.trim(),status=el<HTMLSelectElement>("processing-status").value,category=el<HTMLSelectElement>("processing-category").value;
       el("processing-list-state").textContent="Loading";
-      const r=await actions.whatsapp.inboundProcessingRuns({search:search||undefined,status:status||undefined,category:category||undefined,limit:100});
+      const [r,statsResult]=await Promise.all([actions.whatsapp.inboundProcessingRuns({search:search||undefined,status:status||undefined,category:category||undefined,limit:100}),actions.crm.caseStatistics({})]);
       if(r.error){el("processing-list-items").innerHTML=`<div class="crm-intake-empty error"><span>!</span><h3>Could not load reviews</h3><p>${escapeHtml(r.error.message)}</p></div>`;el("processing-list-state").textContent="Error";return;}
       const d=r.data as any,c=d.counts||{},items=d.items||[];
+      if(statsResult.data){const s=statsResult.data as any;el("publication-unique-count").textContent=String(s.unique_cases);el("publication-approved-count").textContent=String(s.approved_cases);el("publication-ready-count").textContent=String(s.ready_to_publish);el("publication-publishing-count").textContent=String(s.publishing);el("publication-published-count").textContent=String(s.published);}
       el("processing-count-total").textContent=String(c.total||0);el("processing-count-active").textContent=String(c.active||0);el("processing-count-completed").textContent=String(c.completed||0);el("processing-count-errors").textContent=String(c.with_errors||0);
       el("processing-result-count").textContent=`${items.length} review run(s)`;el("processing-list-state").textContent=items.some((x:any)=>["queued","extracting","checking_paperless"].includes(x.status))?"Classifying":"Ready";
       el("processing-list-items").innerHTML=items.length?items.map(renderReview).join(""):`<div class="crm-intake-empty"><span>✓</span><h3>No complaint reviews need attention</h3><p>Completed classifications and new candidates will appear here. Start a new intake to capture another conversation.</p><a class="btn btn-sm" href="/crm/intake/">Start new intake</a></div>`;
