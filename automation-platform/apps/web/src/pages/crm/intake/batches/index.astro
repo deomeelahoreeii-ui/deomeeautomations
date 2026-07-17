@@ -6,21 +6,24 @@ import CrmLayout from "../../../../layouts/CrmLayout.astro";
   <button class="btn btn-sm" id="refresh-batches" slot="actions">↻ Refresh</button>
   <CrmIntakeNav active="runs" />
 
-  <section class="inbound-summary-grid">
+  <section class="inbound-summary-grid crm-intake-summary">
     <article class="master-card"><span>Total intake runs</span><strong id="batch-count-total">—</strong></article>
     <article class="master-card"><span>Active</span><strong id="batch-count-active">—</strong></article>
     <article class="master-card"><span>Completed</span><strong id="batch-count-completed">—</strong></article>
     <article class="master-card"><span>With errors</span><strong id="batch-count-errors">—</strong></article>
   </section>
 
-  <section class="master-card">
-    <div class="inbound-card-heading"><div><p class="eyebrow">Intake ledger</p><h2>WhatsApp complaint intake history</h2></div><span class="badge" id="batch-list-state">Loading</span></div>
-    <div class="toolbar inbound-batch-toolbar">
-      <input class="input input-bordered input-sm" id="batch-search" placeholder="Search batch code, contact or JID" />
-      <select class="select select-bordered select-sm" id="batch-status"><option value="">All statuses</option><option value="created">Created</option><option value="fetching">Fetching</option><option value="storing">Storing</option><option value="completed">Completed</option><option value="completed_with_errors">Completed with errors</option><option value="failed">Failed</option></select>
-      <span class="toolbar-status" id="batch-result-count">Loading…</span>
+  <section class="master-card crm-intake-queue-panel">
+    <div class="inbound-card-heading">
+      <div><p class="eyebrow">Intake history</p><h2>WhatsApp complaint intake history</h2><p>Open a run to verify its captured conversation and continue it into complaint review.</p></div>
+      <a class="btn btn-sm btn-primary" href="/crm/intake/">＋ New intake</a>
     </div>
-    <div class="table-wrap"><table class="table table-sm inbound-file-table"><thead><tr><th>Batch</th><th>Contact</th><th>Started</th><th>Messages</th><th>Files</th><th>Storage</th><th>Status</th><th></th></tr></thead><tbody id="batch-list-items"><tr><td colspan="8" class="empty-cell">Loading batches…</td></tr></tbody></table></div>
+    <div class="toolbar inbound-batch-toolbar crm-intake-toolbar">
+      <input class="input input-bordered input-sm" id="batch-search" placeholder="Search complainant, intake code or WhatsApp identity" />
+      <select class="select select-bordered select-sm" id="batch-status"><option value="">All statuses</option><option value="created">Created</option><option value="fetching">Fetching</option><option value="storing">Storing</option><option value="completed">Completed</option><option value="completed_with_errors">Completed with errors</option><option value="failed">Failed</option></select>
+      <span class="toolbar-status"><b id="batch-list-state">Loading</b> · <span id="batch-result-count">Loading…</span></span>
+    </div>
+    <div class="crm-run-list" id="batch-list-items"><div class="crm-intake-empty"><span>◷</span><h3>Loading intake history…</h3></div></div>
   </section>
 
   <script>
@@ -29,8 +32,24 @@ import CrmLayout from "../../../../layouts/CrmLayout.astro";
     const escapeHtml=(v:unknown)=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
     const formatDate=(v:any)=>{if(!v)return"—";const d=new Date(v);return Number.isNaN(d.getTime())?String(v):d.toLocaleString();};
     const formatBytes=(v:any)=>{const n=Number(v||0);if(!n)return"0 B";const u=["B","KB","MB","GB"];const i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),3);return`${(n/1024**i).toFixed(i?1:0)} ${u[i]}`;};
-    let timer:number|undefined, searchTimer:number|undefined;
-    async function load(){const search=el<HTMLInputElement>("batch-search").value.trim(),status=el<HTMLSelectElement>("batch-status").value;el("batch-list-state").textContent="Loading";const r=await actions.whatsapp.inboundBatches({search:search||undefined,status:status||undefined,limit:100});if(r.error){el("batch-list-items").innerHTML=`<tr><td colspan="8" class="empty-cell">${escapeHtml(r.error.message)}</td></tr>`;el("batch-list-state").textContent="Error";return;}const d=r.data as any,c=d.counts||{},items=d.items||[];el("batch-count-total").textContent=String(c.total||0);el("batch-count-active").textContent=String(c.active||0);el("batch-count-completed").textContent=String(c.completed||0);el("batch-count-errors").textContent=String(c.with_errors||0);el("batch-result-count").textContent=`${items.length} intake run(s)`;el("batch-list-state").textContent=items.some((x:any)=>["created","fetching","storing"].includes(x.status))?"Live":"Ready";el("batch-list-items").innerHTML=items.length?items.map((x:any)=>`<tr><td><strong>${escapeHtml(x.batch_code)}</strong><small>${escapeHtml(x.provider)} · ${escapeHtml(x.storage_backend)}</small></td><td><strong>${escapeHtml(x.contact_name)}</strong><small>${escapeHtml(x.contact_identity||"")}</small></td><td>${escapeHtml(formatDate(x.started_at||x.created_at))}</td><td>${x.messages_discovered}/${x.requested_count}</td><td>${x.files_discovered}<small>${formatBytes(x.total_bytes)}</small></td><td>${x.files_stored} new · ${x.files_reused} reused<small>${x.files_failed} failed</small></td><td><span class="badge batch-status-${escapeHtml(x.status)}">${escapeHtml(x.status)}</span></td><td><a class="btn btn-xs" href="/crm/intake/batches/${escapeHtml(x.id)}">Open</a></td></tr>`).join(""):'<tr><td colspan="8" class="empty-cell">No intake runs match these filters.</td></tr>';}
+    let timer:number|undefined,searchTimer:number|undefined;
+
+    function renderRun(x:any){
+      const archiveNote=x.files_failed?String(x.files_failed)+" need attention":"ready for review";
+      return `<article class="crm-run-card"><header><div><span class="crm-run-state ${escapeHtml(x.status)}">${escapeHtml(String(x.status).replaceAll("_"," "))}</span><h3>${escapeHtml(x.contact_name)}</h3><p>${escapeHtml(x.contact_identity||"WhatsApp identity unavailable")}</p></div><time>${escapeHtml(formatDate(x.started_at||x.created_at))}</time></header><div class="crm-run-metrics"><div><span>Conversation</span><strong>${x.messages_discovered}/${x.requested_count}</strong><small>messages captured</small></div><div><span>Evidence</span><strong>${x.files_discovered}</strong><small>${formatBytes(x.total_bytes)}</small></div><div><span>Durable archive</span><strong>${x.files_stored+x.files_reused}/${x.files_discovered}</strong><small>${archiveNote}</small></div></div><footer><span>${escapeHtml(x.batch_code)} · ${escapeHtml(x.provider)}</span><a class="btn btn-sm btn-primary" href="/crm/intake/batches/${escapeHtml(x.id)}">Review captured evidence →</a></footer></article>`;
+    }
+
+    async function load(){
+      const search=el<HTMLInputElement>("batch-search").value.trim(),status=el<HTMLSelectElement>("batch-status").value;
+      el("batch-list-state").textContent="Loading";
+      const r=await actions.whatsapp.inboundBatches({search:search||undefined,status:status||undefined,limit:100});
+      if(r.error){el("batch-list-items").innerHTML=`<div class="crm-intake-empty error"><span>!</span><h3>Could not load intake history</h3><p>${escapeHtml(r.error.message)}</p></div>`;el("batch-list-state").textContent="Error";return;}
+      const d=r.data as any,c=d.counts||{},items=d.items||[];
+      el("batch-count-total").textContent=String(c.total||0);el("batch-count-active").textContent=String(c.active||0);el("batch-count-completed").textContent=String(c.completed||0);el("batch-count-errors").textContent=String(c.with_errors||0);
+      el("batch-result-count").textContent=`${items.length} intake run(s)`;el("batch-list-state").textContent=items.some((x:any)=>["created","fetching","storing"].includes(x.status))?"Live":"Ready";
+      el("batch-list-items").innerHTML=items.length?items.map(renderRun).join(""):`<div class="crm-intake-empty"><span>◎</span><h3>No intake runs found</h3><p>Start with a complainant's WhatsApp conversation, or clear the current filters.</p><a class="btn btn-sm btn-primary" href="/crm/intake/">Start complaint intake</a></div>`;
+    }
+
     function start(){if(timer)clearInterval(timer);void load();timer=window.setInterval(()=>{if(!document.hidden)void load();},5000);}
     el("refresh-batches").addEventListener("click",()=>void load());el("batch-status").addEventListener("change",()=>void load());el("batch-search").addEventListener("input",()=>{if(searchTimer)clearTimeout(searchTimer);searchTimer=window.setTimeout(()=>void load(),300);});window.addEventListener("beforeunload",()=>{if(timer)clearInterval(timer);});start();
   </script>

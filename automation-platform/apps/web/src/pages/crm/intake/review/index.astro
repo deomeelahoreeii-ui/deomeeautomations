@@ -6,27 +6,27 @@ import CrmLayout from "../../../../layouts/CrmLayout.astro";
   <button class="btn btn-sm" id="refresh-processing" slot="actions">↻ Refresh</button>
   <CrmIntakeNav active="review" />
 
-  <section class="wa-health-banner inbound-processing-safety">
+  <section class="wa-health-banner inbound-processing-safety crm-review-safety">
     <span class="status-dot ready"></span>
-    <div><strong>Dry-run only</strong><small>Bundle 4C extracts, categorizes and checks Paperless. It never creates or uploads a Paperless document.</small></div>
+    <div><strong>Safe review workspace</strong><small>CRM extracts evidence and checks Paperless, but never creates or uploads a Paperless document from this queue.</small></div>
   </section>
 
-  <section class="inbound-summary-grid">
+  <section class="inbound-summary-grid crm-intake-summary">
     <article class="master-card"><span>Total runs</span><strong id="processing-count-total">—</strong></article>
     <article class="master-card"><span>Active</span><strong id="processing-count-active">—</strong></article>
     <article class="master-card"><span>Completed</span><strong id="processing-count-completed">—</strong></article>
     <article class="master-card"><span>With errors</span><strong id="processing-count-errors">—</strong></article>
   </section>
 
-  <section class="master-card">
-    <div class="inbound-card-heading"><div><p class="eyebrow">Processing ledger</p><h2>CRM categorization runs</h2></div><span class="badge" id="processing-list-state">Loading</span></div>
-    <div class="toolbar inbound-processing-toolbar">
-      <input class="input input-bordered input-sm" id="processing-search" placeholder="Search run, batch, contact or JID" />
+  <section class="master-card crm-intake-queue-panel">
+    <div class="inbound-card-heading"><div><p class="eyebrow">Decision queue</p><h2>Complaint candidates waiting for an operator</h2><p>Open a review to confirm complaint numbers, evidence categories and Paperless duplicate results.</p></div><span class="badge" id="processing-list-state">Loading</span></div>
+    <div class="toolbar inbound-processing-toolbar crm-intake-toolbar">
+      <input class="input input-bordered input-sm" id="processing-search" placeholder="Search complainant, complaint number or intake code" />
       <select class="select select-bordered select-sm" id="processing-status"><option value="">All run statuses</option><option value="queued">Queued</option><option value="extracting">Extracting</option><option value="checking_paperless">Checking Paperless</option><option value="completed">Completed</option><option value="completed_with_errors">Completed with errors</option><option value="failed">Failed</option></select>
       <select class="select select-bordered select-sm" id="processing-category"><option value="">All results</option><option value="crm_complaint">Confirmed CRM</option><option value="possible_crm_complaint">Possible CRM</option><option value="eligible">Eligible</option><option value="duplicate_in_paperless">Paperless duplicates</option><option value="needs_review">Needs review</option><option value="failed">Failed items</option></select>
       <span class="toolbar-status" id="processing-result-count">Loading…</span>
     </div>
-    <div class="table-wrap"><table class="table table-sm inbound-file-table"><thead><tr><th>Run</th><th>Contact / batch</th><th>CRM categorization</th><th>Paperless dry-run</th><th>Review</th><th>Status</th><th></th></tr></thead><tbody id="processing-list-items"><tr><td colspan="7" class="empty-cell">Loading processing runs…</td></tr></tbody></table></div>
+    <div class="crm-review-list" id="processing-list-items"><div class="crm-intake-empty"><span>◇</span><h3>Loading review queue…</h3></div></div>
   </section>
 
   <script>
@@ -34,8 +34,25 @@ import CrmLayout from "../../../../layouts/CrmLayout.astro";
     const el=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T;
     const escapeHtml=(v:unknown)=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
     const formatDate=(v:any)=>{if(!v)return"—";const d=new Date(v);return Number.isNaN(d.getTime())?String(v):d.toLocaleString();};
-    let timer:number|undefined, searchTimer:number|undefined;
-    async function load(){const search=el<HTMLInputElement>("processing-search").value.trim(),status=el<HTMLSelectElement>("processing-status").value,category=el<HTMLSelectElement>("processing-category").value;el("processing-list-state").textContent="Loading";const r=await actions.whatsapp.inboundProcessingRuns({search:search||undefined,status:status||undefined,category:category||undefined,limit:100});if(r.error){el("processing-list-items").innerHTML=`<tr><td colspan="7" class="empty-cell">${escapeHtml(r.error.message)}</td></tr>`;el("processing-list-state").textContent="Error";return;}const d=r.data as any,c=d.counts||{},items=d.items||[];el("processing-count-total").textContent=String(c.total||0);el("processing-count-active").textContent=String(c.active||0);el("processing-count-completed").textContent=String(c.completed||0);el("processing-count-errors").textContent=String(c.with_errors||0);el("processing-result-count").textContent=`${items.length} review run(s)`;el("processing-list-state").textContent=items.some((x:any)=>["queued","extracting","checking_paperless"].includes(x.status))?"Live":"Ready";el("processing-list-items").innerHTML=items.length?items.map((x:any)=>`<tr><td><strong>${escapeHtml(x.run_code)}</strong><small>${escapeHtml(formatDate(x.started_at||x.created_at))}<br>${escapeHtml(x.classifier_version)}</small></td><td><strong>${escapeHtml(x.contact_name)}</strong><small>${escapeHtml(x.batch_code)}<br>${escapeHtml(x.contact_identity||"")}</small></td><td><strong>${x.crm_complaints} confirmed · ${x.possible_crm} possible</strong><small>${x.supporting_documents} supporting · ${x.reply_reports} replies/reports · ${x.total_items} total</small></td><td><strong>${x.eligible_items} eligible · ${x.duplicate_items} duplicate</strong><small>${escapeHtml(x.paperless_check_status)}${x.paperless_error?` · ${escapeHtml(x.paperless_error)}`:""}</small></td><td><strong>${x.review_items} need review</strong><small>${x.failed_items} failed</small></td><td><span class="badge processing-status-${escapeHtml(x.status)}">${escapeHtml(x.status)}</span></td><td><a class="btn btn-xs" href="/crm/intake/review/${escapeHtml(x.id)}">Review</a></td></tr>`).join(""):'<tr><td colspan="7" class="empty-cell">No complaint reviews match these filters. Start a new intake or open an intake run.</td></tr>';}
+    let timer:number|undefined,searchTimer:number|undefined;
+
+    function renderReview(x:any){
+      const failureLabel=x.failed_items?String(x.failed_items)+" failed":"No failures";
+      const actionLabel=x.review_items?"Review decisions":"Open completed review";
+      return `<article class="crm-review-card ${x.review_items?"attention":""}"><header><div><span class="crm-run-state ${escapeHtml(x.status)}">${escapeHtml(String(x.status).replaceAll("_"," "))}</span><h3>${escapeHtml(x.contact_name)}</h3><p>${escapeHtml(x.run_code)} · ${escapeHtml(formatDate(x.started_at||x.created_at))}</p></div><div class="crm-review-attention"><strong>${x.review_items}</strong><small>need review</small></div></header><div class="crm-review-breakdown"><div><span>Complaint candidates</span><strong>${x.crm_complaints} confirmed</strong><small>${x.possible_crm} possible · ${x.supporting_documents} supporting</small></div><div><span>Paperless check</span><strong>${x.eligible_items} eligible</strong><small>${x.duplicate_items} duplicate · ${escapeHtml(x.paperless_check_status)}</small></div><div><span>Exceptions</span><strong>${failureLabel}</strong><small>${x.reply_reports} replies or reports</small></div></div><footer><span>${escapeHtml(x.contact_identity||x.batch_code)}</span><a class="btn btn-sm btn-primary" href="/crm/intake/review/${escapeHtml(x.id)}">${actionLabel} →</a></footer></article>`;
+    }
+
+    async function load(){
+      const search=el<HTMLInputElement>("processing-search").value.trim(),status=el<HTMLSelectElement>("processing-status").value,category=el<HTMLSelectElement>("processing-category").value;
+      el("processing-list-state").textContent="Loading";
+      const r=await actions.whatsapp.inboundProcessingRuns({search:search||undefined,status:status||undefined,category:category||undefined,limit:100});
+      if(r.error){el("processing-list-items").innerHTML=`<div class="crm-intake-empty error"><span>!</span><h3>Could not load reviews</h3><p>${escapeHtml(r.error.message)}</p></div>`;el("processing-list-state").textContent="Error";return;}
+      const d=r.data as any,c=d.counts||{},items=d.items||[];
+      el("processing-count-total").textContent=String(c.total||0);el("processing-count-active").textContent=String(c.active||0);el("processing-count-completed").textContent=String(c.completed||0);el("processing-count-errors").textContent=String(c.with_errors||0);
+      el("processing-result-count").textContent=`${items.length} review run(s)`;el("processing-list-state").textContent=items.some((x:any)=>["queued","extracting","checking_paperless"].includes(x.status))?"Classifying":"Ready";
+      el("processing-list-items").innerHTML=items.length?items.map(renderReview).join(""):`<div class="crm-intake-empty"><span>✓</span><h3>No complaint reviews need attention</h3><p>Completed classifications and new candidates will appear here. Start a new intake to capture another conversation.</p><a class="btn btn-sm" href="/crm/intake/">Start new intake</a></div>`;
+    }
+
     function start(){if(timer)clearInterval(timer);void load();timer=window.setInterval(()=>{if(!document.hidden)void load();},5000);}
     el("refresh-processing").addEventListener("click",()=>void load());el("processing-status").addEventListener("change",()=>void load());el("processing-category").addEventListener("change",()=>void load());el("processing-search").addEventListener("input",()=>{if(searchTimer)clearTimeout(searchTimer);searchTimer=window.setTimeout(()=>void load(),300);});window.addEventListener("beforeunload",()=>{if(timer)clearInterval(timer);});start();
   </script>

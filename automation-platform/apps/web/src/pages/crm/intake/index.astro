@@ -11,14 +11,15 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
   <button class="btn btn-sm" id="refresh-page" slot="actions">↻ Refresh</button>
   <CrmIntakeNav active="intake" />
 
-  <div class="notice inbound-coverage-notice">
-    WhatsApp remains the secure capture channel. CRM owns the complaint intake, evidence review and Paperless decision. Every history request is retained as an auditable intake run.
-  </div>
+  <section class="crm-intake-brief">
+    <div><p class="eyebrow">Start here</p><h2>Turn a WhatsApp conversation into reviewable complaint evidence</h2><p>Select the complainant and scope. CRM will preserve the source history, collect supported evidence and keep the intake auditable.</p></div>
+    <div class="crm-intake-boundary"><span>WhatsApp</span><i>captures securely</i><b>→</b><span>CRM</span><i>classifies and reviews</i></div>
+  </section>
 
   <section class="inbound-workspace-grid">
-    <article class="master-card inbound-fetch-card">
+    <article class="master-card inbound-fetch-card crm-intake-builder">
       <div class="inbound-card-heading">
-        <div><p class="eyebrow">Step 1</p><h2>Complainant and conversation scope</h2></div>
+        <div><p class="eyebrow">Capture setup</p><h2>Choose the complainant</h2><p>Search the synchronized WhatsApp directory, then choose how much conversation history CRM should capture.</p></div>
         <span class="badge" id="inbound-bridge-state">Bridge not checked</span>
       </div>
 
@@ -54,9 +55,9 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
       <p class="inbound-form-status" id="inbound-form-status"></p>
     </article>
 
-    <article class="master-card inbound-live-card">
+    <article class="master-card inbound-live-card crm-intake-live-card">
       <div class="inbound-card-heading">
-        <div><p class="eyebrow">Step 2</p><h2>Live intake activity</h2></div>
+        <div><p class="eyebrow">Capture result</p><h2>Intake readiness</h2><p>Once capture starts, the evidence count and durable server progress appear here.</p></div>
         <span class="badge" id="current-batch-status">No intake</span>
       </div>
       <div class="inbound-batch-identity">
@@ -69,12 +70,13 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
         <article><span>Stored</span><strong id="batch-stored">—</strong></article>
         <article><span>Reused</span><strong id="batch-reused">—</strong></article>
       </div>
-      <pre class="inbound-log inbound-fetch-log" id="batch-live-log">Select a complainant and start intake. Activity from the server will appear here.</pre>
+      <div class="crm-intake-live-empty" id="intake-live-empty"><span>↙</span><h3>Choose a complainant to begin</h3><p>CRM will first verify that managed WhatsApp history is available. Starting intake does not create or upload anything in Paperless.</p></div>
+      <details class="crm-intake-activity" id="intake-activity" hidden open><summary>Technical capture activity</summary><pre class="inbound-log inbound-fetch-log" id="batch-live-log">Select a complainant and start intake. Activity from the server will appear here.</pre></details>
     </article>
   </section>
 
-  <section class="master-card inbound-scan-card">
-    <div class="inbound-card-heading"><div><p class="eyebrow">Step 3</p><h2>Captured complaint evidence</h2></div><span class="badge" id="inbound-preview-state">Not scanned</span></div>
+  <section class="master-card inbound-scan-card crm-evidence-preview">
+    <div class="inbound-card-heading"><div><p class="eyebrow">Evidence preview</p><h2>What CRM can use from this conversation</h2><p>Review the captured range and evidence before creating a package or continuing to classification.</p></div><span class="badge" id="inbound-preview-state">Not scanned</span></div>
     <div class="inbound-metrics inbound-scan-metrics">
       <article><span>All files</span><strong id="metric-all">—</strong></article><article><span>Images</span><strong id="metric-images">—</strong></article><article><span>PDFs</span><strong id="metric-pdfs">—</strong></article><article><span>Spreadsheets</span><strong id="metric-sheets">—</strong></article><article><span>Estimated size</span><strong id="metric-size">—</strong></article><article><span>Already archived</span><strong id="metric-archived">—</strong></article>
     </div>
@@ -101,8 +103,8 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
     async function loadBridge(){const r=await actions.whatsapp.inboundHistoryBridgeStatus({contactId:contactId.value});const state=el("inbound-bridge-state"),detail=el("inbound-bridge-detail");if(r.error){bridgeReady=false;state.textContent="Bridge error";detail.textContent=r.error.message;historyButton.disabled=true;return;}const d=r.data as any;bridgeReady=Boolean(d.historyReady??d.ready);state.textContent=bridgeReady?"Managed browser ready":String(d.status||"Unavailable");detail.textContent=bridgeReady?`Managed Brave page ready${d.webVersion?` · Web ${d.webVersion}`:""}.`:d.message||d.error||"Bridge is unavailable.";historyButton.disabled=!bridgeReady;}
     function renderPreview(d:any){latestPreview=d;const c=d.counts||{},s=d.statuses||{};el("metric-all").textContent=String(d.files_found||0);el("metric-images").textContent=String(c.image||0);el("metric-pdfs").textContent=String(c.pdf||0);el("metric-sheets").textContent=String(c.spreadsheet||0);el("metric-size").textContent=formatBytes(d.declared_bytes);el("metric-archived").textContent=String(s.archived||0);el("inbound-preview-state").textContent=d.files_found?"Ready":"No matches";const cov=d.coverage||{};el("inbound-coverage").innerHTML=`<strong>Captured coverage:</strong> ${escapeHtml(formatDate(cov.earliest_message_at))} to ${escapeHtml(formatDate(cov.latest_message_at))}<br><small>${escapeHtml(cov.note||"Historical coverage may be partial.")}</small>`;const items=d.items||[];previewItems.innerHTML=items.length?items.map((x:any)=>`<tr><td>${escapeHtml(formatDate(x.timestamp))}</td><td><strong>${escapeHtml(x.filename)}</strong><small>${escapeHtml(x.caption||"")}</small></td><td><span class="badge">${escapeHtml(x.category)}</span><small>${escapeHtml(x.mime_type||"")}</small></td><td>${escapeHtml(x.chat_scope)}</td><td>${escapeHtml(x.download_status||"metadata_only")}</td></tr>`).join(""):'<tr><td colspan="5" class="empty-cell">No supported files matched.</td></tr>';buildButton.disabled=!d.files_found;}
     async function scan(){try{scanButton.disabled=true;status("Scanning captured files…");const r=await actions.whatsapp.inboundExportPreview(filters());if(r.error)throw new Error(r.error.message);renderPreview(r.data);status(`Scan complete: ${(r.data as any).files_found} file(s).`,"success");}catch(e:any){status(e.message||String(e),"error");}finally{scanButton.disabled=false;}}
-    function resetBatch(){el("current-batch-code").textContent="—";el("current-batch-status").textContent="No intake";["batch-messages","batch-files","batch-stored","batch-reused"].forEach(id=>el(id).textContent="—");el<HTMLAnchorElement>("open-current-batch").hidden=true;log.textContent="Select a complainant and start intake. Activity from the server will appear here.";}
-    function renderBatch(b:any){currentBatchId=b.id;el("current-batch-code").textContent=b.batch_code;el("current-batch-status").textContent=b.status;el("batch-messages").textContent=String(b.messages_discovered||0);el("batch-files").textContent=String(b.files_discovered||0);el("batch-stored").textContent=String(b.files_stored||0);el("batch-reused").textContent=String(b.files_reused||0);const link=el<HTMLAnchorElement>("open-current-batch");link.href=`/crm/intake/batches/${b.id}`;link.hidden=false;}
+    function resetBatch(){el("current-batch-code").textContent="—";el("current-batch-status").textContent="No intake";["batch-messages","batch-files","batch-stored","batch-reused"].forEach(id=>el(id).textContent="—");el<HTMLAnchorElement>("open-current-batch").hidden=true;el("intake-live-empty").hidden=false;el("intake-activity").hidden=true;log.textContent="Select a complainant and start intake. Activity from the server will appear here.";}
+    function renderBatch(b:any){currentBatchId=b.id;el("current-batch-code").textContent=b.batch_code;el("current-batch-status").textContent=b.status;el("batch-messages").textContent=String(b.messages_discovered||0);el("batch-files").textContent=String(b.files_discovered||0);el("batch-stored").textContent=String(b.files_stored||0);el("batch-reused").textContent=String(b.files_reused||0);el("intake-live-empty").hidden=true;el("intake-activity").hidden=false;const link=el<HTMLAnchorElement>("open-current-batch");link.href=`/crm/intake/batches/${b.id}`;link.hidden=false;}
     async function loadBatch(){if(!currentBatchId)return;const [b,e]=await Promise.all([actions.whatsapp.inboundBatch({id:currentBatchId}),actions.whatsapp.inboundBatchEvents({id:currentBatchId,limit:500})]);if(b.data)renderBatch(b.data);if(e.data){const events=(e.data as any).items||[];log.textContent=events.length?events.map((x:any)=>`[${formatDate(x.created_at)}] ${String(x.level).toUpperCase().padEnd(7)} ${x.message}`).join("\n"):"Batch created. Waiting for WhatsApp Web activity…";log.scrollTop=log.scrollHeight;}if(b.data&&terminal.has((b.data as any).status)){stopPoll();await scan();}}
     function startPoll(){stopPoll();void loadBatch();pollTimer=window.setInterval(()=>void loadBatch(),2000);}
     function stopPoll(){if(pollTimer)window.clearInterval(pollTimer);pollTimer=undefined;}

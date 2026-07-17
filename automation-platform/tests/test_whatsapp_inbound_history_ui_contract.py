@@ -14,10 +14,10 @@ APP_LAYOUT = ROOT / "apps/web/src/layouts/AppLayout.astro"
 
 def test_crm_intake_workspace_is_split_into_focused_subnavigation() -> None:
     nav = NAV.read_text(encoding="utf-8")
-    assert "New intake" in nav
+    assert '"intake", "Capture"' in nav
     assert "Intake runs" in nav
-    assert "Review queue" in nav
-    assert "Download packages" in nav
+    assert '"review", "Review"' in nav
+    assert '"packages", "Packages"' in nav
     assert "/crm/intake/batches" in nav
     assert "/crm/intake/review" in nav
 
@@ -39,7 +39,7 @@ def test_crm_owns_complaint_intake_and_whatsapp_retains_capture_health() -> None
 
 def test_history_fetch_console_polls_persisted_batch_activity() -> None:
     source = FETCH_PAGE.read_text(encoding="utf-8")
-    assert "Live intake activity" in source
+    assert "Intake readiness" in source
     assert "actions.whatsapp.inboundBatchEvents" in source
     assert "actions.whatsapp.inboundBatch" in source
     assert "window.setInterval(()=>void loadBatch(),2000)" in source
@@ -63,5 +63,5 @@ def test_fetch_page_requires_managed_visible_profile_bridge() -> None:
     source = FETCH_PAGE.read_text(encoding="utf-8")
     assert 'state.textContent=bridgeReady?"Managed browser ready"' in source
     assert "Managed Brave page ready" in source
-    assert "WhatsApp remains the secure capture channel" in source
-    assert "CRM owns the complaint intake" in source
+    assert "Turn a WhatsApp conversation into reviewable complaint evidence" in source
+    assert "CRM will preserve the source history" in source

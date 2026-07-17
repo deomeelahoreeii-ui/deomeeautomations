@@ -11,7 +11,7 @@ DEV_SCRIPT = ROOT / "scripts/dev.sh"
 
 def test_crm_intake_navigation_exposes_review_workspace() -> None:
     source = NAV.read_text(encoding="utf-8")
-    assert '"review", "Review queue"' in source
+    assert '"review", "Review"' in source
     assert '"/crm/intake/review"' in source
 
 
@@ -31,7 +31,7 @@ def test_batch_page_can_start_dry_run_processing() -> None:
 def test_processing_pages_show_crm_and_paperless_dry_run_contract() -> None:
     list_source = LIST_PAGE.read_text(encoding="utf-8")
     detail_source = DETAIL_PAGE.read_text(encoding="utf-8")
-    assert "Dry-run only" in list_source
+    assert "Safe review workspace" in list_source
     assert "Confirmed CRM" in list_source
     assert "Paperless duplicates" in list_source
     assert "Live classifier log" in detail_source
