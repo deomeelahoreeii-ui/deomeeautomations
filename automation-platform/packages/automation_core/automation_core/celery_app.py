@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from celery import Celery
-from celery.signals import worker_ready
+from celery.signals import heartbeat_sent, worker_ready
 
 from automation_core.config import get_settings
 
@@ -44,6 +44,7 @@ celery_app.conf.update(
     task_routes={
         "antidengue_automation.*": {"queue": "antidengue"},
         "whatsapp_gateway.compile_dispatch_preview": {"queue": "antidengue"},
+        "whatsapp_gateway.compile_dispatch_preview.v2": {"queue": "antidengue-preview-v2"},
         "whatsapp_gateway.send_approved_preview": {"queue": "antidengue"},
         "whatsapp_gateway.build_inbound_export": {"queue": "whatsapp"},
         "whatsapp_gateway.process_inbound_batch": {"queue": "whatsapp"},
@@ -56,12 +57,69 @@ celery_app.conf.update(
 )
 
 
+_registered_worker_name = ""
+
+
+def _consumed_queues(sender) -> list[str]:  # type: ignore[no-untyped-def]
+    try:
+        consumer = getattr(sender, "consumer", sender)
+        queues = consumer.task_consumer.queues
+        if isinstance(queues, dict):
+            return sorted(str(name) for name in queues)
+        return sorted({str(getattr(queue, "name", queue)) for queue in queues})
+    except (AttributeError, TypeError):
+        return []
+
+
 @worker_ready.connect
 def _announce_worker_database(sender=None, **_kwargs):  # type: ignore[no-untyped-def]
     from automation_core.database_identity import database_identity
 
+    global _registered_worker_name
     identity = database_identity()
+    _registered_worker_name = str(getattr(sender, "hostname", "") or "automation-worker")
     print(
         f"Automation Celery worker database={identity['fingerprint']} ({identity['display']})",
         flush=True,
     )
+    try:
+        from sqlmodel import Session
+
+        from automation_core.database import engine
+        from automation_core.worker_runtime import register_worker_runtime
+        from whatsapp_gateway.previews.compiler.capabilities import (
+            PREVIEW_COMPILER_PROTOCOL,
+            compiler_build_id,
+            compiler_capabilities,
+            compiler_fingerprint,
+        )
+
+        with Session(engine) as session:
+            register_worker_runtime(
+                session,
+                worker_name=_registered_worker_name,
+                queues=_consumed_queues(sender),
+                protocols={"antidengue_preview": PREVIEW_COMPILER_PROTOCOL},
+                capabilities=compiler_capabilities(),
+                capability_fingerprint=compiler_fingerprint(),
+                build_id=compiler_build_id(),
+                database_fingerprint=identity["fingerprint"],
+            )
+    except Exception as exc:
+        print(f"Worker capability registration failed: {type(exc).__name__}: {exc}", flush=True)
+
+
+@heartbeat_sent.connect
+def _refresh_worker_runtime(**_kwargs):  # type: ignore[no-untyped-def]
+    if not _registered_worker_name:
+        return
+    try:
+        from sqlmodel import Session
+
+        from automation_core.database import engine
+        from automation_core.worker_runtime import touch_worker_runtime
+
+        with Session(engine) as session:
+            touch_worker_runtime(session, _registered_worker_name)
+    except Exception as exc:
+        print(f"Worker capability heartbeat failed: {type(exc).__name__}: {exc}", flush=True)

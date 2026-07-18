@@ -45,6 +45,8 @@ from whatsapp_gateway.preview_service import (
     delete_preview_records,
 )
 from whatsapp_gateway.schemas import DispatchProfileInput
+from whatsapp_gateway.configuration.dynamic_audiences import active_audience_sources
+from whatsapp_gateway.previews.compiler.capabilities import resolve_planner_capability
 
 def validate_dispatch_profile(
     session: Session,
@@ -100,12 +102,49 @@ def validate_dispatch_profile(
     ).all()
     group_members = [member for member in members if member.target_type == "group"]
     contact_members = [member for member in members if member.target_type == "contact"]
-    if data.enabled and not members:
+    dynamic_sources = active_audience_sources(session, audience_item.id)
+    if data.delivery_granularity == "scope" and not dynamic_sources:
+        raise HTTPException(
+            status_code=422,
+            detail="Per-jurisdiction delivery requires a dynamic Master Data audience",
+        )
+    if data.enabled and not members and not dynamic_sources:
         raise HTTPException(status_code=422, detail="Add at least one target before enabling this profile")
     if data.recipient_channel == "group" and (not group_members or contact_members):
         raise HTTPException(status_code=422, detail="Group profiles require a group-only audience")
-    if data.recipient_channel == "individual" and (not contact_members or group_members):
+    if data.recipient_channel == "individual" and (
+        (not contact_members and not dynamic_sources) or group_members
+    ):
         raise HTTPException(status_code=422, detail="Individual profiles require a contact-only audience")
+    if dynamic_sources and data.recipient_channel != "individual":
+        raise HTTPException(status_code=422, detail="Master Data jurisdiction audiences require an individual profile")
+    if data.enabled and dynamic_sources and recipient_scope and resolve_planner_capability(
+        report_key=report_type.key,
+        audience_kind="dynamic",
+        channel=data.recipient_channel,
+        scope_key=recipient_scope.key,
+        delivery_granularity=data.delivery_granularity,
+    ) is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "unsupported_preview_planner_capability",
+                "message": (
+                    "This report, dynamic audience, channel, and recipient role combination "
+                    "has no registered preview planner."
+                ),
+                "report_key": report_type.key,
+                "audience_kind": "dynamic",
+                "recipient_channel": data.recipient_channel,
+                "scope_key": recipient_scope.key,
+                "delivery_granularity": data.delivery_granularity,
+            },
+        )
+    for source in dynamic_sources:
+        if source.wing_id != data.wing_id:
+            raise HTTPException(status_code=422, detail="Dynamic audience wing must match the profile wing")
+        if recipient_scope and source.recipient_role != recipient_scope.key:
+            raise HTTPException(status_code=422, detail="Dynamic audience role must match the profile recipient scope")
     if data.recipient_channel == "group" and recipient_scope:
         unbound = [
             member

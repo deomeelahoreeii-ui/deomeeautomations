@@ -35,15 +35,10 @@ import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
             <option value="remote_approve">Remote approval</option>
           </select>
 
-          <label class="field-label" for="profile-selector">Routing profiles</label>
-          <details class="routing-profile-selector" id="profile-selector">
-            <summary class="select select-bordered w-full" id="profile-summary">Routing profiles: select profiles</summary>
-            <div class="routing-profile-popover">
-              <div class="schedule-form-row"><input class="input input-bordered" id="profile-search" type="search" placeholder="Search profiles" /><select class="select select-bordered" id="profile-report-filter"><option value="">All reports / wings</option></select></div>
-              <div class="routing-profile-tools"><button class="btn btn-xs btn-ghost" id="profile-select-visible" type="button">Select all visible</button><button class="btn btn-xs btn-ghost" id="profile-clear" type="button">Clear</button><button class="btn btn-xs btn-ghost" id="profile-refresh" type="button">Refresh</button></div>
-              <div id="profile-options" class="routing-profile-options" role="group" aria-label="AntiDengue routing profiles"><p>Open to load profiles…</p></div>
-            </div>
-          </details>
+          <label class="field-label" for="profile-selector-button">Routing profiles</label>
+          <button class="select select-bordered w-full dashboard-profile-trigger" id="profile-selector-button" type="button" aria-haspopup="dialog">
+            <span id="profile-summary">Routing profiles: select profiles</span><span aria-hidden="true">›</span>
+          </button>
           <div id="profile-chips" class="routing-profile-chips" aria-live="polite"></div>
           <p class="field-help" id="profile-help">Selected profiles freeze the audiences, routing, reports and targets into one exact send plan.</p>
 
@@ -102,6 +97,32 @@ import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
     </article>
   </section>
 
+  <dialog class="modal" id="profile-dialog"><div class="modal-box master-modal wide-modal dashboard-profile-modal">
+    <div class="modal-title"><div><p class="eyebrow">Run configuration</p><h2>Select routing profiles</h2><small>Choose the AntiDengue reports and audiences to include in this run.</small></div><button type="button" id="close-profiles">×</button></div>
+    <form class="master-form" id="profile-form">
+      <div class="full profile-picker">
+        <span class="field-label">Enabled AntiDengue profiles *</span>
+        <div class="profile-picker-toolbar">
+          <input class="input input-bordered input-sm" id="profile-search" type="search" placeholder="Search profiles or audiences…" />
+          <select class="select select-bordered select-sm" id="profile-report-filter" aria-label="Report and wing filter"><option value="">All reports / wings</option></select>
+          <button class="btn btn-sm" id="profile-select-visible" type="button">Select visible</button>
+          <button class="btn btn-sm" id="profile-clear" type="button">Clear</button>
+          <button class="btn btn-sm btn-ghost" id="profile-refresh" type="button">Refresh</button>
+          <strong id="modal-profile-count">0 selected</strong>
+        </div>
+        <div id="profile-options" class="profile-options" role="group" aria-label="AntiDengue routing profiles"><p>Loading enabled profiles…</p></div>
+        <small>Each selected profile freezes its current audience, wing, report policy and resolved targets into the run.</small>
+      </div>
+      <div class="preview-compile-explainer full"><strong>What will happen</strong><span>Generate reports → resolve selected routes → validate recipients and wing isolation → prepare one exact reviewed send plan.</span></div>
+      <div class="form-actions"><button class="btn btn-sm" id="cancel-profiles" type="button">Cancel</button><button class="btn btn-sm btn-primary" id="apply-profiles" type="submit">Apply profiles</button></div>
+    </form>
+  </div><form method="dialog" class="modal-backdrop"><button>close</button></form></dialog>
+
+  <style is:global>
+    .dashboard-profile-trigger{display:flex;align-items:center;justify-content:space-between;text-align:left;cursor:pointer}.dashboard-profile-trigger>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dashboard-profile-trigger>span:last-child{font-size:1.15rem;color:#718198}.dashboard-profile-modal{max-width:72rem}.profile-picker-toolbar{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}.profile-picker-toolbar .input{min-width:13rem;flex:1 1 16rem}.profile-picker-toolbar .select{width:auto;min-width:12rem;flex:0 1 16rem}.profile-picker-toolbar strong{margin-left:auto;font-size:.78rem}.profile-options{border:1px solid #d5deea;border-radius:.65rem;max-height:21rem;overflow:auto;margin-top:.55rem;background:#fff}.profile-wing-heading{padding:.55rem .8rem;background:#f3f7fb;border-bottom:1px solid #d5deea;font-size:.72rem;letter-spacing:.07em;text-transform:uppercase;color:#60708a;font-weight:800}.profile-option{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:.75rem;padding:.75rem .8rem;border-bottom:1px solid #e5ebf2;cursor:pointer}.profile-option:hover,.profile-option:focus-within{background:#f6fbfc}.profile-option:last-child{border-bottom:0}.profile-option strong,.profile-option small{display:block}.profile-option strong{font-size:.9rem}.profile-option small{color:#718198;margin-top:.2rem}.preview-compile-explainer{display:flex;align-items:center;gap:1rem;border:1px solid #bcdde4;border-radius:.65rem;background:#eef8fa;padding:.75rem 1rem;color:#617188;font-size:.75rem}.preview-compile-explainer strong{color:#176877;white-space:nowrap}@media(max-width:720px){.profile-picker-toolbar>*{width:100%!important;flex-basis:100%!important}.profile-picker-toolbar strong{margin-left:0}}
+    [data-theme="automation-dark"] .profile-options{border-color:#334155;background:#111827}[data-theme="automation-dark"] .profile-wing-heading{border-color:#334155;background:#172033;color:#cbd5e1}[data-theme="automation-dark"] .profile-option{border-color:#273449}[data-theme="automation-dark"] .profile-option:hover,[data-theme="automation-dark"] .profile-option:focus-within{background:#163244}
+  </style>
+
   <script>
     const API = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
     const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -112,6 +133,7 @@ import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
     let executions: any[] = [];
     let profiles: any[] = [];
     const selectedProfileIds = new Set<string>();
+    const draftProfileIds = new Set<string>();
     let profilesLoaded = false;
     const profileSelectionKey = "antidengue.dashboard.dispatch-profile-ids.v1";
     let hasPersistedProfileSelection = false;
@@ -194,14 +216,26 @@ import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
 
     function renderProfileOptions() {
       const container = el("profile-options"); container.replaceChildren();
-      for (const profile of visibleProfiles()) {
-        const label = document.createElement("label"); label.className = "routing-profile-option";
-        const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.className = "checkbox checkbox-sm"; checkbox.checked = selectedProfileIds.has(profile.id);
-        checkbox.addEventListener("change", () => { checkbox.checked ? selectedProfileIds.add(profile.id) : selectedProfileIds.delete(profile.id); persistProfileSelection(); renderProfileOptions(); renderProfileSummary(); });
-        const text = document.createElement("span"); text.textContent = `${profile.name} · ${profile.audience_name} · ${profile.target_count} target(s)`;
-        label.append(checkbox, text); container.append(label);
+      const visible = visibleProfiles().sort((a, b) => (a.wing_name || "").localeCompare(b.wing_name || "") || a.name.localeCompare(b.name));
+      let currentWing = "";
+      for (const profile of visible) {
+        const wingName = profile.wing_name || "All wings";
+        if (wingName !== currentWing) { currentWing = wingName; const heading = document.createElement("div"); heading.className = "profile-wing-heading"; heading.textContent = currentWing; container.append(heading); }
+        const label = document.createElement("label"); label.className = "profile-option";
+        const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.className = "checkbox checkbox-sm"; checkbox.checked = draftProfileIds.has(profile.id);
+        checkbox.addEventListener("change", () => { checkbox.checked ? draftProfileIds.add(profile.id) : draftProfileIds.delete(profile.id); updateDraftProfileSelection(); });
+        const detail = document.createElement("div"); const title = document.createElement("strong"); title.textContent = profile.name; const meta = document.createElement("small"); meta.textContent = `${profile.report_type_name || "Report"} → ${profile.recipient_scope_name || profile.recipient_channel || "Audience"} · ${profile.target_count} target${profile.target_count === 1 ? "" : "s"} · v${profile.version}`; detail.append(title, meta);
+        label.append(checkbox, detail); container.append(label);
       }
-      if (!container.children.length) container.innerHTML = "<p>No profiles match the filters.</p>";
+      if (!visible.length) container.innerHTML = "<p class=\"empty-state\">No profiles match these filters.</p>";
+      updateDraftProfileSelection();
+    }
+
+    function updateDraftProfileSelection() {
+      el("modal-profile-count").textContent = `${draftProfileIds.size} selected`;
+      const button = el<HTMLButtonElement>("apply-profiles");
+      button.disabled = !draftProfileIds.size;
+      button.textContent = draftProfileIds.size ? `Apply ${draftProfileIds.size} profile${draftProfileIds.size === 1 ? "" : "s"}` : "Select profiles to continue";
     }
 
     function renderProfileSummary() {
@@ -210,6 +244,20 @@ import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
       el("profile-summary").textContent = selected.length ? `Routing profiles: ${selected.length} selected · ${targets} targets` : "Routing profiles: select profiles";
       const chips = el("profile-chips"); chips.replaceChildren();
       for (const profile of selected) { const chip = document.createElement("span"); chip.className = "environment-pill"; chip.textContent = profile.name; chips.append(chip); }
+    }
+
+    async function openProfileDialog() {
+      try {
+        await loadProfiles();
+        draftProfileIds.clear();
+        selectedProfileIds.forEach((id) => draftProfileIds.add(id));
+        el<HTMLInputElement>("profile-search").value = "";
+        el<HTMLSelectElement>("profile-report-filter").value = "";
+        renderProfileOptions();
+        el<HTMLDialogElement>("profile-dialog").showModal();
+      } catch (error) {
+        el("form-message").textContent = error instanceof Error ? error.message : "Could not load routing profiles";
+      }
     }
 
     function renderExecutionList() {
@@ -404,12 +452,15 @@ import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
       el("copy-logs").textContent = "Copied";
       setTimeout(() => el("copy-logs").textContent = "Copy logs", 1200);
     });
-    el("profile-selector").addEventListener("toggle", () => { if ((el("profile-selector") as HTMLDetailsElement).open) void loadProfiles(); });
+    el("profile-selector-button").addEventListener("click", () => void openProfileDialog());
+    el("close-profiles").addEventListener("click", () => el<HTMLDialogElement>("profile-dialog").close());
+    el("cancel-profiles").addEventListener("click", () => el<HTMLDialogElement>("profile-dialog").close());
+    el<HTMLFormElement>("profile-form").addEventListener("submit", (event) => { event.preventDefault(); selectedProfileIds.clear(); draftProfileIds.forEach((id) => selectedProfileIds.add(id)); persistProfileSelection(); renderProfileSummary(); el<HTMLDialogElement>("profile-dialog").close(); });
     el("profile-search").addEventListener("input", renderProfileOptions);
     el("profile-report-filter").addEventListener("change", renderProfileOptions);
-    el("profile-select-visible").addEventListener("click", () => { visibleProfiles().forEach((item) => selectedProfileIds.add(item.id)); persistProfileSelection(); renderProfileOptions(); renderProfileSummary(); });
-    el("profile-clear").addEventListener("click", () => { selectedProfileIds.clear(); persistProfileSelection(); renderProfileOptions(); renderProfileSummary(); });
-    el("profile-refresh").addEventListener("click", () => void loadProfiles(true));
+    el("profile-select-visible").addEventListener("click", () => { visibleProfiles().forEach((item) => draftProfileIds.add(item.id)); renderProfileOptions(); });
+    el("profile-clear").addEventListener("click", () => { draftProfileIds.clear(); renderProfileOptions(); });
+    el("profile-refresh").addEventListener("click", async () => { await loadProfiles(true); for (const id of [...draftProfileIds]) if (!profiles.some((profile) => profile.id === id)) draftProfileIds.delete(id); renderProfileOptions(); });
     restoreProfileSelection();
     void loadProfiles().catch((error) => { el("form-message").textContent = error instanceof Error ? error.message : "Could not load routing profiles"; });
     void refreshAll();

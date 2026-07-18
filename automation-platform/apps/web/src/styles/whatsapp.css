@@ -147,6 +147,26 @@
 .preview-next-card p:last-child { max-width: 650px; margin-bottom: 0; }
 .preview-next-actions { display: flex; flex: 0 0 auto; gap: 7px; }
 
+[data-theme="automation-dark"] .wa-panel,
+[data-theme="automation-dark"] .preview-identity,
+[data-theme="automation-dark"] .preview-metrics article {
+  border-color: #334155;
+  background: #111827;
+}
+[data-theme="automation-dark"] .wa-panel h2,
+[data-theme="automation-dark"] .wa-panel h3,
+[data-theme="automation-dark"] .preview-identity strong,
+[data-theme="automation-dark"] .preview-metrics strong,
+[data-theme="automation-dark"] .preview-facts dd { color: #e5edf7; }
+[data-theme="automation-dark"] .preview-facts div,
+[data-theme="automation-dark"] .preview-tabs { border-color: #334155; }
+[data-theme="automation-dark"] .preview-integrity-card > p,
+[data-theme="automation-dark"] .preview-facts dt,
+[data-theme="automation-dark"] .preview-identity div > span,
+[data-theme="automation-dark"] .preview-identity small,
+[data-theme="automation-dark"] .preview-metrics span,
+[data-theme="automation-dark"] .preview-metrics small { color: #94a3b8; }
+
 .preview-delivery-modal { width: min(1120px, calc(100vw - 28px)); max-width: 1120px; padding: 0; }
 .preview-delivery-modal .modal-title { padding: 18px 20px; }
 .delivery-inspector { display: grid; grid-template-columns: minmax(280px, .75fr) minmax(380px, 1.25fr); min-height: 520px; border-top: 1px solid #e3e8ee; }

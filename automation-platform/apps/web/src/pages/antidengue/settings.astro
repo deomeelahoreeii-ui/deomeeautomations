@@ -8,8 +8,38 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
   page="settings"
 >
   <div class="notice antidengue-safety-notice">
-    Sound preferences are saved only in this browser. They never change report generation, scheduling, validation, or WhatsApp delivery.
+    Operational policy is server-owned and applies to future runs. Sound preferences are saved only in this browser.
   </div>
+
+  <section class="panel notification-settings-panel" style="margin-bottom:1.25rem">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Operational policy</p>
+        <h2>Activity submission deadline</h2>
+        <p>Used by Test Runs, Send Now, schedules, message rendering and generated workbooks.</p>
+      </div>
+      <span class="badge" id="deadline-version">Loading…</span>
+    </div>
+    <div class="master-form" style="margin-top:1rem">
+      <label>
+        <span>Default deadline *</span>
+        <input class="input input-bordered" id="submission-deadline" type="time" required />
+        <small>Schedules inherit this value unless they define an override.</small>
+      </label>
+      <label>
+        <span>Timezone *</span>
+        <select class="select select-bordered" id="deadline-timezone">
+          <option value="Asia/Karachi">Asia/Karachi (Pakistan)</option>
+        </select>
+        <small>The resolved time and timezone are frozen into every new execution.</small>
+      </label>
+      <div class="form-actions full">
+        <span class="form-message" id="deadline-status" role="status"></span>
+        <button class="btn btn-primary" id="save-deadline" type="button">Save deadline policy</button>
+      </div>
+    </div>
+    <p class="field-help" style="margin-top:.75rem">Already-created previews keep their original frozen deadline, messages and attachment checksums.</p>
+  </section>
 
   <section class="notification-settings-grid">
     <article class="panel notification-settings-panel">
@@ -71,10 +101,57 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
     });
     render();
     const api = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+    const deadlineInput = document.getElementById("submission-deadline") as HTMLInputElement;
+    const deadlineTimezone = document.getElementById("deadline-timezone") as HTMLSelectElement;
+    const deadlineStatus = document.getElementById("deadline-status")!;
+    const deadlineVersion = document.getElementById("deadline-version")!;
+    const saveDeadline = document.getElementById("save-deadline") as HTMLButtonElement;
+
+    async function readDeadlinePolicy() {
+      const response = await fetch(`${api}/api/v1/antidengue/deadline-policy`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || "Could not load deadline policy");
+      deadlineInput.value = data.submission_deadline;
+      deadlineTimezone.value = data.timezone;
+      deadlineVersion.textContent = `Version ${data.version}`;
+      deadlineStatus.textContent = `Current message value: ${data.submission_deadline_label}`;
+    }
+
+    saveDeadline.addEventListener("click", async () => {
+      saveDeadline.disabled = true;
+      deadlineStatus.textContent = "Saving…";
+      try {
+        const response = await fetch(`${api}/api/v1/antidengue/deadline-policy`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            submission_deadline: deadlineInput.value,
+            timezone: deadlineTimezone.value,
+            updated_by: "web-operator",
+          }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || "Could not save deadline policy");
+        deadlineVersion.textContent = `Version ${data.version}`;
+        deadlineStatus.textContent = `Saved. Future runs will use ${data.submission_deadline_label}.`;
+      } catch (error) {
+        deadlineStatus.textContent = error instanceof Error ? error.message : "Could not save deadline policy";
+      } finally {
+        saveDeadline.disabled = false;
+      }
+    });
+    void readDeadlinePolicy().catch((error) => {
+      deadlineStatus.textContent = error instanceof Error ? error.message : "Could not load deadline policy";
+    });
     fetch(`${api}/api/v1/antidengue/notification-settings`).then((response) => response.json()).then((data) => {
-      document.getElementById("ntfy-status")!.textContent = data.ntfy_enabled
-        ? `ntfy off-device alerts are active through ${data.ntfy_server}.`
-        : "Browser sound requires an open page and audible computer. Configure ntfy server variables for phone or background push alerts.";
+      const status = document.getElementById("ntfy-status")!;
+      if (data.ntfy_enabled && data.ntfy_reachable) {
+        status.textContent = `ntfy is healthy in ${data.ntfy_exposure_mode} mode at ${data.ntfy_server}; topic: ${data.ntfy_topic}.`;
+      } else if (data.ntfy_enabled) {
+        status.textContent = `ntfy is enabled in ${data.ntfy_exposure_mode} mode but its local origin is not reachable.`;
+      } else {
+        status.textContent = "Browser sound requires an open page and audible computer. Enable the shared ntfy transport and this module's topic for background push alerts.";
+      }
     }).catch(() => { document.getElementById("ntfy-status")!.textContent = "Could not read the optional off-device channel status."; });
   </script>
 </AntiDengueLayout>

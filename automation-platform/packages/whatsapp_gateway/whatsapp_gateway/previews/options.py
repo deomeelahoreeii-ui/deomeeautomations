@@ -32,6 +32,7 @@ from whatsapp_gateway.previews.schemas import (
     ContactLinkInput, PreviewApprovalInput,
 )
 from whatsapp_gateway.previews.serialization import _artifact_dict, _delivery_dict, _digits, _with_approval
+from whatsapp_gateway.configuration.dynamic_audiences import resolve_dynamic_audience
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp-previews"])
 
@@ -95,6 +96,11 @@ def preview_options(session: Session = Depends(get_session)) -> dict[str, Any]:
                     WhatsAppAudienceMember.enabled.is_(True),
                 )
             ) or 0
+            target_count += len(resolve_dynamic_audience(
+                session, audience_id=profile.audience_id,
+                account=session.get(WhatsAppAccount, profile.account_id),
+                granularity=profile.delivery_granularity,
+            ))
             profiles.append(
                 {
                     "id": str(profile.id),
@@ -110,6 +116,7 @@ def preview_options(session: Session = Depends(get_session)) -> dict[str, Any]:
                     "recipient_channel": profile.recipient_channel,
                     "recipient_scope_name": recipient_scope.name if recipient_scope else "Legacy / unscoped",
                     "target_count": target_count,
+                    "delivery_granularity": profile.delivery_granularity,
                 }
             )
     return {"runs": run_options, "profiles": profiles}

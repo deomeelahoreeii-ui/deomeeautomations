@@ -6,6 +6,8 @@ from fastapi import APIRouter
 from whatsapp_gateway.api_common import *
 from whatsapp_gateway.configuration.audiences import *
 from whatsapp_gateway.configuration.audiences import router as _audiences_router
+from whatsapp_gateway.configuration.audience_sources import *
+from whatsapp_gateway.configuration.audience_sources import router as _audience_sources_router
 from whatsapp_gateway.configuration.catalog import *
 from whatsapp_gateway.configuration.catalog import router as _catalog_router
 from whatsapp_gateway.configuration.profiles import *
@@ -25,6 +27,7 @@ from whatsapp_gateway.gateway.connection import router as _connection_router
 
 _CHILD_ROUTERS = (
     _audiences_router,
+    _audience_sources_router,
     _catalog_router,
     _profiles_router,
     _directory_router,

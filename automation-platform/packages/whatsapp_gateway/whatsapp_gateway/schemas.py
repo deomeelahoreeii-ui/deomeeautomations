@@ -139,6 +139,7 @@ class DispatchProfileInput(BaseModel):
     recipient_channel: Literal["individual", "group"] = "group"
     wing_id: uuid.UUID | None = None
     delivery_mode: Literal["groups", "individuals"] = "groups"
+    delivery_granularity: Literal["recipient", "scope"] = "recipient"
     require_approval: bool = True
     fallback_policy: Literal["none", "same_scope"] = "none"
     max_retries: int = PydanticField(default=5, ge=0, le=10)

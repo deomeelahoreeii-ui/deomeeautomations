@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session, col, func, select
 
 from antidengue_automation.activity_rule_schemas import (
@@ -19,40 +19,7 @@ from antidengue_automation.activity_rules import (
 from antidengue_automation.models import AntiDengueActivityRule
 from automation_core.database import get_session
 from automation_core.time import utcnow
-from antidengue_automation.hotspot_routing import (
-    configure_hotspot_routes,
-    hotspot_routing_status,
-    link_hotspot_routes,
-)
-
 router = APIRouter(prefix="/api/v1/antidengue/activity-rules", tags=["antidengue-activity-rules"])
-
-
-@router.get("/routing")
-def read_hotspot_routing(session: Session = Depends(get_session)) -> dict:
-    return hotspot_routing_status(session)
-
-
-@router.post("/routing/link")
-def reuse_dormant_routes_for_hotspot(
-    source_profile_ids: list[uuid.UUID] = Body(default=[]),
-    session: Session = Depends(get_session),
-) -> dict:
-    try:
-        return link_hotspot_routes(session, source_profile_ids)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.put("/routing")
-def update_hotspot_routing(
-    source_profile_ids: list[uuid.UUID] = Body(default=[]),
-    session: Session = Depends(get_session),
-) -> dict:
-    try:
-        return configure_hotspot_routes(session, source_profile_ids)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _get_rule(session: Session, rule_id: uuid.UUID) -> AntiDengueActivityRule:

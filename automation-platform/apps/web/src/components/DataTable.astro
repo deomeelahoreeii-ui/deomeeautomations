@@ -62,7 +62,10 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
     private sorting: SortingState = [];
 
     connectedCallback() {
-      this.pagination.pageSize = Number(this.dataset.pageSize || 10);
+      this.pagination = {
+        ...this.pagination,
+        pageSize: Number(this.dataset.pageSize || 10),
+      };
       this.querySelector<HTMLElement>("[data-first-page]")?.addEventListener("click", () => this.goTo(0));
       this.querySelector<HTMLElement>("[data-previous-page]")?.addEventListener("click", () => this.goTo(this.pagination.pageIndex - 1));
       this.querySelector<HTMLElement>("[data-next-page]")?.addEventListener("click", () => this.goTo(this.pagination.pageIndex + 1));
@@ -86,7 +89,7 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
         },
         onSortingChange: (updater) => {
           this.sorting = resolveUpdater(updater, this.sorting);
-          this.pagination.pageIndex = 0;
+          this.pagination = { ...this.pagination, pageIndex: 0 };
           this.syncTable();
           this.render();
         },
@@ -101,7 +104,7 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
 
     async refresh(resetPage = false) {
       if (!this.config || !this.table) return;
-      if (resetPage) this.pagination.pageIndex = 0;
+      if (resetPage) this.pagination = { ...this.pagination, pageIndex: 0 };
       this.errorMessage = "";
       let caught: unknown;
       if (this.config.manualPagination && this.config.loadPage) {
@@ -115,7 +118,9 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
           this.rows = result.rows;
           this.total = Math.max(0, Number(result.total));
           const lastPage = Math.max(0, this.pageCount() - 1);
-          if (this.pagination.pageIndex > lastPage) this.pagination.pageIndex = lastPage;
+          if (this.pagination.pageIndex > lastPage) {
+            this.pagination = { ...this.pagination, pageIndex: lastPage };
+          }
         } catch (error) {
           caught = error;
           this.rows = [];
@@ -164,7 +169,9 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
     private async goTo(pageIndex: number) {
       const next = Math.max(0, Math.min(pageIndex, this.pageCount() - 1));
       if (next === this.pagination.pageIndex) return;
-      this.pagination.pageIndex = next;
+      // TanStack memoizes its row models by state object identity. Keep pagination
+      // immutable so client-side tables recalculate their visible rows.
+      this.pagination = { ...this.pagination, pageIndex: next };
       await this.refresh(false);
     }
 

@@ -9,28 +9,7 @@ from antidengue_automation.models import AntiDengueSimpleActivityRule
 from antidengue_automation.simple_activity_rules import SimpleActivityRuleInput, preview_rule, rule_dict
 from automation_core.database import get_session
 from automation_core.time import utcnow
-from antidengue_automation.simple_activity_routing import (
-    configure_simple_activity_routes, link_simple_activity_routes, simple_activity_routing_status,
-)
-
 router = APIRouter(prefix="/api/v1/antidengue/simple-activity-rules", tags=["antidengue-simple-activity-rules"])
-
-
-@router.get("/routing")
-def routing(session: Session = Depends(get_session)) -> dict:
-    return simple_activity_routing_status(session)
-
-
-@router.post("/routing/link")
-def link_routing(source_profile_ids: list[uuid.UUID] = [], session: Session = Depends(get_session)) -> dict:
-    try: return link_simple_activity_routes(session, source_profile_ids)
-    except ValueError as exc: raise HTTPException(422, str(exc)) from exc
-
-
-@router.put("/routing")
-def configure_routing(source_profile_ids: list[uuid.UUID] = [], session: Session = Depends(get_session)) -> dict:
-    try: return configure_simple_activity_routes(session, source_profile_ids)
-    except ValueError as exc: raise HTTPException(422, str(exc)) from exc
 
 
 class PreviewInput(SimpleActivityRuleInput):

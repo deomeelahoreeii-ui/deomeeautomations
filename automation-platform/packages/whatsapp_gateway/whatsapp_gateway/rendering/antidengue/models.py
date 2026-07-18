@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 RENDERER_KEY = "antidengue.tehsil_dormant.v1"
 WING_RENDERER_KEY = "antidengue.wing_dormant.v1"
+MARKAZ_RENDERER_KEY = "antidengue.aeo_markaz_dormant.v1"
 PAKISTAN_TIME = ZoneInfo("Asia/Karachi")
 REQUIRED_COLUMNS = {"school emis", "school name"}
 
@@ -34,6 +35,11 @@ class RenderedTehsilDormantReport:
     attachment_paths: list[Path] = field(default_factory=list)
     source_artifact_id: int | None = None
     source_artifact_sha256: str = ""
+
+
+@dataclass
+class RenderedMarkazDormantReport(RenderedTehsilDormantReport):
+    markaz_ids: list[str] = field(default_factory=list)
 
 
 @dataclass

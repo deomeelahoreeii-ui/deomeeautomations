@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import or_, select
 
-from automation_core.config import get_settings
 from automation_core.time import utcnow
 from master_data.models import Tehsil
 from whatsapp_gateway.models import (
@@ -107,7 +106,7 @@ def build_zero_result_plan(
         "report_date": business_date.isoformat(),
         "checked_at": business_time.strftime("%I:%M %p").lstrip("0"),
         "group_name": directory_group.name,
-        "submission_deadline": get_settings().antidengue_submission_deadline,
+        "submission_deadline": ctx.deadline.label if ctx.deadline else "12:30 PM",
     }
     missing = sorted({key for key in PLACEHOLDER_RE.findall(template.body) if key not in values})
     if missing:

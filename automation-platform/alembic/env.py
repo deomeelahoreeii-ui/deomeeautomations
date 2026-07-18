@@ -19,6 +19,7 @@ from crm_domain.models import (
 )
 from antidengue_automation.models import (
     AntiDengueActivityRule,
+    AntiDengueDeadlinePolicy,
     AntiDengueSchedule,
     AntiDengueScheduleEvent,
     AntiDengueScheduleExecution,

@@ -23,14 +23,17 @@ from whatsapp_gateway.previews.compiler.preview_record import configuration_snap
 
 def compile_antidengue_preview(
     session: Session, *, source_job_id: uuid.UUID, dispatch_profile_id: uuid.UUID | None = None,
-    dispatch_profile_ids: list[uuid.UUID] | None = None, created_by: str = "web"
+    dispatch_profile_ids: list[uuid.UUID] | None = None, created_by: str = "web",
+    compiler_runtime: dict | None = None, deadline_snapshot: dict | None = None,
 ) -> WhatsAppDispatchPreview:
     profile_ids = _profile_ids(dispatch_profile_ids, dispatch_profile_id)
     if len(profile_ids) > 1:
-        return _compile_many(session, source_job_id, profile_ids, created_by)
-    ctx = load_compile_context(session, source_job_id=source_job_id, dispatch_profile_id=profile_ids[0])
+        return _compile_many(session, source_job_id, profile_ids, created_by, compiler_runtime, deadline_snapshot)
+    ctx = load_compile_context(session, source_job_id=source_job_id, dispatch_profile_id=profile_ids[0],
+                               deadline_snapshot=deadline_snapshot)
     plan_result = build_dispatch_plan(ctx)
     snapshot = configuration_snapshot(ctx)
+    snapshot["compiler_runtime"] = dict(compiler_runtime or {})
     preview = create_preview_record(ctx, batch_issues=plan_result.batch_issues, snapshot=snapshot, created_by=created_by)
     artifact_store = ArtifactSnapshotStore(ctx, preview, plan_result.dispatch_plan)
     artifact_store.snapshot_all()
@@ -46,21 +49,31 @@ def _profile_ids(values: list[uuid.UUID] | None, primary: uuid.UUID | None) -> l
 
 
 def _compile_many(
-    session: Session, source_job_id: uuid.UUID, profile_ids: list[uuid.UUID], created_by: str
+    session: Session, source_job_id: uuid.UUID, profile_ids: list[uuid.UUID], created_by: str,
+    compiler_runtime: dict | None, deadline_snapshot: dict | None,
 ) -> WhatsAppDispatchPreview:
     previews = [
-        _compile_one(session, source_job_id=source_job_id, dispatch_profile_id=value, created_by=created_by)
+        _compile_one(
+            session, source_job_id=source_job_id, dispatch_profile_id=value,
+            created_by=created_by, compiler_runtime=compiler_runtime,
+            deadline_snapshot=deadline_snapshot,
+        )
         for value in profile_ids
     ]
     return _merge_profile_previews(session, previews)
 
 
 def _compile_one(
-    session: Session, *, source_job_id: uuid.UUID, dispatch_profile_id: uuid.UUID, created_by: str
+    session: Session, *, source_job_id: uuid.UUID, dispatch_profile_id: uuid.UUID,
+    created_by: str, compiler_runtime: dict | None, deadline_snapshot: dict | None,
 ) -> WhatsAppDispatchPreview:
-    ctx = load_compile_context(session, source_job_id=source_job_id, dispatch_profile_id=dispatch_profile_id)
+    ctx = load_compile_context(
+        session, source_job_id=source_job_id, dispatch_profile_id=dispatch_profile_id,
+        deadline_snapshot=deadline_snapshot,
+    )
     plan_result = build_dispatch_plan(ctx)
     snapshot = configuration_snapshot(ctx)
+    snapshot["compiler_runtime"] = dict(compiler_runtime or {})
     preview = create_preview_record(ctx, batch_issues=plan_result.batch_issues, snapshot=snapshot, created_by=created_by)
     artifact_store = ArtifactSnapshotStore(ctx, preview, plan_result.dispatch_plan)
     artifact_store.snapshot_all()
@@ -116,8 +129,8 @@ def _merge_profile_previews(
         WhatsAppDispatchPreviewDelivery.preview_id == primary.id
     ).order_by(WhatsAppDispatchPreviewDelivery.sequence)))
 
-    exact_seen: dict[tuple[str, str, str, tuple[str, ...]], WhatsAppDispatchPreviewDelivery] = {}
-    by_target_report: dict[tuple[str, str, str], list[WhatsAppDispatchPreviewDelivery]] = {}
+    exact_seen: dict[tuple[str, str, tuple[str, ...], str, tuple[str, ...]], WhatsAppDispatchPreviewDelivery] = {}
+    by_target_report: dict[tuple[str, str, str, tuple[str, ...]], list[WhatsAppDispatchPreviewDelivery]] = {}
     retained: list[WhatsAppDispatchPreviewDelivery] = []
     for delivery in deliveries:
         checksums = tuple(
@@ -126,13 +139,16 @@ def _merge_profile_previews(
             if item in artifacts_by_id
         )
         report_type_id = str((delivery.routing_snapshot or {}).get("report_type_id") or "")
-        exact_key = (delivery.target_jid, report_type_id, delivery.message, checksums)
+        route_identity = tuple(sorted(str(value) for value in (
+            (delivery.routing_snapshot or {}).get("route_identity") or []
+        )))
+        exact_key = (delivery.target_jid, report_type_id, route_identity, delivery.message, checksums)
         if exact_key in exact_seen:
             session.delete(delivery)
             continue
         exact_seen[exact_key] = delivery
         by_target_report.setdefault(
-            (delivery.target_type, delivery.target_jid, report_type_id), []
+            (delivery.target_type, delivery.target_jid, report_type_id, route_identity), []
         ).append(delivery)
         retained.append(delivery)
 
@@ -158,6 +174,7 @@ def _merge_profile_previews(
         delivery.idempotency_key = hashlib.sha256(json.dumps({
             "preview": str(primary.id), "target": delivery.target_jid,
             "report_type_id": str((delivery.routing_snapshot or {}).get("report_type_id") or ""),
+            "route_identity": (delivery.routing_snapshot or {}).get("route_identity") or [],
             "message": delivery.message, "attachments": checksum_key,
         }, sort_keys=True).encode()).hexdigest()
         session.add(delivery)

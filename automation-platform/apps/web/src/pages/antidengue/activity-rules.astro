@@ -8,7 +8,10 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
   description="Configure evidence-based rules that place portal activities into human review."
   page="activity-rules"
 >
-  <button class="btn btn-sm btn-primary" id="add-rule" slot="actions">＋ Add rule</button>
+  <div class="page-actions" slot="actions">
+    <a class="btn btn-sm" href="/antidengue/routing?view=hotspot">Manage routing profiles →</a>
+    <button class="btn btn-sm btn-primary" id="add-rule">＋ Add rule</button>
+  </div>
 
   <div class="notice">
     <strong>Automatic matches are not confirmed fake activities.</strong><br />
@@ -28,19 +31,6 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       <p><code>&gt; 50</code> excludes exactly 50 metres. <code>≥ 50</code> includes it. Time ranges use <code>[start, end)</code> and can cross midnight.</p>
     </aside>
   </section>
-
-  <article class="panel" style="margin-top:1.25rem;padding:1.25rem">
-    <div class="panel-heading">
-      <div>
-        <p class="eyebrow">Shared WhatsApp routing</p>
-        <h2>Reuse dormant-report audiences</h2>
-        <p>Hotspot-distance deliveries use the same authorized groups, hierarchy scopes and connection, with their own message and Excel report.</p>
-      </div>
-      <button class="btn btn-sm btn-primary" id="save-hotspot-routes">Save delivery routes</button>
-    </div>
-    <div id="hotspot-routing-list" style="display:grid;gap:.65rem;margin-top:1rem"></div>
-    <p class="field-help" id="hotspot-routing-summary">Loading routing configuration…</p>
-  </article>
 
   <article class="master-card" style="margin-top:1.25rem">
     <DataTable id="rules-table" pageSize={10} emptyText="No activity rules are configured. Add a draft and test it against the latest hotspot report." />
@@ -106,36 +96,6 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
     const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
     let rules: any[] = [];
     let previewConfigured = false;
-    let routingItems: any[] = [];
-
-    async function loadHotspotRouting() {
-      const result = await actions.antidengue.hotspotRouting();
-      if (result.error) throw result.error;
-      const data = result.data as any;
-      routingItems = data.items || [];
-      const container = el("hotspot-routing-list");
-      container.replaceChildren();
-      for (const item of routingItems) {
-        const label = document.createElement("label");
-        label.style.cssText = "display:flex;align-items:center;gap:.7rem;padding:.7rem .8rem;border:1px solid var(--border-color);border-radius:.55rem";
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.className = "checkbox checkbox-sm hotspot-route-choice";
-        checkbox.value = item.source_profile_id;
-        checkbox.checked = item.enabled;
-        const text = document.createElement("span");
-        text.textContent = item.enabled
-          ? `${item.source_profile_name} — included in hotspot-distance runs`
-          : `${item.source_profile_name} — excluded from hotspot-distance runs`;
-        label.append(checkbox, text);
-        label.style.cursor = "pointer";
-        container.append(label);
-      }
-      if (!routingItems.length) {
-        container.textContent = "No enabled AntiDengue group routes are available.";
-      }
-      el("hotspot-routing-summary").textContent = `${data.enabled_count} of ${data.eligible_count} delivery routes enabled. Checked routes are included together in Test Run, Send now and scheduled runs.`;
-    }
 
     function formPayload() {
       return {
@@ -220,17 +180,6 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
           return actionButtons(buttons);
         } },
       ],
-    });
-
-    await loadHotspotRouting();
-    el("save-hotspot-routes").addEventListener("click", async () => {
-      const source_profile_ids = Array.from(document.querySelectorAll<HTMLInputElement>(".hotspot-route-choice:checked")).map((item) => item.value);
-      const result = await actions.antidengue.configureHotspotRoutes({ source_profile_ids });
-      if (result.error) await showError(result.error);
-      else {
-        await showSuccess("Delivery routes saved", `${(result.data as any).enabled_count} hotspot-distance route(s) will be included in each AntiDengue run.`);
-        await loadHotspotRouting();
-      }
     });
 
     el("add-rule").addEventListener("click", () => openForm());

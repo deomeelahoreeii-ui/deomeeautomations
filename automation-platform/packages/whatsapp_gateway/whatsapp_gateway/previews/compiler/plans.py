@@ -4,8 +4,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from whatsapp_gateway.previews.compiler.context import CompileContext
-from whatsapp_gateway.previews.compiler.errors import issue
-from whatsapp_gateway.previews.compiler.plan_members import plan_contact_member, plan_group_member
+from whatsapp_gateway.previews.compiler.errors import IssueCollector, issue
+from whatsapp_gateway.previews.compiler.plan_members import (
+    plan_contact_member, plan_group_member,
+)
+from whatsapp_gateway.previews.compiler.dynamic_plan_members import plan_dynamic_contact_member
+from whatsapp_gateway.configuration.dynamic_audiences import ResolvedAudienceMember
 
 @dataclass(slots=True)
 class DispatchPlanResult:
@@ -15,21 +19,71 @@ class DispatchPlanResult:
 
 
 def build_dispatch_plan(ctx: CompileContext) -> DispatchPlanResult:
-    batch_issues: list[dict[str, Any]] = []
+    batch_issues = IssueCollector()
     dispatch_plan: list[dict[str, Any]] = []
     native_renderer_used = False
-    for member in ctx.members:
+    eligible_members = [
+        member for member in ctx.members
+        if not (ctx.profile.recipient_channel == "group" and member.target_type != "group")
+        and not (ctx.profile.recipient_channel == "individual" and member.target_type != "contact")
+    ]
+    delivery_granularity = getattr(ctx.profile, "delivery_granularity", "recipient")
+    scope_members = [
+        member for member in eligible_members
+        if isinstance(member, ResolvedAudienceMember)
+    ] if delivery_granularity == "scope" else []
+    invalid_scope_members = [member for member in scope_members if len(member.scope_ids) != 1]
+    if invalid_scope_members:
+        batch_issues.add_batch(
+            issue(
+                "invalid_scope_delivery_cardinality", "blocked",
+                "Per-jurisdiction profiles require exactly one active Master Data scope per resolved route.",
+            ),
+            affected_count=len(invalid_scope_members),
+            affected_entity_type="jurisdiction route",
+        )
+    if ctx.planner_capability is None and any(
+        isinstance(member, ResolvedAudienceMember) for member in eligible_members
+    ):
+        batch_issues.add_batch(
+            issue(
+                "profile_audience_capability_mismatch", "blocked",
+                f"{ctx.report_type.name} is not registered for this dynamic audience, channel and recipient scope.",
+            ),
+            affected_count=len(eligible_members),
+            affected_entity_type="recipient",
+        )
+        return DispatchPlanResult([], list(batch_issues), True)
+    for member in eligible_members:
         if ctx.profile.recipient_channel == "group" and member.target_type != "group":
             continue
         if ctx.profile.recipient_channel == "individual" and member.target_type != "contact":
             continue
-        if member.target_type == "group":
-            plan, native = plan_group_member(ctx, member, batch_issues)
-            native_renderer_used = native_renderer_used or native
-        else:
-            plan = plan_contact_member(ctx, member, batch_issues)
+        affected_key = str(getattr(member, "id", ""))
+        affected_label = str(getattr(member, "route_scope_label", "") or getattr(member, "target_key", "") or affected_key)
+        entity_type = "AEO recipient" if isinstance(member, ResolvedAudienceMember) else member.target_type
+        with batch_issues.affecting(key=affected_key, label=affected_label, entity_type=entity_type):
+            if member.target_type == "group":
+                plan, native = plan_group_member(ctx, member, batch_issues)
+                native_renderer_used = native_renderer_used or native
+            elif isinstance(member, ResolvedAudienceMember):
+                plan, native = plan_dynamic_contact_member(ctx, member, batch_issues)
+                native_renderer_used = native_renderer_used or native
+            else:
+                plan = plan_contact_member(ctx, member, batch_issues)
         if plan is not None:
             dispatch_plan.append(plan)
+
+    if scope_members:
+        planned_scope_routes = sum(bool(plan.get("dynamic_audience")) for plan in dispatch_plan)
+        if planned_scope_routes != len(scope_members):
+            batch_issues.append(issue(
+                "scope_delivery_cardinality_mismatch", "blocked",
+                "The compiler did not prepare one delivery for every resolved Master Data jurisdiction.",
+                expected_scope_routes=len(scope_members),
+                planned_scope_routes=planned_scope_routes,
+                missing_scope_routes=max(0, len(scope_members) - planned_scope_routes),
+            ))
 
     quality = ctx.summary.get("quality_gate") if isinstance(ctx.summary, dict) else {}
     quality_issues = (quality.get("issues") or []) if isinstance(quality, dict) else []
@@ -75,4 +129,4 @@ def build_dispatch_plan(ctx: CompileContext) -> DispatchPlanResult:
         else:
             batch_issues.append(issue("empty_dispatch_plan", "blocked",
                 "The dry run did not produce an exact WhatsApp dispatch plan."))
-    return DispatchPlanResult(dispatch_plan, batch_issues, native_renderer_used)
+    return DispatchPlanResult(dispatch_plan, list(batch_issues), native_renderer_used)

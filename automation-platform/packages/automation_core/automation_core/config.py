@@ -39,11 +39,22 @@ class Settings(BaseSettings):
     antidengue_submission_deadline: str = "12:30 PM"
     antidengue_scheduler_enabled: bool = True
     antidengue_scheduler_interval_seconds: int = 10
+
+    # Shared ntfy transport. Publishing and subscriber URLs are deliberately
+    # separate: containers can publish over their private network while phones
+    # use localhost, LAN, Tailscale, or Cloudflare without application changes.
+    ntfy_enabled: bool = False
+    ntfy_port: int = 2586
+    ntfy_publish_url: str = "http://127.0.0.1:2586"
+    ntfy_public_base_url: str = "http://localhost:2586"
+    ntfy_exposure_mode: str = "local"
+    ntfy_token: str = ""
+    ntfy_timeout_seconds: float = 5.0
+
+    # Module-level routing switch. Other modules can add their own topic field
+    # while sharing the transport above.
     antidengue_ntfy_enabled: bool = False
-    antidengue_ntfy_base_url: str = "https://ntfy.sh"
-    antidengue_ntfy_topic: str = ""
-    antidengue_ntfy_token: str = ""
-    antidengue_ntfy_timeout_seconds: float = 5.0
+    antidengue_ntfy_topic: str = "automation-antidengue"
 
     artifact_root: Path = Path("./data/artifacts")
     source_file_max_bytes: int = 50 * 1024 * 1024
@@ -113,6 +124,30 @@ class Settings(BaseSettings):
             return None
 
         return value
+
+    @field_validator("ntfy_exposure_mode")
+    @classmethod
+    def validate_ntfy_exposure_mode(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"local", "lan", "tailscale", "cloudflare"}
+        if normalized not in allowed:
+            raise ValueError(f"ntfy_exposure_mode must be one of: {', '.join(sorted(allowed))}")
+        return normalized
+
+    @field_validator("ntfy_port")
+    @classmethod
+    def validate_ntfy_port(cls, value: int) -> int:
+        if not 1 <= value <= 65535:
+            raise ValueError("ntfy_port must be between 1 and 65535")
+        return value
+
+    @field_validator("ntfy_publish_url", "ntfy_public_base_url")
+    @classmethod
+    def normalize_ntfy_url(cls, value: str) -> str:
+        normalized = value.strip().rstrip("/")
+        if not normalized.startswith(("http://", "https://")):
+            raise ValueError("ntfy URLs must start with http:// or https://")
+        return normalized
 
     @property
     def crm_root(self) -> Path:

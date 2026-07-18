@@ -13,6 +13,7 @@ import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
   <div class="toolbar">
     <input class="input input-bordered input-sm search-input" id="school-search" placeholder="Search EMIS, school, or head…" />
     <select class="select select-bordered select-sm" id="school-tehsil"><option value="">All tehsils</option></select>
+    <select class="select select-bordered select-sm" id="school-markaz"><option value="">All markazes</option></select>
     <select class="select select-bordered select-sm" id="school-status">
       <option value="true">Active schools</option>
       <option value="false">Archived schools</option>
@@ -62,6 +63,8 @@ import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
     let options: any = {};
     let schools: any[] = [];
     let searchTimer: number | undefined;
+    const initialTehsilRef = new URLSearchParams(window.location.search).get("tehsil_ref") || "";
+    const initialMarkazRef = new URLSearchParams(window.location.search).get("markaz_ref") || "";
     const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
     const escapeHtml = (value: unknown) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]!));
 
@@ -94,12 +97,16 @@ import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
       fillSelect("tehsil-ref", options.tehsils, "Select tehsil");
       fillSelect("markaz-ref", options.markazes, "Select markaz");
       fillSelect("school-tehsil", options.tehsils, "All tehsils");
+      fillSelect("school-markaz", options.markazes, "All markazes");
+      el<HTMLSelectElement>("school-tehsil").value = initialTehsilRef;
+      el<HTMLSelectElement>("school-markaz").value = initialMarkazRef;
     }
 
     async function loadSchoolPage(pageIndex: number, pageSize: number) {
       const result = await actions.masterData.schools({
         search: el<HTMLInputElement>("school-search").value,
         tehsilRef: el<HTMLSelectElement>("school-tehsil").value,
+        markazRef: el<HTMLSelectElement>("school-markaz").value,
         active: el<HTMLSelectElement>("school-status").value === "true",
         page: pageIndex + 1,
         pageSize,
@@ -216,6 +223,7 @@ import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
     el("tehsil-ref").addEventListener("change", () => refreshMarkazes());
     el("wing-ref").addEventListener("change", () => refreshMarkazes());
     el("school-tehsil").addEventListener("change", () => void table.refresh(true));
+    el("school-markaz").addEventListener("change", () => void table.refresh(true));
     el("school-status").addEventListener("change", () => void table.refresh(true));
     el("school-search").addEventListener("input", () => { window.clearTimeout(searchTimer); searchTimer = window.setTimeout(() => void table.refresh(true), 250); });
   </script>

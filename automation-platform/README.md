@@ -28,11 +28,11 @@ Start RabbitMQ, then use three terminals:
 
 ```bash
 # API
-/home/ahmad/.local/bin/uv run uvicorn automation_api.main:app --reload --port 8020
+/home/ahmad/.local/bin/uv run uvicorn automation_api.main:app --reload --timeout-graceful-shutdown 5 --port 8020
 
 # Automation worker (AntiDengue, WhatsApp, and CRM queues)
 /home/ahmad/.local/bin/uv run celery -A automation_worker.main.celery_app worker \
-  --queues=antidengue,crm --concurrency=1 --hostname=automation@%h \
+  --queues=antidengue,antidengue-preview-v2,crm,whatsapp --concurrency=1 --hostname=automation@%h \
   --without-gossip --without-mingle --loglevel=INFO
 
 # Astro
@@ -40,6 +40,66 @@ cd apps/web && npm run dev -- --host 0.0.0.0 --port 4321
 ```
 
 Open <http://localhost:4321>.
+
+## Local ntfy notifications
+
+The first ntfy stage runs as a private Compose service with a persistent message
+cache and deny-by-default access control. Application publishing and subscriber
+access use different URLs, so adding Tailscale or Cloudflare later does not change
+notification-producing code.
+
+Open <http://localhost:4321/notifications/> for the notification control plane.
+It shows origin health, exposure mode, authentication state, module channels,
+durable delivery attempts and retry errors, and provides a confirmed test-delivery
+action.
+
+The checked-in defaults are disabled and localhost-only. Set `NTFY_ENABLED=true`
+and `ANTIDENGUE_NTFY_ENABLED=true` in `.env`, then start and provision the service:
+
+```bash
+./scripts/ntfy.sh start
+./scripts/ntfy.sh provision automation automation-antidengue
+```
+
+Put the generated `tk_...` value in `NTFY_TOKEN`, restart application processes,
+and verify publishing:
+
+```bash
+./scripts/ntfy.sh restart
+./scripts/ntfy.sh test
+./scripts/ntfy.sh status
+```
+
+Subscribe locally at <http://localhost:2586/automation-antidengue> and use the
+same token as the topic credential. The operational controls are `enable`,
+`disable`, `start`, `stop`, `restart`, `status`, and `test`. `enable` and `disable`
+update the publishing switch as well as the container; `stop` only stops the server
+and leaves the configured publishing preference unchanged.
+
+Switch the origin atomically instead of editing related variables by hand:
+
+```bash
+./scripts/ntfy.sh mode local
+./scripts/ntfy.sh mode lan 192.168.1.20
+# Later, after installing the selected adapter:
+./scripts/ntfy.sh mode tailscale https://laptop.example-tailnet.ts.net
+./scripts/ntfy.sh mode cloudflare https://notify.example.com
+```
+
+Exposure is configuration-only:
+
+| Mode | `NTFY_EXPOSURE_MODE` | Bind address | Public base URL |
+|---|---|---|---|
+| This laptop | `local` | `127.0.0.1` | `http://localhost:2586` |
+| Local network | `lan` | laptop LAN IP | `http://<laptop-lan-ip>:2586` |
+| Tailscale (later) | `tailscale` | `127.0.0.1` | Tailscale HTTPS hostname |
+| Cloudflare (later) | `cloudflare` | `127.0.0.1` | Cloudflare HTTPS hostname |
+
+For LAN mode, bind to the laptop's specific LAN IP rather than `0.0.0.0`; the
+host-side publish URL follows that LAN address automatically. The ntfy
+ACL remains `deny-all` by default; do not remove it when exposing the service.
+Tailscale Serve or `cloudflared` will later proxy the unchanged local origin at
+`http://127.0.0.1:2586`.
 
 PostgreSQL runs natively; Docker is not required. After creating the
 `automation_platform` database and its user, copy `.env.example` to `.env`, set

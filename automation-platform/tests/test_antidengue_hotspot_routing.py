@@ -13,16 +13,7 @@ import master_data.models  # noqa: F401
 import whatsapp_gateway.models  # noqa: F401
 from automation_core.models import Artifact, Job, JobStatus, JobType
 from master_data.models import Wing
-from antidengue_automation.hotspot_routing import (
-    configure_hotspot_routes,
-    expand_hotspot_profile_ids,
-)
 from whatsapp_gateway.models import (
-    WhatsAppAccount,
-    WhatsAppApplication,
-    WhatsAppAudience,
-    WhatsAppDispatchProfile,
-    WhatsAppReportType,
     WhatsAppTemplate,
 )
 from whatsapp_gateway.previews.compiler.messages import _render_message
@@ -39,7 +30,9 @@ def _engine():
     return engine
 
 
-def _review_workbook(path: Path, wing_id: uuid.UUID, tehsil_id: uuid.UUID) -> None:
+def _review_workbook(
+    path: Path, wing_id: uuid.UUID, tehsil_id: uuid.UUID, markaz_id: uuid.UUID | None = None
+) -> None:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Review Required"
@@ -58,6 +51,9 @@ def _review_workbook(path: Path, wing_id: uuid.UUID, tehsil_id: uuid.UUID) -> No
         "CITY", "MARKAZ ONE", 90.25, "31.5210, 74.3590",
         "activity-2", "35210001.lahore.sed",
     ])
+    if markaz_id is not None:
+        sheet.cell(row=2, column=5, value=str(markaz_id))
+        sheet.cell(row=3, column=5, value=str(markaz_id))
     sheet.append([
         "35210002", "School B", str(uuid.uuid4()), str(tehsil_id), "",
         "CITY", "MARKAZ TWO", 500.0, "31.5000, 74.3000",
@@ -133,63 +129,28 @@ def test_hotspot_renderer_scopes_classified_rows_to_authorized_wing(tmp_path: Pa
         assert "rule-based review candidates" in customized
 
 
-def test_enabled_hotspot_routes_are_global_execution_selection() -> None:
+def test_hotspot_renderer_accepts_aggregated_markaz_scope_values(tmp_path: Path) -> None:
     engine = _engine()
+    wing = Wing(
+        id=uuid.uuid4(), district_id=uuid.uuid4(), department_id=uuid.uuid4(),
+        name="MEE", code="MEE",
+    )
+    tehsil_id, markaz_id = uuid.uuid4(), uuid.uuid4()
+    report_path = tmp_path / "Hotspot Distance Review - markaz.xlsx"
+    _review_workbook(report_path, wing.id, tehsil_id, markaz_id)
     with Session(engine) as session:
-        account = WhatsAppAccount(name="Primary", worker_key="routing-test")
-        application = WhatsAppApplication(key="antidengue", name="AntiDengue")
-        session.add(account)
-        session.add(application)
-        session.flush()
-        dormant_type = WhatsAppReportType(
-            application_id=application.id, key="tehsil_dormant_summary", name="Dormant"
-        )
-        hotspot_type = WhatsAppReportType(
-            application_id=application.id,
-            key="hotspot_distance_activity",
-            name="Hotspot distance",
-        )
-        audience = WhatsAppAudience(
-            application_id=application.id, key="routing-test", name="Routing test"
-        )
-        session.add_all([dormant_type, hotspot_type, audience])
-        session.flush()
-        sources = [
-            WhatsAppDispatchProfile(
-                application_id=application.id,
-                key=f"source-{index}",
-                name=f"Source {index}",
-                report_type_id=dormant_type.id,
-                audience_id=audience.id,
-                account_id=account.id,
-                recipient_channel="group",
-                delivery_mode="groups",
-            )
-            for index in (1, 2)
-        ]
-        session.add_all(sources)
-        session.commit()
+        job = Job(type=JobType.antidengue_report.value, title="Dry run", status=JobStatus.succeeded.value)
+        session.add(job); session.flush()
+        session.add(Artifact(
+            job_id=job.id, module_key="antidengue", kind="report",
+            name=report_path.name, path=str(report_path), size_bytes=report_path.stat().st_size,
+        )); session.commit()
 
-        configured = configure_hotspot_routes(session, [item.id for item in sources])
-        assert configured["enabled_count"] == 2
-        hotspot_by_source = {
-            item["source_profile_id"]: uuid.UUID(item["hotspot_profile_id"])
-            for item in configured["items"]
-        }
+        rendered = render_hotspot_distance_report(
+            session, source_job=job, wing=wing, recipient_name="AEO One",
+            scope_key="markaz", scope_value="", scope_values=[str(markaz_id)],
+            scope_label="MARKAZ ONE", presentation_policy={"attachment_mode": "none"},
+        )
 
-        # Running only source 1 still includes both routes enabled on the
-        # Activity Rules page.
-        expanded = expand_hotspot_profile_ids(session, [sources[0].id])
-        assert set(expanded) == {
-            sources[0].id,
-            hotspot_by_source[str(sources[0].id)],
-            hotspot_by_source[str(sources[1].id)],
-        }
-
-        configured = configure_hotspot_routes(session, [sources[1].id])
-        assert configured["enabled_count"] == 1
-        expanded = expand_hotspot_profile_ids(session, [sources[0].id])
-        assert set(expanded) == {
-            sources[0].id,
-            hotspot_by_source[str(sources[1].id)],
-        }
+        assert len(rendered.rows) == 2
+        assert {row.markaz_id for row in rendered.rows} == {str(markaz_id)}

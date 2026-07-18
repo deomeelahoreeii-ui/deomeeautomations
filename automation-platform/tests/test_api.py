@@ -14,6 +14,7 @@ from sqlmodel import Session, select
 from automation_api.main import app
 from automation_core.database import engine
 from automation_core.models import Artifact, Job, JobLog, JobStatus, JobType, SourceFile, SourceFileRun
+from automation_core.worker_runtime import register_worker_runtime
 from master_data.models import School, Wing
 from whatsapp_gateway.api import ensure_defaults
 from whatsapp_gateway.models import (
@@ -42,7 +43,11 @@ from whatsapp_gateway.antidengue_renderer import (
     _build_wing_message,
     normalize_presentation_policy,
 )
-from whatsapp_gateway.tasks import compile_dispatch_preview_job
+from whatsapp_gateway.tasks import compile_dispatch_preview_v2_job
+from whatsapp_gateway.previews.compiler.capabilities import (
+    PREVIEW_COMPILER_PROTOCOL, PREVIEW_COMPILER_QUEUE, PREVIEW_COMPILER_TASK,
+    compiler_build_id, compiler_capabilities, compiler_fingerprint,
+)
 
 
 def test_health_endpoint() -> None:
@@ -355,6 +360,15 @@ def test_antidengue_dispatch_preview_freezes_exact_payload(tmp_path) -> None:
     created: dict[str, object] = {}
 
     with Session(engine) as session:
+        runtime = register_worker_runtime(
+            session, worker_name=f"api-test-preview-worker-{suffix}",
+            queues=[PREVIEW_COMPILER_QUEUE],
+            protocols={"antidengue_preview": PREVIEW_COMPILER_PROTOCOL},
+            capabilities=compiler_capabilities(),
+            capability_fingerprint=compiler_fingerprint(),
+            build_id=compiler_build_id(), database_fingerprint="test",
+        )
+        created["worker_runtime"] = (type(runtime), runtime.id)
         account, _ = ensure_defaults(session)
         application = session.exec(
             select(WhatsAppApplication).where(WhatsAppApplication.key == "antidengue")
@@ -480,13 +494,14 @@ def test_antidengue_dispatch_preview_freezes_exact_payload(tmp_path) -> None:
             "audience": (WhatsAppAudience, audience.id),
             "configured_group": (WhatsAppGroup, configured_group.id),
             "directory_group": (WhatsAppDirectoryGroup, directory_group.id),
+            "worker_runtime": (type(runtime), runtime.id),
         }
 
     try:
         def run_queued_preview(name: str, *, args: list[str], kwargs: dict, queue: str, task_id: str) -> None:
-            assert name == "whatsapp_gateway.compile_dispatch_preview"
-            assert queue == "antidengue"
-            compile_dispatch_preview_job.run(args[0])
+            assert name == PREVIEW_COMPILER_TASK
+            assert queue == PREVIEW_COMPILER_QUEUE
+            compile_dispatch_preview_v2_job.run(args[0])
 
         with (
             patch(
@@ -515,6 +530,8 @@ def test_antidengue_dispatch_preview_freezes_exact_payload(tmp_path) -> None:
             )
 
         assert preview["delivery_count"] == 1
+        assert preview["configuration_snapshot"]["compiler_runtime"]["protocol"] == PREVIEW_COMPILER_PROTOCOL
+        assert preview["configuration_snapshot"]["compiler_runtime"]["worker_name"]
         assert preview["blocked_count"] == 0
         assert preview["skipped_count"] == 0
         assert deliveries.status_code == 200
@@ -561,6 +578,7 @@ def test_antidengue_dispatch_preview_freezes_exact_payload(tmp_path) -> None:
                 "directory_group",
                 "artifact",
                 "job",
+                "worker_runtime",
             ):
                 model, item_id = created[key]
                 item = session.get(model, item_id)

@@ -439,7 +439,8 @@ class MasterDataRepository:
                 for row in conn.execute(
                     f"""
                     SELECT j.id, j.active, o.name AS officer_name, o.mobile,
-                      t.name AS tehsil_name, m.name AS markaz_name, w.name AS wing_name
+                      j.tehsil_ref, t.name AS tehsil_name, j.markaz_ref,
+                      m.name AS markaz_name, w.name AS wing_name
                     FROM aeo_jurisdictions j
                     LEFT JOIN aeo_officers o ON o.id = j.aeo_ref
                     LEFT JOIN tehsils t ON t.id = j.tehsil_ref
@@ -456,7 +457,8 @@ class MasterDataRepository:
                 for row in conn.execute(
                     f"""
                     SELECT j.id, j.active, o.name AS officer_name, o.mobile,
-                      t.name AS tehsil_name, w.name AS wing_name
+                      j.tehsil_ref, t.name AS tehsil_name, '' AS markaz_ref,
+                      w.name AS wing_name
                     FROM ddeo_jurisdictions j
                     LEFT JOIN ddeo_officers o ON o.id = j.ddeo_ref
                     LEFT JOIN tehsils t ON t.id = j.tehsil_ref

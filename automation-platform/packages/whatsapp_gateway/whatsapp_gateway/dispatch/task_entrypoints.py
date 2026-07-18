@@ -19,6 +19,9 @@ from whatsapp_gateway.models import (
     WhatsAppDelivery, WhatsAppDispatchApproval,
 )
 from whatsapp_gateway.preview_service import compile_antidengue_preview
+from whatsapp_gateway.previews.compiler.capabilities import (
+    PREVIEW_COMPILER_TASK, contract_mismatches, local_compiler_runtime,
+)
 
 
 @celery_app.task(
@@ -27,6 +30,27 @@ from whatsapp_gateway.preview_service import compile_antidengue_preview
     time_limit=60 * 12,
 )
 def compile_dispatch_preview_job(job_id: str) -> dict[str, str]:
+    """Compatibility consumer for preview jobs queued before protocol v2."""
+    return _compile_dispatch_preview(job_id, enforce_contract=False, worker_name="legacy")
+
+
+@celery_app.task(
+    bind=True,
+    name=PREVIEW_COMPILER_TASK,
+    soft_time_limit=60 * 10,
+    time_limit=60 * 12,
+)
+def compile_dispatch_preview_v2_job(self, job_id: str) -> dict[str, str]:  # type: ignore[no-untyped-def]
+    return _compile_dispatch_preview(
+        job_id,
+        enforce_contract=True,
+        worker_name=str(getattr(self.request, "hostname", "") or "automation-worker"),
+    )
+
+
+def _compile_dispatch_preview(
+    job_id: str, *, enforce_contract: bool, worker_name: str
+) -> dict[str, str]:
     uuid.UUID(job_id)
     with Session(engine) as session:
         job = claim_job_running(session, job_id)
@@ -43,6 +67,20 @@ def compile_dispatch_preview_job(job_id: str) -> dict[str, str]:
         append_log(session, job_id, "Compiling immutable AntiDengue dispatch preview.")
 
     try:
+        runtime = local_compiler_runtime(worker_name=worker_name)
+        if enforce_contract:
+            required = dict(parameters.get("compiler_contract") or {})
+            problems = contract_mismatches(required, runtime)
+            if not required or problems:
+                explanation = "; ".join(problems) or "the job has no compiler capability contract"
+                raise RuntimeError(
+                    f"Preview worker capability mismatch: {explanation}. "
+                    "No preview was created; restart or deploy a compatible AntiDengue worker."
+                )
+            from automation_core.worker_runtime import touch_worker_runtime
+
+            with Session(engine) as session:
+                touch_worker_runtime(session, worker_name)
         with Session(engine) as session:
             preview = compile_antidengue_preview(
                 session,
@@ -52,6 +90,8 @@ def compile_dispatch_preview_job(job_id: str) -> dict[str, str]:
                     uuid.UUID(value) for value in parameters.get("dispatch_profile_ids", [])
                 ] or None,
                 created_by=str(parameters.get("created_by") or "web"),
+                compiler_runtime=runtime,
+                deadline_snapshot=dict(parameters.get("deadline_snapshot") or {}) or None,
             )
             result = {"preview_id": str(preview.id), "preview_key": preview.preview_key}
         with Session(engine) as session:

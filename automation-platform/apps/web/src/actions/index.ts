@@ -79,6 +79,36 @@ const simpleActivityRuleInput = z.object({
 });
 
 export const server = {
+  notifications: {
+    overview: defineAction({ handler: () => api("/api/v1/notifications/overview") }),
+    deliveries: defineAction({
+      input: z.object({
+        status: z.string().default(""),
+        eventType: z.string().default(""),
+        page: z.number().int().positive().default(1),
+        pageSize: z.number().int().min(1).max(100).default(25),
+      }),
+      handler: (input) => {
+        const params = new URLSearchParams({
+          status: input.status,
+          event_type: input.eventType,
+          page: String(input.page),
+          page_size: String(input.pageSize),
+        });
+        return api(`/api/v1/notifications/deliveries?${params}`);
+      },
+    }),
+    sendTest: defineAction({
+      input: z.object({
+        channel: z.literal("antidengue").default("antidengue"),
+        message: z.string().min(1).max(500).default("Automation Platform notification test"),
+      }),
+      handler: (input) => api("/api/v1/notifications/test", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    }),
+  },
   storage: {
     overview: defineAction({ handler: () => api("/api/v1/storage/overview") }),
     artifacts: defineAction({
@@ -114,11 +144,6 @@ export const server = {
   },
   antidengue: {
     simpleActivityRules: defineAction({ handler: () => api("/api/v1/antidengue/simple-activity-rules") }),
-    simpleActivityRouting: defineAction({ handler: () => api("/api/v1/antidengue/simple-activity-rules/routing") }),
-    configureSimpleActivityRoutes: defineAction({
-      input: z.object({ source_profile_ids: z.array(z.string().uuid()).default([]) }),
-      handler: ({ source_profile_ids }) => api("/api/v1/antidengue/simple-activity-rules/routing", { method: "PUT", body: JSON.stringify(source_profile_ids) }),
-    }),
     createSimpleActivityRule: defineAction({ input: simpleActivityRuleInput, handler: (input) => api("/api/v1/antidengue/simple-activity-rules", { method: "POST", body: JSON.stringify(input) }) }),
     updateSimpleActivityRule: defineAction({ input: simpleActivityRuleInput.extend({ id: z.string().uuid() }), handler: ({ id, ...input }) => api(`/api/v1/antidengue/simple-activity-rules/${id}`, { method: "PATCH", body: JSON.stringify(input) }) }),
     createSimpleActivityRuleVersion: defineAction({ input: z.object({ id: z.string().uuid() }), handler: ({ id }) => api(`/api/v1/antidengue/simple-activity-rules/${id}/versions`, { method: "POST" }) }),
@@ -127,19 +152,6 @@ export const server = {
     archiveSimpleActivityRule: defineAction({ input: z.object({ id: z.string().uuid() }), handler: ({ id }) => api(`/api/v1/antidengue/simple-activity-rules/${id}`, { method: "DELETE" }) }),
     previewSimpleActivityRule: defineAction({ input: simpleActivityRuleInput.extend({ sample_size: z.number().int().min(1).max(100).default(20) }), handler: (input) => api("/api/v1/antidengue/simple-activity-rules/previews/evaluate", { method: "POST", body: JSON.stringify(input) }) }),
     activityRules: defineAction({ handler: () => api("/api/v1/antidengue/activity-rules") }),
-    hotspotRouting: defineAction({ handler: () => api("/api/v1/antidengue/activity-rules/routing") }),
-    linkHotspotRoutes: defineAction({
-      input: z.object({ source_profile_ids: z.array(z.string().uuid()).default([]) }),
-      handler: ({ source_profile_ids }) => api("/api/v1/antidengue/activity-rules/routing/link", {
-        method: "POST", body: JSON.stringify(source_profile_ids),
-      }),
-    }),
-    configureHotspotRoutes: defineAction({
-      input: z.object({ source_profile_ids: z.array(z.string().uuid()).default([]) }),
-      handler: ({ source_profile_ids }) => api("/api/v1/antidengue/activity-rules/routing", {
-        method: "PUT", body: JSON.stringify(source_profile_ids),
-      }),
-    }),
     createActivityRule: defineAction({
       input: activityRuleInput,
       handler: (input) => api("/api/v1/antidengue/activity-rules", { method: "POST", body: JSON.stringify(input) }),
@@ -354,6 +366,20 @@ export const server = {
       input: z.object({ id: z.string().uuid(), page: z.number().int().positive().default(1), pageSize: z.number().int().min(1).max(100).default(10) }),
       handler: (input) => api(`/api/v1/whatsapp/audiences/${input.id}/members?page=${input.page}&page_size=${input.pageSize}`),
     }),
+    addAudienceSource: defineAction({
+      input: z.object({
+        id: z.string().uuid(),
+        source_type: z.literal("master_data_jurisdictions").default("master_data_jurisdictions"),
+        recipient_role: z.enum(["aeo", "ddeo"]),
+        wing_id: z.string().uuid(),
+        route_scope_key: z.enum(["markaz", "tehsil"]),
+        aggregate_by_recipient: z.boolean().default(true),
+        enabled: z.boolean().default(true),
+      }),
+      handler: ({ id, ...input }) => api(`/api/v1/whatsapp/audiences/${id}/sources`, {
+        method: "POST", body: JSON.stringify(input),
+      }),
+    }),
     addAudienceMember: defineAction({
       input: z.object({
         id: z.string().uuid(), target_type: z.enum(["group", "contact"]), target_id: z.string().uuid(),
@@ -395,7 +421,7 @@ export const server = {
       input: z.object({
         id: z.string().uuid().optional(), application_id: z.string().uuid(), key: z.string().regex(/^[a-z0-9_]+$/), name: z.string().min(2),
         report_type_id: z.string().uuid(), audience_id: z.string().uuid(), account_id: z.string().uuid(), template_id: z.string().uuid().optional(), wing_id: z.string().uuid().optional(),
-        recipient_channel: z.enum(["individual", "group"]), recipient_scope_id: z.string().uuid().optional(), delivery_mode: z.enum(["groups", "individuals"]), require_approval: z.boolean(), fallback_policy: z.enum(["none", "same_scope"]),
+        recipient_channel: z.enum(["individual", "group"]), recipient_scope_id: z.string().uuid().optional(), delivery_mode: z.enum(["groups", "individuals"]), delivery_granularity: z.enum(["recipient", "scope"]).default("recipient"), require_approval: z.boolean(), fallback_policy: z.enum(["none", "same_scope"]),
         max_retries: z.number().int().min(0).max(10), messages_per_minute: z.number().int().min(1).max(120), enabled: z.boolean(), notes: z.string().default(""),
         message_style: z.enum(["summary", "detailed"]).default("summary"), attachment_mode: z.enum(["none", "image", "excel", "image_excel"]).default("image_excel"), image_content: z.enum(["summary", "details"]).default("details"),
       }),
@@ -1000,11 +1026,45 @@ export const server = {
   },
   masterData: {
     dashboard: defineAction({ handler: () => api("/api/v1/master-data/dashboard") }),
+    hierarchy: defineAction({
+      input: z.object({
+        includeInactive: z.boolean().default(false),
+        districtId: z.string().uuid().optional(),
+        wingId: z.string().uuid().optional(),
+      }),
+      handler: ({ includeInactive, districtId, wingId }) => {
+        const params = new URLSearchParams({ include_inactive: String(includeInactive) });
+        if (districtId) params.set("district_id", districtId);
+        if (wingId) params.set("wing_id", wingId);
+        return api(`/api/v1/master-data/hierarchy?${params}`);
+      },
+    }),
+    markazes: defineAction({
+      input: z.object({
+        search: z.string().default(""), wingId: z.string().uuid().optional(),
+        tehsilId: z.string().uuid().optional(),
+        coverage: z.enum(["all", "assigned", "unassigned"]).default("all"),
+        includeInactive: z.boolean().default(false),
+        page: z.number().int().positive().default(1),
+        pageSize: z.number().int().min(1).max(100).default(20),
+      }),
+      handler: (input) => {
+        const params = new URLSearchParams({
+          search: input.search, coverage: input.coverage,
+          include_inactive: String(input.includeInactive),
+          page: String(input.page), page_size: String(input.pageSize),
+        });
+        if (input.wingId) params.set("wing_id", input.wingId);
+        if (input.tehsilId) params.set("tehsil_id", input.tehsilId);
+        return api(`/api/v1/master-data/markazes?${params}`);
+      },
+    }),
     options: defineAction({ handler: () => api("/api/v1/master-data/options") }),
     schools: defineAction({
       input: z.object({
         search: z.string().default(""),
         tehsilRef: z.string().default(""),
+        markazRef: z.string().default(""),
         active: z.boolean().default(true),
         page: z.number().int().positive().default(1),
         pageSize: z.number().int().min(1).max(100).default(10),
@@ -1013,6 +1073,7 @@ export const server = {
         const params = new URLSearchParams({
           search: input.search,
           tehsil_ref: input.tehsilRef,
+          markaz_ref: input.markazRef,
           active: String(input.active),
           page: String(input.page),
           page_size: String(input.pageSize),

@@ -28,6 +28,9 @@ from whatsapp_gateway.persistence.configuration import (
     WhatsAppDispatchProfile,
     WhatsAppReportType,
 )
+from whatsapp_gateway.persistence.account import WhatsAppAccount
+from whatsapp_gateway.configuration.dynamic_audiences import resolve_dynamic_audience
+from antidengue_automation.dynamic_runtime_routes import dynamic_runtime_route_rows
 from whatsapp_gateway.persistence.directory import (
     WhatsAppDirectoryContact,
     WhatsAppDirectoryGroup,
@@ -151,12 +154,16 @@ def _route_rows(session: Session, profile_ids: Iterable[str]) -> list[dict[str, 
         for profile in profiles
         if (
             (report_type := session.get(WhatsAppReportType, profile.report_type_id))
-            and report_type.key not in {"hotspot_distance_activity", "simple_activity_timing"}
+            and report_type.key not in {
+                "hotspot_distance_activity", "simple_activity_timing",
+                "consolidated_action_digest",
+            }
         )
     ]
     group_ids: set[uuid.UUID] = set()
     contact_ids: set[uuid.UUID] = set()
     members_by_profile: list[tuple[WhatsAppDispatchProfile, WhatsAppAudienceMember]] = []
+    dynamic_rows: list[dict[str, Any]] = []
     for profile in profiles:
         members = session.exec(
             select(WhatsAppAudienceMember).where(
@@ -170,11 +177,20 @@ def _route_rows(session: Session, profile_ids: Iterable[str]) -> list[dict[str, 
                 group_ids.add(member.directory_group_id)
             if member.directory_contact_id:
                 contact_ids.add(member.directory_contact_id)
+        for member in resolve_dynamic_audience(
+            session, audience_id=profile.audience_id,
+            account=session.get(WhatsAppAccount, profile.account_id),
+        ):
+            officer = session.get(Officer, member.officer_id)
+            dynamic_rows.extend(dynamic_runtime_route_rows(profile, member, officer))
 
     groups = {value: session.get(WhatsAppDirectoryGroup, value) for value in group_ids}
     contacts = {value: session.get(WhatsAppDirectoryContact, value) for value in contact_ids}
-    rows: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
+    rows: list[dict[str, Any]] = list(dynamic_rows)
+    seen: set[tuple[str, str, str]] = {
+        (str(row["target"]), str(row["route_kind"]), str(row.get("markaz_ref") or row.get("tehsil_ref") or ""))
+        for row in dynamic_rows
+    }
     for profile, member in members_by_profile:
         if member.target_type == "group":
             directory = groups.get(member.directory_group_id)
@@ -291,6 +307,7 @@ def write_runtime_snapshot(
     *,
     job_id: str,
     dispatch_profile_ids: Iterable[str] = (),
+    deadline_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     master_rows, schools = _master_school_rows(session)
     payload: dict[str, Any] = {
@@ -298,6 +315,7 @@ def write_runtime_snapshot(
         "generated_at": datetime.now(UTC).isoformat(),
         "source": "automation-platform-postgresql",
         "job_id": job_id,
+        "operational_policy": {"deadline": dict(deadline_snapshot or {})},
         "master_schools": master_rows,
         "officer_mappings": _officer_mapping_rows(session, master_rows, schools),
         "group_routes": _route_rows(session, dispatch_profile_ids),

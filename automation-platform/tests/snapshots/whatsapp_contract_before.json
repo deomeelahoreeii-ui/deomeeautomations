@@ -3,11 +3,16 @@
     "task_names": [
       "whatsapp_gateway.build_inbound_export",
       "whatsapp_gateway.compile_dispatch_preview",
+      "whatsapp_gateway.compile_dispatch_preview.v2",
+      "whatsapp_gateway.process_inbound_batch",
       "whatsapp_gateway.send_approved_preview"
     ],
     "task_routes": {
       "antidengue_automation.*": {
         "queue": "antidengue"
+      },
+      "crm_domain.*": {
+        "queue": "crm"
       },
       "crm_filters.*": {
         "queue": "crm"
@@ -17,6 +22,12 @@
       },
       "whatsapp_gateway.compile_dispatch_preview": {
         "queue": "antidengue"
+      },
+      "whatsapp_gateway.compile_dispatch_preview.v2": {
+        "queue": "antidengue-preview-v2"
+      },
+      "whatsapp_gateway.process_inbound_batch": {
+        "queue": "whatsapp"
       },
       "whatsapp_gateway.send_approved_preview": {
         "queue": "antidengue"
@@ -30,7 +41,8 @@
     "whatsapp_health_subject": "whatsapp.worker.health",
     "whatsapp_identity_directory_subject": "whatsapp.worker.directory.identities",
     "whatsapp_inbound_history_subject": "whatsapp.worker.inbound.history",
-    "whatsapp_inbound_media_subject": "whatsapp.worker.inbound.media"
+    "whatsapp_inbound_media_subject": "whatsapp.worker.inbound.media",
+    "whatsapp_web_history_subject": "whatsapp.web.inbound.history"
   },
   "openapi_paths": {
     "/api/v1/whatsapp/activity": {
@@ -556,6 +568,227 @@
         ]
       }
     },
+    "/api/v1/whatsapp/audiences/{audience_id}/members/{member_id}/enabled": {
+      "patch": {
+        "operationId": "set_audience_member_enabled_api_v1_whatsapp_audiences__audience_id__members__member_id__enabled_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "audience_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Audience Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AudienceMemberEnabledInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Audience Member Enabled Api V1 Whatsapp Audiences  Audience Id  Members  Member Id  Enabled Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Audience Member Enabled",
+        "tags": [
+          "whatsapp"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/audiences/{audience_id}/sources": {
+      "get": {
+        "operationId": "audience_sources_api_v1_whatsapp_audiences__audience_id__sources_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "audience_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Audience Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Audience Sources Api V1 Whatsapp Audiences  Audience Id  Sources Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audience Sources",
+        "tags": [
+          "whatsapp"
+        ]
+      },
+      "post": {
+        "operationId": "save_audience_source_api_v1_whatsapp_audiences__audience_id__sources_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "audience_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Audience Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AudienceSourceInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Save Audience Source Api V1 Whatsapp Audiences  Audience Id  Sources Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Audience Source",
+        "tags": [
+          "whatsapp"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/audiences/{audience_id}/sources/{source_id}": {
+      "delete": {
+        "operationId": "delete_audience_source_api_v1_whatsapp_audiences__audience_id__sources__source_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "audience_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Audience Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Audience Source Api V1 Whatsapp Audiences  Audience Id  Sources  Source Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Audience Source",
+        "tags": [
+          "whatsapp"
+        ]
+      }
+    },
     "/api/v1/whatsapp/configuration/options": {
       "get": {
         "operationId": "configuration_options_api_v1_whatsapp_configuration_options_get",
@@ -985,6 +1218,61 @@
         "summary": "Remove Contact Link",
         "tags": [
           "whatsapp-previews"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/directory/contacts/{contact_id}/master-contact": {
+      "put": {
+        "operationId": "update_directory_master_contact_api_v1_whatsapp_directory_contacts__contact_id__master_contact_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Contact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MasterContactNameInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Directory Master Contact Api V1 Whatsapp Directory Contacts  Contact Id  Master Contact Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Directory Master Contact",
+        "tags": [
+          "whatsapp"
         ]
       }
     },
@@ -1812,6 +2100,454 @@
         ]
       }
     },
+    "/api/v1/whatsapp/inbound/batches": {
+      "get": {
+        "operationId": "list_inbound_batches_api_v1_whatsapp_inbound_batches_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "contact_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Contact Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Inbound Batches Api V1 Whatsapp Inbound Batches Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Inbound Batches",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/inbound/batches/{batch_id}": {
+      "get": {
+        "operationId": "read_inbound_batch_api_v1_whatsapp_inbound_batches__batch_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Read Inbound Batch Api V1 Whatsapp Inbound Batches  Batch Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Inbound Batch",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/inbound/batches/{batch_id}/events": {
+      "get": {
+        "operationId": "list_inbound_batch_events_api_v1_whatsapp_inbound_batches__batch_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 250,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Inbound Batch Events Api V1 Whatsapp Inbound Batches  Batch Id  Events Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Inbound Batch Events",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/inbound/batches/{batch_id}/items/{item_id}/download": {
+      "get": {
+        "operationId": "download_inbound_batch_item_api_v1_whatsapp_inbound_batches__batch_id__items__item_id__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Inbound Batch Item",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/inbound/batches/{batch_id}/retry-storage": {
+      "post": {
+        "operationId": "retry_inbound_batch_storage_api_v1_whatsapp_inbound_batches__batch_id__retry_storage_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Retry Inbound Batch Storage Api V1 Whatsapp Inbound Batches  Batch Id  Retry Storage Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Inbound Batch Storage",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/inbound/contacts/{contact_id}/evidence/{attachment_id}/download": {
+      "get": {
+        "operationId": "download_contact_evidence_api_v1_whatsapp_inbound_contacts__contact_id__evidence__attachment_id__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Contact Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Attachment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Contact Evidence",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/inbound/contacts/{contact_id}/workspace": {
+      "get": {
+        "operationId": "contact_intake_workspace_api_v1_whatsapp_inbound_contacts__contact_id__workspace_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Contact Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(image|pdf|spreadsheet)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Contact Intake Workspace Api V1 Whatsapp Inbound Contacts  Contact Id  Workspace Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Contact Intake Workspace",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
     "/api/v1/whatsapp/inbound/events": {
       "post": {
         "operationId": "ingest_event_api_v1_whatsapp_inbound_events_post",
@@ -2077,6 +2813,51 @@
         ]
       }
     },
+    "/api/v1/whatsapp/inbound/history/bridge/status": {
+      "get": {
+        "operationId": "history_bridge_status_api_v1_whatsapp_inbound_history_bridge_status_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Contact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response History Bridge Status Api V1 Whatsapp Inbound History Bridge Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "History Bridge Status",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
     "/api/v1/whatsapp/inbound/history/request": {
       "post": {
         "operationId": "request_inbound_history_api_v1_whatsapp_inbound_history_request_post",
@@ -2229,6 +3010,520 @@
         ]
       }
     },
+    "/api/v1/whatsapp/inbound/processing-items/{item_id}/content": {
+      "get": {
+        "operationId": "preview_inbound_processing_item_api_v1_whatsapp_inbound_processing_items__item_id__content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "download",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Download",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Inbound Processing Item",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/inbound/processing-items/{item_id}/review": {
+      "post": {
+        "operationId": "review_inbound_processing_item_api_v1_whatsapp_inbound_processing_items__item_id__review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewProcessingItemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Review Inbound Processing Item Api V1 Whatsapp Inbound Processing Items  Item Id  Review Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Inbound Processing Item",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/inbound/processing-runs": {
+      "get": {
+        "operationId": "list_inbound_processing_runs_api_v1_whatsapp_inbound_processing_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Inbound Processing Runs Api V1 Whatsapp Inbound Processing Runs Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Inbound Processing Runs",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      },
+      "post": {
+        "operationId": "create_inbound_processing_run_api_v1_whatsapp_inbound_processing_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProcessingRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Inbound Processing Run Api V1 Whatsapp Inbound Processing Runs Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Inbound Processing Run",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/inbound/processing-runs/{run_id}": {
+      "get": {
+        "operationId": "read_inbound_processing_run_api_v1_whatsapp_inbound_processing_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "review_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Review Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Read Inbound Processing Run Api V1 Whatsapp Inbound Processing Runs  Run Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Inbound Processing Run",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/inbound/processing-runs/{run_id}/complaint-group-approvals": {
+      "post": {
+        "description": "Approve an explicit, current Ready selection in one transaction.",
+        "operationId": "batch_approve_inbound_complaint_groups_api_v1_whatsapp_inbound_processing_runs__run_id__complaint_group_approvals_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchReviewComplaintGroupsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Batch Approve Inbound Complaint Groups Api V1 Whatsapp Inbound Processing Runs  Run Id  Complaint Group Approvals Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Approve Inbound Complaint Groups",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/inbound/processing-runs/{run_id}/complaint-groups/{complaint_number}/review": {
+      "post": {
+        "operationId": "review_inbound_complaint_group_api_v1_whatsapp_inbound_processing_runs__run_id__complaint_groups__complaint_number__review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "complaint_number",
+            "required": true,
+            "schema": {
+              "title": "Complaint Number",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewComplaintGroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Review Inbound Complaint Group Api V1 Whatsapp Inbound Processing Runs  Run Id  Complaint Groups  Complaint Number  Review Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Inbound Complaint Group",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/inbound/processing-runs/{run_id}/events": {
+      "get": {
+        "operationId": "list_inbound_processing_events_api_v1_whatsapp_inbound_processing_runs__run_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 2000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Inbound Processing Events Api V1 Whatsapp Inbound Processing Runs  Run Id  Events Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Inbound Processing Events",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
     "/api/v1/whatsapp/inbound/status": {
       "get": {
         "operationId": "inbound_status_api_v1_whatsapp_inbound_status_get",
@@ -2247,6 +3542,29 @@
           }
         },
         "summary": "Inbound Status",
+        "tags": [
+          "whatsapp-inbound"
+        ]
+      }
+    },
+    "/api/v1/whatsapp/inbound/storage/status": {
+      "get": {
+        "operationId": "object_storage_status_api_v1_whatsapp_inbound_storage_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Object Storage Status Api V1 Whatsapp Inbound Storage Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Object Storage Status",
         "tags": [
           "whatsapp-inbound"
         ]
@@ -2460,7 +3778,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PreviewInput"
+                "$ref": "#/components/schemas/whatsapp_gateway__previews__schemas__PreviewInput"
               }
             }
           },
@@ -3717,7 +5035,429 @@
     }
   },
   "openapi_schemas": {
+    "ActivityProfileCloneInput": {
+      "properties": {
+        "name": {
+          "maxLength": 200,
+          "minLength": 2,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ActivityProfileCloneInput",
+      "type": "object"
+    },
+    "ActivityRuleInput": {
+      "properties": {
+        "classification": {
+          "const": "review_required",
+          "default": "review_required",
+          "title": "Classification",
+          "type": "string"
+        },
+        "created_by": {
+          "default": "web-operator",
+          "maxLength": 120,
+          "title": "Created By",
+          "type": "string"
+        },
+        "distance_enabled": {
+          "default": true,
+          "title": "Distance Enabled",
+          "type": "boolean"
+        },
+        "distance_operator": {
+          "default": "gte",
+          "enum": [
+            "gt",
+            "gte"
+          ],
+          "title": "Distance Operator",
+          "type": "string"
+        },
+        "distance_threshold_meters": {
+          "default": 50,
+          "maximum": 100000.0,
+          "minimum": 0.0,
+          "title": "Distance Threshold Meters",
+          "type": "number"
+        },
+        "match_mode": {
+          "default": "all",
+          "enum": [
+            "all",
+            "any"
+          ],
+          "title": "Match Mode",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 180,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "time_enabled": {
+          "default": false,
+          "title": "Time Enabled",
+          "type": "boolean"
+        },
+        "time_end": {
+          "default": "07:00",
+          "maxLength": 5,
+          "minLength": 5,
+          "title": "Time End",
+          "type": "string"
+        },
+        "time_operator": {
+          "default": "between",
+          "enum": [
+            "between",
+            "outside"
+          ],
+          "title": "Time Operator",
+          "type": "string"
+        },
+        "time_start": {
+          "default": "00:00",
+          "maxLength": 5,
+          "minLength": 5,
+          "title": "Time Start",
+          "type": "string"
+        },
+        "timezone": {
+          "const": "Asia/Karachi",
+          "default": "Asia/Karachi",
+          "title": "Timezone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ActivityRuleInput",
+      "type": "object"
+    },
+    "ActivityRulePreviewInput": {
+      "properties": {
+        "classification": {
+          "const": "review_required",
+          "default": "review_required",
+          "title": "Classification",
+          "type": "string"
+        },
+        "created_by": {
+          "default": "web-operator",
+          "maxLength": 120,
+          "title": "Created By",
+          "type": "string"
+        },
+        "distance_enabled": {
+          "default": true,
+          "title": "Distance Enabled",
+          "type": "boolean"
+        },
+        "distance_operator": {
+          "default": "gte",
+          "enum": [
+            "gt",
+            "gte"
+          ],
+          "title": "Distance Operator",
+          "type": "string"
+        },
+        "distance_threshold_meters": {
+          "default": 50,
+          "maximum": 100000.0,
+          "minimum": 0.0,
+          "title": "Distance Threshold Meters",
+          "type": "number"
+        },
+        "match_mode": {
+          "default": "all",
+          "enum": [
+            "all",
+            "any"
+          ],
+          "title": "Match Mode",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 180,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "sample_size": {
+          "default": 20,
+          "maximum": 100.0,
+          "minimum": 1.0,
+          "title": "Sample Size",
+          "type": "integer"
+        },
+        "time_enabled": {
+          "default": false,
+          "title": "Time Enabled",
+          "type": "boolean"
+        },
+        "time_end": {
+          "default": "07:00",
+          "maxLength": 5,
+          "minLength": 5,
+          "title": "Time End",
+          "type": "string"
+        },
+        "time_operator": {
+          "default": "between",
+          "enum": [
+            "between",
+            "outside"
+          ],
+          "title": "Time Operator",
+          "type": "string"
+        },
+        "time_start": {
+          "default": "00:00",
+          "maxLength": 5,
+          "minLength": 5,
+          "title": "Time Start",
+          "type": "string"
+        },
+        "timezone": {
+          "const": "Asia/Karachi",
+          "default": "Asia/Karachi",
+          "title": "Timezone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ActivityRulePreviewInput",
+      "type": "object"
+    },
+    "ActivityRuleUpdate": {
+      "properties": {
+        "distance_enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Distance Enabled"
+        },
+        "distance_operator": {
+          "anyOf": [
+            {
+              "enum": [
+                "gt",
+                "gte"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Distance Operator"
+        },
+        "distance_threshold_meters": {
+          "anyOf": [
+            {
+              "maximum": 100000.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Distance Threshold Meters"
+        },
+        "match_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "all",
+                "any"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Match Mode"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 180,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Name"
+        },
+        "time_enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Time Enabled"
+        },
+        "time_end": {
+          "anyOf": [
+            {
+              "maxLength": 5,
+              "minLength": 5,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Time End"
+        },
+        "time_operator": {
+          "anyOf": [
+            {
+              "enum": [
+                "between",
+                "outside"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Time Operator"
+        },
+        "time_start": {
+          "anyOf": [
+            {
+              "maxLength": 5,
+              "minLength": 5,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Time Start"
+        }
+      },
+      "title": "ActivityRuleUpdate",
+      "type": "object"
+    },
+    "AntiDengueDeadlinePolicyUpdate": {
+      "properties": {
+        "submission_deadline": {
+          "maxLength": 20,
+          "minLength": 1,
+          "title": "Submission Deadline",
+          "type": "string"
+        },
+        "timezone": {
+          "default": "Asia/Karachi",
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Timezone",
+          "type": "string"
+        },
+        "updated_by": {
+          "default": "web-operator",
+          "maxLength": 120,
+          "title": "Updated By",
+          "type": "string"
+        }
+      },
+      "required": [
+        "submission_deadline"
+      ],
+      "title": "AntiDengueDeadlinePolicyUpdate",
+      "type": "object"
+    },
+    "AntiDengueExecutionCreate": {
+      "properties": {
+        "created_by": {
+          "default": "web-operator",
+          "maxLength": 120,
+          "title": "Created By",
+          "type": "string"
+        },
+        "dispatch_policy": {
+          "default": "preview_only",
+          "enum": [
+            "preview_only",
+            "auto_send_when_clean"
+          ],
+          "title": "Dispatch Policy",
+          "type": "string"
+        },
+        "dispatch_profile_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dispatch Profile Id"
+        },
+        "dispatch_profile_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Dispatch Profile Ids",
+          "type": "array"
+        },
+        "login_mode": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "manual",
+            "remote_approve"
+          ],
+          "title": "Login Mode",
+          "type": "string"
+        }
+      },
+      "title": "AntiDengueExecutionCreate",
+      "type": "object"
+    },
+    "AntiDengueRunNowRequest": {
+      "properties": {
+        "created_by": {
+          "default": "web-operator",
+          "maxLength": 120,
+          "title": "Created By",
+          "type": "string"
+        }
+      },
+      "title": "AntiDengueRunNowRequest",
+      "type": "object"
+    },
     "AntiDengueRunRequest": {
+      "description": "Legacy endpoint contract retained for rollback compatibility.\n\nThe web dashboard and scheduler no longer use dry_run=False. New sends always\noriginate from a successful dry run and an immutable approved preview.",
       "properties": {
         "dry_run": {
           "default": true,
@@ -3738,8 +5478,363 @@
       "title": "AntiDengueRunRequest",
       "type": "object"
     },
+    "AntiDengueScheduleCreate": {
+      "properties": {
+        "created_by": {
+          "default": "web-operator",
+          "maxLength": 120,
+          "title": "Created By",
+          "type": "string"
+        },
+        "dispatch_policy": {
+          "default": "preview_only",
+          "enum": [
+            "preview_only",
+            "auto_send_when_clean"
+          ],
+          "title": "Dispatch Policy",
+          "type": "string"
+        },
+        "dispatch_profile_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dispatch Profile Id"
+        },
+        "dispatch_profile_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Dispatch Profile Ids",
+          "type": "array"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "login_mode": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "manual",
+            "remote_approve"
+          ],
+          "title": "Login Mode",
+          "type": "string"
+        },
+        "missed_run_grace_minutes": {
+          "default": 15,
+          "maximum": 240.0,
+          "minimum": 0.0,
+          "title": "Missed Run Grace Minutes",
+          "type": "integer"
+        },
+        "name": {
+          "maxLength": 180,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "overlap_grace_minutes": {
+          "default": 15,
+          "maximum": 240.0,
+          "minimum": 0.0,
+          "title": "Overlap Grace Minutes",
+          "type": "integer"
+        },
+        "recurrence_type": {
+          "default": "daily",
+          "enum": [
+            "once",
+            "daily",
+            "weekly"
+          ],
+          "title": "Recurrence Type",
+          "type": "string"
+        },
+        "run_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Run Date"
+        },
+        "submission_deadline_override": {
+          "anyOf": [
+            {
+              "maxLength": 20,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Submission Deadline Override"
+        },
+        "times": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Times",
+          "type": "array"
+        },
+        "timezone": {
+          "default": "Asia/Karachi",
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Timezone",
+          "type": "string"
+        },
+        "weekdays": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Weekdays",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "AntiDengueScheduleCreate",
+      "type": "object"
+    },
+    "AntiDengueScheduleUpdate": {
+      "properties": {
+        "dispatch_policy": {
+          "anyOf": [
+            {
+              "enum": [
+                "preview_only",
+                "auto_send_when_clean"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dispatch Policy"
+        },
+        "dispatch_profile_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dispatch Profile Id"
+        },
+        "dispatch_profile_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "maxItems": 50,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dispatch Profile Ids"
+        },
+        "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Enabled"
+        },
+        "login_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "auto",
+                "manual",
+                "remote_approve"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Login Mode"
+        },
+        "missed_run_grace_minutes": {
+          "anyOf": [
+            {
+              "maximum": 240.0,
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Missed Run Grace Minutes"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 180,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Name"
+        },
+        "overlap_grace_minutes": {
+          "anyOf": [
+            {
+              "maximum": 240.0,
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Overlap Grace Minutes"
+        },
+        "recurrence_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "once",
+                "daily",
+                "weekly"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Recurrence Type"
+        },
+        "run_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Run Date"
+        },
+        "submission_deadline_override": {
+          "anyOf": [
+            {
+              "maxLength": 20,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Submission Deadline Override"
+        },
+        "times": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Times"
+        },
+        "timezone": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Timezone"
+        },
+        "weekdays": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Weekdays"
+        }
+      },
+      "title": "AntiDengueScheduleUpdate",
+      "type": "object"
+    },
     "ArtifactPublic": {
       "properties": {
+        "archived_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Archived At"
+        },
+        "content_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Content Type"
+        },
         "created_at": {
           "format": "date-time",
           "title": "Created At",
@@ -3758,6 +5853,10 @@
           "title": "Kind",
           "type": "string"
         },
+        "module_key": {
+          "title": "Module Key",
+          "type": "string"
+        },
         "name": {
           "title": "Name",
           "type": "string"
@@ -3766,18 +5865,56 @@
           "title": "Path",
           "type": "string"
         },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
         "size_bytes": {
           "title": "Size Bytes",
           "type": "integer"
+        },
+        "storage_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Storage Error"
+        },
+        "storage_status": {
+          "title": "Storage Status",
+          "type": "string"
+        },
+        "stored_object_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Stored Object Id"
         }
       },
       "required": [
         "id",
         "job_id",
+        "module_key",
         "kind",
         "name",
         "path",
         "size_bytes",
+        "sha256",
+        "content_type",
+        "stored_object_id",
+        "storage_status",
+        "storage_error",
+        "archived_at",
         "created_at"
       ],
       "title": "ArtifactPublic",
@@ -3914,6 +6051,19 @@
       "title": "AudienceInput",
       "type": "object"
     },
+    "AudienceMemberEnabledInput": {
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "AudienceMemberEnabledInput",
+      "type": "object"
+    },
     "AudienceMemberInput": {
       "properties": {
         "route_scope_key": {
@@ -3967,6 +6117,170 @@
       "title": "AudienceMemberInput",
       "type": "object"
     },
+    "AudienceSourceInput": {
+      "properties": {
+        "aggregate_by_recipient": {
+          "default": true,
+          "title": "Aggregate By Recipient",
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "recipient_role": {
+          "enum": [
+            "aeo",
+            "ddeo"
+          ],
+          "title": "Recipient Role",
+          "type": "string"
+        },
+        "route_scope_key": {
+          "enum": [
+            "markaz",
+            "tehsil"
+          ],
+          "title": "Route Scope Key",
+          "type": "string"
+        },
+        "source_type": {
+          "const": "master_data_jurisdictions",
+          "default": "master_data_jurisdictions",
+          "title": "Source Type",
+          "type": "string"
+        },
+        "wing_id": {
+          "format": "uuid",
+          "title": "Wing Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "recipient_role",
+        "wing_id",
+        "route_scope_key"
+      ],
+      "title": "AudienceSourceInput",
+      "type": "object"
+    },
+    "BackfillInput": {
+      "properties": {
+        "apply": {
+          "default": false,
+          "title": "Apply",
+          "type": "boolean"
+        },
+        "limit": {
+          "default": 200,
+          "maximum": 2000.0,
+          "minimum": 1.0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "module_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Module Key"
+        }
+      },
+      "title": "BackfillInput",
+      "type": "object"
+    },
+    "BackfillRequest": {
+      "properties": {
+        "limit": {
+          "anyOf": [
+            {
+              "maximum": 100000.0,
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Limit"
+        }
+      },
+      "title": "BackfillRequest",
+      "type": "object"
+    },
+    "BatchPublicationRequest": {
+      "properties": {
+        "case_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "maxItems": 200,
+          "minItems": 1,
+          "title": "Case Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "case_ids"
+      ],
+      "title": "BatchPublicationRequest",
+      "type": "object"
+    },
+    "BatchReviewComplaintGroupsRequest": {
+      "properties": {
+        "complaint_numbers": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 200,
+          "minItems": 1,
+          "title": "Complaint Numbers",
+          "type": "array"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Note"
+        },
+        "reviewed_by": {
+          "default": "web-operator",
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Reviewed By",
+          "type": "string"
+        }
+      },
+      "required": [
+        "complaint_numbers"
+      ],
+      "title": "BatchReviewComplaintGroupsRequest",
+      "type": "object"
+    },
     "Body_import_officers_api_v1_master_data_imports_officers_post": {
       "properties": {
         "commit": {
@@ -3984,6 +6298,20 @@
         "file"
       ],
       "title": "Body_import_officers_api_v1_master_data_imports_officers_post",
+      "type": "object"
+    },
+    "Body_import_replies_api_v1_crm_replies_imports_post": {
+      "properties": {
+        "file": {
+          "contentMediaType": "application/octet-stream",
+          "title": "File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "title": "Body_import_replies_api_v1_crm_replies_imports_post",
       "type": "object"
     },
     "Body_import_schools_api_v1_master_data_imports_schools_post": {
@@ -4105,6 +6433,42 @@
       "title": "BulkPreviewInput",
       "type": "object"
     },
+    "CaseReviewRequest": {
+      "properties": {
+        "accepted_document_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Accepted Document Ids",
+          "type": "array"
+        },
+        "fields": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Fields",
+          "type": "object"
+        },
+        "rejected_document_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Rejected Document Ids",
+          "type": "array"
+        }
+      },
+      "title": "CaseReviewRequest",
+      "type": "object"
+    },
     "ContactLinkInput": {
       "properties": {
         "entity_id": {
@@ -4185,6 +6549,25 @@
       "title": "CreateInboundExportRequest",
       "type": "object"
     },
+    "CreateProcessingRunRequest": {
+      "properties": {
+        "batch_id": {
+          "format": "uuid",
+          "title": "Batch Id",
+          "type": "string"
+        },
+        "paperless_check": {
+          "default": true,
+          "title": "Paperless Check",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "batch_id"
+      ],
+      "title": "CreateProcessingRunRequest",
+      "type": "object"
+    },
     "DispatchProfileInput": {
       "properties": {
         "account_id": {
@@ -4211,6 +6594,15 @@
         "audience_id": {
           "format": "uuid",
           "title": "Audience Id",
+          "type": "string"
+        },
+        "delivery_granularity": {
+          "default": "recipient",
+          "enum": [
+            "recipient",
+            "scope"
+          ],
+          "title": "Delivery Granularity",
           "type": "string"
         },
         "delivery_mode": {
@@ -4366,6 +6758,24 @@
       "title": "DispatchProfileInput",
       "type": "object"
     },
+    "DocumentAssociationRequest": {
+      "properties": {
+        "accepted": {
+          "default": true,
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role"
+      ],
+      "title": "DocumentAssociationRequest",
+      "type": "object"
+    },
     "GroupInput": {
       "properties": {
         "directory_group_id": {
@@ -4510,6 +6920,18 @@
               "type": "null"
             }
           ]
+        },
+        "batchId": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Batchid"
         },
         "chatScope": {
           "title": "Chatscope",
@@ -4743,6 +7165,53 @@
       "title": "JobPublic",
       "type": "object"
     },
+    "MasterContactNameInput": {
+      "properties": {
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "MasterContactNameInput",
+      "type": "object"
+    },
+    "MasterContactWrite": {
+      "properties": {
+        "active": {
+          "default": true,
+          "title": "Active",
+          "type": "boolean"
+        },
+        "mobile": {
+          "default": "",
+          "maxLength": 30,
+          "title": "Mobile",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "maxLength": 2000,
+          "title": "Notes",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "MasterContactWrite",
+      "type": "object"
+    },
     "MasterDataAuditPublic": {
       "properties": {
         "action": {
@@ -4812,6 +7281,25 @@
         "created_at"
       ],
       "title": "MasterDataAuditPublic",
+      "type": "object"
+    },
+    "NotificationTestInput": {
+      "properties": {
+        "channel": {
+          "const": "antidengue",
+          "default": "antidengue",
+          "title": "Channel",
+          "type": "string"
+        },
+        "message": {
+          "default": "Automation Platform notification test",
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "title": "NotificationTestInput",
       "type": "object"
     },
     "OfficerWrite": {
@@ -4952,26 +7440,6 @@
         "preview_ids"
       ],
       "title": "PreviewIdsInput",
-      "type": "object"
-    },
-    "PreviewInput": {
-      "properties": {
-        "dispatch_profile_id": {
-          "format": "uuid",
-          "title": "Dispatch Profile Id",
-          "type": "string"
-        },
-        "source_job_id": {
-          "format": "uuid",
-          "title": "Source Job Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "source_job_id",
-        "dispatch_profile_id"
-      ],
-      "title": "PreviewInput",
       "type": "object"
     },
     "RecipientScopeInput": {
@@ -5305,6 +7773,11 @@
     },
     "RequestInboundHistory": {
       "properties": {
+        "all_history": {
+          "default": false,
+          "title": "All History",
+          "type": "boolean"
+        },
         "contact_id": {
           "format": "uuid",
           "title": "Contact Id",
@@ -5312,7 +7785,7 @@
         },
         "count": {
           "default": 50,
-          "maximum": 200.0,
+          "maximum": 5000.0,
           "minimum": 1.0,
           "title": "Count",
           "type": "integer"
@@ -5322,6 +7795,148 @@
         "contact_id"
       ],
       "title": "RequestInboundHistory",
+      "type": "object"
+    },
+    "ReviewComplaintGroupRequest": {
+      "properties": {
+        "decision": {
+          "enum": [
+            "approved",
+            "rejected"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Note"
+        },
+        "reviewed_by": {
+          "default": "web-operator",
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Reviewed By",
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision"
+      ],
+      "title": "ReviewComplaintGroupRequest",
+      "type": "object"
+    },
+    "ReviewProcessingItemRequest": {
+      "properties": {
+        "category": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Category"
+        },
+        "complaint_number": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Complaint Number"
+        },
+        "decision": {
+          "enum": [
+            "pending",
+            "approved",
+            "rejected",
+            "deferred"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Note"
+        },
+        "reviewed_by": {
+          "default": "web-operator",
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Reviewed By",
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision"
+      ],
+      "title": "ReviewProcessingItemRequest",
+      "type": "object"
+    },
+    "RuleUpdate": {
+      "properties": {
+        "minimum_seconds": {
+          "anyOf": [
+            {
+              "maximum": 86400.0,
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Minimum Seconds"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 180,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Name"
+        },
+        "operator": {
+          "anyOf": [
+            {
+              "pattern": "^(lt|lte)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Operator"
+        }
+      },
+      "title": "RuleUpdate",
       "type": "object"
     },
     "SchoolWrite": {
@@ -5464,6 +8079,45 @@
       "title": "SheetFilterJobRequest",
       "type": "object"
     },
+    "SimpleActivityRuleInput": {
+      "properties": {
+        "created_by": {
+          "default": "web-operator",
+          "maxLength": 120,
+          "title": "Created By",
+          "type": "string"
+        },
+        "minimum_seconds": {
+          "default": 300,
+          "maximum": 86400.0,
+          "minimum": 1.0,
+          "title": "Minimum Seconds",
+          "type": "integer"
+        },
+        "name": {
+          "maxLength": 180,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "operator": {
+          "default": "lt",
+          "pattern": "^(lt|lte)$",
+          "title": "Operator",
+          "type": "string"
+        },
+        "timezone": {
+          "default": "Asia/Karachi",
+          "title": "Timezone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "SimpleActivityRuleInput",
+      "type": "object"
+    },
     "TemplateInput": {
       "properties": {
         "application_id": {
@@ -5486,7 +8140,12 @@
         },
         "category": {
           "default": "report",
-          "maxLength": 80,
+          "enum": [
+            "report",
+            "system",
+            "escalation",
+            "zero_result_acknowledgement"
+          ],
           "title": "Category",
           "type": "string"
         },
@@ -5629,6 +8288,72 @@
       ],
       "title": "ValidationError",
       "type": "object"
+    },
+    "antidengue_automation__simple_activity_rule_api__PreviewInput": {
+      "properties": {
+        "created_by": {
+          "default": "web-operator",
+          "maxLength": 120,
+          "title": "Created By",
+          "type": "string"
+        },
+        "minimum_seconds": {
+          "default": 300,
+          "maximum": 86400.0,
+          "minimum": 1.0,
+          "title": "Minimum Seconds",
+          "type": "integer"
+        },
+        "name": {
+          "maxLength": 180,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "operator": {
+          "default": "lt",
+          "pattern": "^(lt|lte)$",
+          "title": "Operator",
+          "type": "string"
+        },
+        "sample_size": {
+          "default": 20,
+          "maximum": 100.0,
+          "minimum": 1.0,
+          "title": "Sample Size",
+          "type": "integer"
+        },
+        "timezone": {
+          "default": "Asia/Karachi",
+          "title": "Timezone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "PreviewInput",
+      "type": "object"
+    },
+    "whatsapp_gateway__previews__schemas__PreviewInput": {
+      "properties": {
+        "dispatch_profile_id": {
+          "format": "uuid",
+          "title": "Dispatch Profile Id",
+          "type": "string"
+        },
+        "source_job_id": {
+          "format": "uuid",
+          "title": "Source Job Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_job_id",
+        "dispatch_profile_id"
+      ],
+      "title": "PreviewInput",
+      "type": "object"
     }
   },
   "public_symbols": {
@@ -5663,6 +8388,7 @@
     "whatsapp_gateway.models": [
       "WhatsAppAccount",
       "WhatsAppActivity",
+      "WhatsAppDailyMessageClaim",
       "WhatsAppApplication",
       "WhatsAppAudience",
       "WhatsAppAudienceMember",
@@ -5679,10 +8405,17 @@
       "WhatsAppGroupMember",
       "WhatsAppIdentityAlias",
       "WhatsAppInboundAttachment",
+      "WhatsAppInboundBatch",
+      "WhatsAppInboundBatchEvent",
+      "WhatsAppInboundBatchItem",
       "WhatsAppInboundExportItem",
       "WhatsAppInboundExportRun",
       "WhatsAppInboundHistoryRequest",
       "WhatsAppInboundMessage",
+      "WhatsAppInboundProcessingEvent",
+      "WhatsAppInboundProcessingItem",
+      "WhatsAppInboundProcessingRun",
+      "WhatsAppInboundStoredObject",
       "WhatsAppRecipientScope",
       "WhatsAppReportType",
       "WhatsAppSettings",
@@ -5709,6 +8442,7 @@
     ],
     "whatsapp_gateway.tasks": [
       "compile_dispatch_preview_job",
+      "compile_dispatch_preview_v2_job",
       "send_approved_preview_job"
     ]
   },
@@ -6434,6 +9168,235 @@
       ],
       "name": "whatsapp_audience_members"
     },
+    "whatsapp_audience_sources": {
+      "columns": [
+        {
+          "default": {
+            "callable": "uuid.uuid4",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "id",
+          "nullable": false,
+          "primary_key": true,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_audiences.id"
+          ],
+          "index": true,
+          "name": "audience_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'master_data_jurisdictions'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "source_type",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "recipient_role",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "wings.id"
+          ],
+          "index": true,
+          "name": "wing_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "route_scope_key",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "True"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "aggregate_by_recipient",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "BOOLEAN",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "True"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "enabled",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "BOOLEAN",
+          "unique": false
+        },
+        {
+          "default": {
+            "callable": "automation_core.time.utcnow",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "created_at",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": {
+            "callable": "automation_core.time.utcnow",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "updated_at",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        }
+      ],
+      "constraints": [
+        {
+          "columns": [
+            "audience_id",
+            "recipient_role",
+            "route_scope_key",
+            "source_type",
+            "wing_id"
+          ],
+          "kind": "unique",
+          "name": "uq_whatsapp_audience_sources_selector"
+        },
+        {
+          "columns": [
+            "audience_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_audiences.id"
+          ]
+        },
+        {
+          "columns": [
+            "wing_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "wings.id"
+          ]
+        },
+        {
+          "kind": "check",
+          "name": "ck_whatsapp_audience_sources_role",
+          "sqltext": "recipient_role IN ('aeo', 'ddeo')"
+        },
+        {
+          "kind": "check",
+          "name": "ck_whatsapp_audience_sources_scope",
+          "sqltext": "route_scope_key IN ('markaz', 'tehsil')"
+        },
+        {
+          "kind": "check",
+          "name": "ck_whatsapp_audience_sources_type",
+          "sqltext": "source_type IN ('master_data_jurisdictions')"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "audience_id"
+          ],
+          "name": "ix_whatsapp_audience_sources_audience_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "enabled"
+          ],
+          "name": "ix_whatsapp_audience_sources_enabled",
+          "unique": false
+        },
+        {
+          "columns": [
+            "recipient_role"
+          ],
+          "name": "ix_whatsapp_audience_sources_recipient_role",
+          "unique": false
+        },
+        {
+          "columns": [
+            "route_scope_key"
+          ],
+          "name": "ix_whatsapp_audience_sources_route_scope_key",
+          "unique": false
+        },
+        {
+          "columns": [
+            "source_type"
+          ],
+          "name": "ix_whatsapp_audience_sources_source_type",
+          "unique": false
+        },
+        {
+          "columns": [
+            "wing_id"
+          ],
+          "name": "ix_whatsapp_audience_sources_wing_id",
+          "unique": false
+        }
+      ],
+      "name": "whatsapp_audience_sources"
+    },
     "whatsapp_audiences": {
       "columns": [
         {
@@ -6907,6 +9870,408 @@
       ],
       "name": "whatsapp_contact_links"
     },
+    "whatsapp_daily_message_claims": {
+      "columns": [
+        {
+          "default": {
+            "callable": "uuid.uuid4",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "id",
+          "nullable": false,
+          "primary_key": true,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "semantic_key",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR(64)",
+          "unique": true
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "business_date",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATE",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "purpose",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR(80)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_accounts.id"
+          ],
+          "index": true,
+          "name": "account_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_applications.id"
+          ],
+          "index": true,
+          "name": "application_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_report_types.id"
+          ],
+          "index": true,
+          "name": "report_type_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_templates.id"
+          ],
+          "index": true,
+          "name": "template_id",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_dispatch_previews.id"
+          ],
+          "index": true,
+          "name": "preview_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_dispatch_preview_deliveries.id"
+          ],
+          "index": true,
+          "name": "preview_delivery_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_dispatch_approvals.id"
+          ],
+          "index": true,
+          "name": "approval_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "target_jid",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR(160)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "scope_key",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR(100)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "scope_value",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR(100)",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "''"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "scope_label",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR(200)",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "''"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "template_key",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR(100)",
+          "unique": false
+        },
+        {
+          "default": {
+            "callable": "automation_core.time.utcnow",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "created_at",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        }
+      ],
+      "constraints": [
+        {
+          "columns": [
+            "account_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_accounts.id"
+          ]
+        },
+        {
+          "columns": [
+            "application_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_applications.id"
+          ]
+        },
+        {
+          "columns": [
+            "approval_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_dispatch_approvals.id"
+          ]
+        },
+        {
+          "columns": [
+            "preview_delivery_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_dispatch_preview_deliveries.id"
+          ]
+        },
+        {
+          "columns": [
+            "preview_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_dispatch_previews.id"
+          ]
+        },
+        {
+          "columns": [
+            "report_type_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_report_types.id"
+          ]
+        },
+        {
+          "columns": [
+            "semantic_key"
+          ],
+          "kind": "unique",
+          "name": "uq_whatsapp_daily_message_claim_semantic_key"
+        },
+        {
+          "columns": [
+            "template_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_templates.id"
+          ]
+        },
+        {
+          "kind": "check",
+          "name": "ck_whatsapp_daily_message_claim_purpose",
+          "sqltext": "purpose IN ('zero_result_acknowledgement')"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "account_id"
+          ],
+          "name": "ix_whatsapp_daily_message_claims_account_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "application_id"
+          ],
+          "name": "ix_whatsapp_daily_message_claims_application_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "approval_id"
+          ],
+          "name": "ix_whatsapp_daily_message_claims_approval_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "business_date"
+          ],
+          "name": "ix_whatsapp_daily_message_claims_business_date",
+          "unique": false
+        },
+        {
+          "columns": [
+            "created_at"
+          ],
+          "name": "ix_whatsapp_daily_message_claims_created_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "preview_delivery_id"
+          ],
+          "name": "ix_whatsapp_daily_message_claims_preview_delivery_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "preview_id"
+          ],
+          "name": "ix_whatsapp_daily_message_claims_preview_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "purpose"
+          ],
+          "name": "ix_whatsapp_daily_message_claims_purpose",
+          "unique": false
+        },
+        {
+          "columns": [
+            "report_type_id"
+          ],
+          "name": "ix_whatsapp_daily_message_claims_report_type_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "scope_key"
+          ],
+          "name": "ix_whatsapp_daily_message_claims_scope_key",
+          "unique": false
+        },
+        {
+          "columns": [
+            "scope_value"
+          ],
+          "name": "ix_whatsapp_daily_message_claims_scope_value",
+          "unique": false
+        },
+        {
+          "columns": [
+            "semantic_key"
+          ],
+          "name": "ix_whatsapp_daily_message_claims_semantic_key",
+          "unique": true
+        },
+        {
+          "columns": [
+            "target_jid"
+          ],
+          "name": "ix_whatsapp_daily_message_claims_target_jid",
+          "unique": false
+        },
+        {
+          "columns": [
+            "template_id"
+          ],
+          "name": "ix_whatsapp_daily_message_claims_template_id",
+          "unique": false
+        }
+      ],
+      "name": "whatsapp_daily_message_claims"
+    },
     "whatsapp_deliveries": {
       "columns": [
         {
@@ -7283,6 +10648,19 @@
         },
         {
           "default": null,
+          "foreign_keys": [
+            "master_contacts.id"
+          ],
+          "index": true,
+          "name": "master_contact_id",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
           "foreign_keys": [],
           "index": true,
           "name": "canonical_key",
@@ -7467,6 +10845,16 @@
           "targets": [
             "whatsapp_accounts.id"
           ]
+        },
+        {
+          "columns": [
+            "master_contact_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "master_contacts.id"
+          ]
         }
       ],
       "indexes": [
@@ -7517,6 +10905,13 @@
             "last_synced_at"
           ],
           "name": "ix_whatsapp_directory_contacts_last_synced_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "master_contact_id"
+          ],
+          "name": "ix_whatsapp_directory_contacts_master_contact_id",
           "unique": false
         },
         {
@@ -8055,6 +11450,19 @@
         {
           "default": null,
           "foreign_keys": [
+            "stored_objects.id"
+          ],
+          "index": true,
+          "name": "stored_object_id",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
             "whatsapp_report_types.id"
           ],
           "index": true,
@@ -8159,6 +11567,31 @@
         {
           "default": {
             "kind": "ScalarElementColumnDefault",
+            "value": "'local'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "storage_status",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "storage_error",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "TEXT",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
             "value": "'ready'"
           },
           "foreign_keys": [],
@@ -8225,6 +11658,16 @@
           "name": null,
           "targets": [
             "whatsapp_report_types.id"
+          ]
+        },
+        {
+          "columns": [
+            "stored_object_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "stored_objects.id"
           ]
         },
         {
@@ -8303,6 +11746,20 @@
             "status"
           ],
           "name": "ix_whatsapp_dispatch_preview_artifacts_status",
+          "unique": false
+        },
+        {
+          "columns": [
+            "storage_status"
+          ],
+          "name": "ix_whatsapp_dispatch_preview_artifacts_storage_status",
+          "unique": false
+        },
+        {
+          "columns": [
+            "stored_object_id"
+          ],
+          "name": "ix_whatsapp_dispatch_preview_artifacts_stored_object_id",
           "unique": false
         },
         {
@@ -9367,6 +12824,20 @@
         {
           "default": {
             "kind": "ScalarElementColumnDefault",
+            "value": "'recipient'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "delivery_granularity",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
             "value": "True"
           },
           "foreign_keys": [],
@@ -9616,6 +13087,11 @@
         },
         {
           "kind": "check",
+          "name": "ck_whatsapp_profiles_delivery_granularity",
+          "sqltext": "delivery_granularity IN ('recipient', 'scope')"
+        },
+        {
+          "kind": "check",
           "name": "ck_whatsapp_profiles_delivery_mode",
           "sqltext": "delivery_mode IN ('groups', 'individuals', 'mixed')"
         },
@@ -9650,6 +13126,13 @@
             "audience_id"
           ],
           "name": "ix_whatsapp_dispatch_profiles_audience_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "delivery_granularity"
+          ],
+          "name": "ix_whatsapp_dispatch_profiles_delivery_granularity",
           "unique": false
         },
         {
@@ -10581,6 +14064,55 @@
         },
         {
           "default": null,
+          "foreign_keys": [
+            "whatsapp_inbound_stored_objects.id"
+          ],
+          "index": true,
+          "name": "stored_object_id",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'local_only'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "storage_status",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "storage_error",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "TEXT",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "storage_uploaded_at",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": null,
           "foreign_keys": [],
           "index": false,
           "name": "caption",
@@ -10686,6 +14218,16 @@
           ],
           "kind": "unique",
           "name": "uq_whatsapp_inbound_attachment_message"
+        },
+        {
+          "columns": [
+            "stored_object_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_inbound_stored_objects.id"
+          ]
         }
       ],
       "indexes": [
@@ -10782,6 +14324,27 @@
         },
         {
           "columns": [
+            "storage_status"
+          ],
+          "name": "ix_whatsapp_inbound_attachments_storage_status",
+          "unique": false
+        },
+        {
+          "columns": [
+            "storage_uploaded_at"
+          ],
+          "name": "ix_whatsapp_inbound_attachments_storage_uploaded_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "stored_object_id"
+          ],
+          "name": "ix_whatsapp_inbound_attachments_stored_object_id",
+          "unique": false
+        },
+        {
+          "columns": [
             "updated_at"
           ],
           "name": "ix_whatsapp_inbound_attachments_updated_at",
@@ -10789,6 +14352,1002 @@
         }
       ],
       "name": "whatsapp_inbound_attachments"
+    },
+    "whatsapp_inbound_batch_events": {
+      "columns": [
+        {
+          "default": {
+            "callable": "uuid.uuid4",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "id",
+          "nullable": false,
+          "primary_key": true,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_inbound_batches.id"
+          ],
+          "index": true,
+          "name": "batch_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_inbound_batch_items.id"
+          ],
+          "index": true,
+          "name": "batch_item_id",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'info'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "level",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "event_type",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "message",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "TEXT",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "details_json",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "JSON",
+          "unique": false
+        },
+        {
+          "default": {
+            "callable": "automation_core.time.utcnow",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "created_at",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        }
+      ],
+      "constraints": [
+        {
+          "columns": [
+            "batch_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_inbound_batches.id"
+          ]
+        },
+        {
+          "columns": [
+            "batch_item_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_inbound_batch_items.id"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "batch_id"
+          ],
+          "name": "ix_whatsapp_inbound_batch_events_batch_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "batch_item_id"
+          ],
+          "name": "ix_whatsapp_inbound_batch_events_batch_item_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "created_at"
+          ],
+          "name": "ix_whatsapp_inbound_batch_events_created_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "event_type"
+          ],
+          "name": "ix_whatsapp_inbound_batch_events_event_type",
+          "unique": false
+        },
+        {
+          "columns": [
+            "level"
+          ],
+          "name": "ix_whatsapp_inbound_batch_events_level",
+          "unique": false
+        }
+      ],
+      "name": "whatsapp_inbound_batch_events"
+    },
+    "whatsapp_inbound_batch_items": {
+      "columns": [
+        {
+          "default": {
+            "callable": "uuid.uuid4",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "id",
+          "nullable": false,
+          "primary_key": true,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_inbound_batches.id"
+          ],
+          "index": true,
+          "name": "batch_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_inbound_attachments.id"
+          ],
+          "index": true,
+          "name": "attachment_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_inbound_messages.id"
+          ],
+          "index": true,
+          "name": "message_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_inbound_stored_objects.id"
+          ],
+          "index": true,
+          "name": "stored_object_id",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'discovered'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "status",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "original_filename",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "message_timestamp",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "mime_type",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "sha256",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "size_bytes",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "object_key",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "TEXT",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "error",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "TEXT",
+          "unique": false
+        },
+        {
+          "default": {
+            "callable": "automation_core.time.utcnow",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "created_at",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "stored_at",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": {
+            "callable": "automation_core.time.utcnow",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "updated_at",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        }
+      ],
+      "constraints": [
+        {
+          "columns": [
+            "attachment_id",
+            "batch_id"
+          ],
+          "kind": "unique",
+          "name": "uq_whatsapp_inbound_batch_item_attachment"
+        },
+        {
+          "columns": [
+            "attachment_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_inbound_attachments.id"
+          ]
+        },
+        {
+          "columns": [
+            "batch_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_inbound_batches.id"
+          ]
+        },
+        {
+          "columns": [
+            "message_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_inbound_messages.id"
+          ]
+        },
+        {
+          "columns": [
+            "stored_object_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_inbound_stored_objects.id"
+          ]
+        },
+        {
+          "kind": "check",
+          "name": "ck_whatsapp_inbound_batch_items_status",
+          "sqltext": "status IN ('discovered', 'downloading', 'hashing', 'uploading', 'stored', 'already_stored', 'storage_pending', 'unsupported', 'failed')"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "attachment_id"
+          ],
+          "name": "ix_whatsapp_inbound_batch_items_attachment_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "batch_id"
+          ],
+          "name": "ix_whatsapp_inbound_batch_items_batch_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "created_at"
+          ],
+          "name": "ix_whatsapp_inbound_batch_items_created_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "message_id"
+          ],
+          "name": "ix_whatsapp_inbound_batch_items_message_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "message_timestamp"
+          ],
+          "name": "ix_whatsapp_inbound_batch_items_message_timestamp",
+          "unique": false
+        },
+        {
+          "columns": [
+            "mime_type"
+          ],
+          "name": "ix_whatsapp_inbound_batch_items_mime_type",
+          "unique": false
+        },
+        {
+          "columns": [
+            "original_filename"
+          ],
+          "name": "ix_whatsapp_inbound_batch_items_original_filename",
+          "unique": false
+        },
+        {
+          "columns": [
+            "sha256"
+          ],
+          "name": "ix_whatsapp_inbound_batch_items_sha256",
+          "unique": false
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "name": "ix_whatsapp_inbound_batch_items_status",
+          "unique": false
+        },
+        {
+          "columns": [
+            "stored_at"
+          ],
+          "name": "ix_whatsapp_inbound_batch_items_stored_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "stored_object_id"
+          ],
+          "name": "ix_whatsapp_inbound_batch_items_stored_object_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "name": "ix_whatsapp_inbound_batch_items_updated_at",
+          "unique": false
+        }
+      ],
+      "name": "whatsapp_inbound_batch_items"
+    },
+    "whatsapp_inbound_batches": {
+      "columns": [
+        {
+          "default": {
+            "callable": "uuid.uuid4",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "id",
+          "nullable": false,
+          "primary_key": true,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "batch_code",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": true
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_accounts.id"
+          ],
+          "index": true,
+          "name": "account_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_directory_contacts.id"
+          ],
+          "index": true,
+          "name": "contact_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "worker_key",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'wwebjs'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "provider",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "50"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "requested_count",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "False"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "all_history",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "BOOLEAN",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "remote_jid",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "anchor_message_id",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "anchor_timestamp",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'created'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "status",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "messages_discovered",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "files_discovered",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "files_stored",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "files_reused",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "files_failed",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "total_bytes",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'local'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "storage_backend",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "raw_bucket",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "manifest_bucket",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "manifest_object_key",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "TEXT",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "error",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "TEXT",
+          "unique": false
+        },
+        {
+          "default": {
+            "callable": "automation_core.time.utcnow",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "created_at",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "started_at",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "finished_at",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": {
+            "callable": "automation_core.time.utcnow",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "updated_at",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        }
+      ],
+      "constraints": [
+        {
+          "columns": [
+            "account_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_accounts.id"
+          ]
+        },
+        {
+          "columns": [
+            "contact_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_directory_contacts.id"
+          ]
+        },
+        {
+          "kind": "check",
+          "name": "ck_whatsapp_inbound_batches_status",
+          "sqltext": "status IN ('created', 'fetching', 'storing', 'completed', 'completed_with_errors', 'failed', 'cancelled')"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "account_id"
+          ],
+          "name": "ix_whatsapp_inbound_batches_account_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "anchor_message_id"
+          ],
+          "name": "ix_whatsapp_inbound_batches_anchor_message_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "anchor_timestamp"
+          ],
+          "name": "ix_whatsapp_inbound_batches_anchor_timestamp",
+          "unique": false
+        },
+        {
+          "columns": [
+            "batch_code"
+          ],
+          "name": "ix_whatsapp_inbound_batches_batch_code",
+          "unique": true
+        },
+        {
+          "columns": [
+            "contact_id"
+          ],
+          "name": "ix_whatsapp_inbound_batches_contact_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "created_at"
+          ],
+          "name": "ix_whatsapp_inbound_batches_created_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "finished_at"
+          ],
+          "name": "ix_whatsapp_inbound_batches_finished_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "manifest_bucket"
+          ],
+          "name": "ix_whatsapp_inbound_batches_manifest_bucket",
+          "unique": false
+        },
+        {
+          "columns": [
+            "provider"
+          ],
+          "name": "ix_whatsapp_inbound_batches_provider",
+          "unique": false
+        },
+        {
+          "columns": [
+            "raw_bucket"
+          ],
+          "name": "ix_whatsapp_inbound_batches_raw_bucket",
+          "unique": false
+        },
+        {
+          "columns": [
+            "remote_jid"
+          ],
+          "name": "ix_whatsapp_inbound_batches_remote_jid",
+          "unique": false
+        },
+        {
+          "columns": [
+            "started_at"
+          ],
+          "name": "ix_whatsapp_inbound_batches_started_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "name": "ix_whatsapp_inbound_batches_status",
+          "unique": false
+        },
+        {
+          "columns": [
+            "storage_backend"
+          ],
+          "name": "ix_whatsapp_inbound_batches_storage_backend",
+          "unique": false
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "name": "ix_whatsapp_inbound_batches_updated_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "worker_key"
+          ],
+          "name": "ix_whatsapp_inbound_batches_worker_key",
+          "unique": false
+        }
+      ],
+      "name": "whatsapp_inbound_batches"
     },
     "whatsapp_inbound_export_items": {
       "columns": [
@@ -11501,6 +16060,33 @@
         {
           "default": {
             "kind": "ScalarElementColumnDefault",
+            "value": "'baileys'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "provider",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_inbound_batches.id"
+          ],
+          "index": true,
+          "name": "batch_id",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": true
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
             "value": "50"
           },
           "foreign_keys": [],
@@ -11510,6 +16096,20 @@
           "primary_key": false,
           "server_default": null,
           "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "False"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "all_history",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "BOOLEAN",
           "unique": false
         },
         {
@@ -11712,6 +16312,16 @@
         },
         {
           "columns": [
+            "batch_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_inbound_batches.id"
+          ]
+        },
+        {
+          "columns": [
             "contact_id"
           ],
           "kind": "foreign_key",
@@ -11757,6 +16367,13 @@
         },
         {
           "columns": [
+            "batch_id"
+          ],
+          "name": "ix_whatsapp_inbound_history_requests_batch_id",
+          "unique": true
+        },
+        {
+          "columns": [
             "contact_id"
           ],
           "name": "ix_whatsapp_inbound_history_requests_contact_id",
@@ -11781,6 +16398,13 @@
             "operation_id"
           ],
           "name": "ix_whatsapp_inbound_history_requests_operation_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "provider"
+          ],
+          "name": "ix_whatsapp_inbound_history_requests_provider",
           "unique": false
         },
         {
@@ -12202,6 +16826,1385 @@
         }
       ],
       "name": "whatsapp_inbound_messages"
+    },
+    "whatsapp_inbound_processing_events": {
+      "columns": [
+        {
+          "default": {
+            "callable": "uuid.uuid4",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "id",
+          "nullable": false,
+          "primary_key": true,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_inbound_processing_runs.id"
+          ],
+          "index": true,
+          "name": "run_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_inbound_processing_items.id"
+          ],
+          "index": true,
+          "name": "processing_item_id",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'info'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "level",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "event_type",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "message",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "TEXT",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "details_json",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "JSON",
+          "unique": false
+        },
+        {
+          "default": {
+            "callable": "automation_core.time.utcnow",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "created_at",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        }
+      ],
+      "constraints": [
+        {
+          "columns": [
+            "processing_item_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_inbound_processing_items.id"
+          ]
+        },
+        {
+          "columns": [
+            "run_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_inbound_processing_runs.id"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "created_at"
+          ],
+          "name": "ix_whatsapp_inbound_processing_events_created_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "event_type"
+          ],
+          "name": "ix_whatsapp_inbound_processing_events_event_type",
+          "unique": false
+        },
+        {
+          "columns": [
+            "level"
+          ],
+          "name": "ix_whatsapp_inbound_processing_events_level",
+          "unique": false
+        },
+        {
+          "columns": [
+            "processing_item_id"
+          ],
+          "name": "ix_whatsapp_inbound_processing_events_processing_item_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "run_id"
+          ],
+          "name": "ix_whatsapp_inbound_processing_events_run_id",
+          "unique": false
+        }
+      ],
+      "name": "whatsapp_inbound_processing_events"
+    },
+    "whatsapp_inbound_processing_items": {
+      "columns": [
+        {
+          "default": {
+            "callable": "uuid.uuid4",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "id",
+          "nullable": false,
+          "primary_key": true,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_inbound_processing_runs.id"
+          ],
+          "index": true,
+          "name": "run_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_inbound_batch_items.id"
+          ],
+          "index": true,
+          "name": "batch_item_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_inbound_attachments.id"
+          ],
+          "index": true,
+          "name": "attachment_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_inbound_stored_objects.id"
+          ],
+          "index": true,
+          "name": "stored_object_id",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'queued'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "status",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'unknown'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "primary_category",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "detected_complaint_number",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0.0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "confidence",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "FLOAT",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "evidence_json",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "JSON",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "extracted_text",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "TEXT",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "extraction_method",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "extracted_metadata_json",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "JSON",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'not_checked'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "paperless_category",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "paperless_reason",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "TEXT",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "paperless_document_ids",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "JSON",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "paperless_statuses",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "JSON",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'pending'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "review_status",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "reviewer_note",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "TEXT",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "reviewed_by",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "reviewed_at",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "derived_object_key",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "TEXT",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "error",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "TEXT",
+          "unique": false
+        },
+        {
+          "default": {
+            "callable": "automation_core.time.utcnow",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "created_at",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "started_at",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "finished_at",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": {
+            "callable": "automation_core.time.utcnow",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "updated_at",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        }
+      ],
+      "constraints": [
+        {
+          "columns": [
+            "attachment_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_inbound_attachments.id"
+          ]
+        },
+        {
+          "columns": [
+            "batch_item_id",
+            "run_id"
+          ],
+          "kind": "unique",
+          "name": "uq_whatsapp_inbound_processing_item_batch_item"
+        },
+        {
+          "columns": [
+            "batch_item_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_inbound_batch_items.id"
+          ]
+        },
+        {
+          "columns": [
+            "run_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_inbound_processing_runs.id"
+          ]
+        },
+        {
+          "columns": [
+            "stored_object_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_inbound_stored_objects.id"
+          ]
+        },
+        {
+          "kind": "check",
+          "name": "ck_whatsapp_inbound_processing_items_review_status",
+          "sqltext": "review_status IN ('pending', 'approved', 'rejected', 'deferred')"
+        },
+        {
+          "kind": "check",
+          "name": "ck_whatsapp_inbound_processing_items_status",
+          "sqltext": "status IN ('queued', 'extracting', 'extracted', 'duplicate_in_paperless', 'eligible', 'needs_review', 'approved', 'rejected', 'deferred', 'unsupported', 'failed')"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "attachment_id"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_attachment_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "batch_item_id"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_batch_item_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "created_at"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_created_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "detected_complaint_number"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_detected_complaint_number",
+          "unique": false
+        },
+        {
+          "columns": [
+            "extraction_method"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_extraction_method",
+          "unique": false
+        },
+        {
+          "columns": [
+            "finished_at"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_finished_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "paperless_category"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_paperless_category",
+          "unique": false
+        },
+        {
+          "columns": [
+            "primary_category"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_primary_category",
+          "unique": false
+        },
+        {
+          "columns": [
+            "review_status"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_review_status",
+          "unique": false
+        },
+        {
+          "columns": [
+            "reviewed_at"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_reviewed_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "reviewed_by"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_reviewed_by",
+          "unique": false
+        },
+        {
+          "columns": [
+            "run_id"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_run_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "started_at"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_started_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_status",
+          "unique": false
+        },
+        {
+          "columns": [
+            "stored_object_id"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_stored_object_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "name": "ix_whatsapp_inbound_processing_items_updated_at",
+          "unique": false
+        }
+      ],
+      "name": "whatsapp_inbound_processing_items"
+    },
+    "whatsapp_inbound_processing_runs": {
+      "columns": [
+        {
+          "default": {
+            "callable": "uuid.uuid4",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "id",
+          "nullable": false,
+          "primary_key": true,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "run_code",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": true
+        },
+        {
+          "default": null,
+          "foreign_keys": [
+            "whatsapp_inbound_batches.id"
+          ],
+          "index": true,
+          "name": "batch_id",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'queued'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "status",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'crm-classifier-v1'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "classifier_version",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'crm-104-v1'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "crm_rule_version",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "True"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "paperless_check_requested",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "BOOLEAN",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'pending'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "paperless_check_status",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "paperless_error",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "TEXT",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "total_items",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "processed_items",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "crm_complaints",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "possible_crm",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "supporting_documents",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "reply_reports",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "non_crm",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "unknown_items",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "duplicate_items",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "eligible_items",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "review_items",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "failed_items",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "configuration_json",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "JSON",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "error",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "TEXT",
+          "unique": false
+        },
+        {
+          "default": {
+            "callable": "automation_core.time.utcnow",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "created_at",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "started_at",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "finished_at",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": {
+            "callable": "automation_core.time.utcnow",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "updated_at",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        }
+      ],
+      "constraints": [
+        {
+          "columns": [
+            "batch_id"
+          ],
+          "kind": "foreign_key",
+          "name": null,
+          "targets": [
+            "whatsapp_inbound_batches.id"
+          ]
+        },
+        {
+          "kind": "check",
+          "name": "ck_whatsapp_inbound_processing_runs_status",
+          "sqltext": "status IN ('queued', 'extracting', 'checking_paperless', 'completed', 'completed_with_errors', 'failed', 'cancelled')"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "batch_id"
+          ],
+          "name": "ix_whatsapp_inbound_processing_runs_batch_id",
+          "unique": false
+        },
+        {
+          "columns": [
+            "classifier_version"
+          ],
+          "name": "ix_whatsapp_inbound_processing_runs_classifier_version",
+          "unique": false
+        },
+        {
+          "columns": [
+            "created_at"
+          ],
+          "name": "ix_whatsapp_inbound_processing_runs_created_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "crm_rule_version"
+          ],
+          "name": "ix_whatsapp_inbound_processing_runs_crm_rule_version",
+          "unique": false
+        },
+        {
+          "columns": [
+            "finished_at"
+          ],
+          "name": "ix_whatsapp_inbound_processing_runs_finished_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "paperless_check_requested"
+          ],
+          "name": "ix_whatsapp_inbound_processing_runs_paperless_check_requested",
+          "unique": false
+        },
+        {
+          "columns": [
+            "paperless_check_status"
+          ],
+          "name": "ix_whatsapp_inbound_processing_runs_paperless_check_status",
+          "unique": false
+        },
+        {
+          "columns": [
+            "run_code"
+          ],
+          "name": "ix_whatsapp_inbound_processing_runs_run_code",
+          "unique": true
+        },
+        {
+          "columns": [
+            "started_at"
+          ],
+          "name": "ix_whatsapp_inbound_processing_runs_started_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "name": "ix_whatsapp_inbound_processing_runs_status",
+          "unique": false
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "name": "ix_whatsapp_inbound_processing_runs_updated_at",
+          "unique": false
+        }
+      ],
+      "name": "whatsapp_inbound_processing_runs"
+    },
+    "whatsapp_inbound_stored_objects": {
+      "columns": [
+        {
+          "default": {
+            "callable": "uuid.uuid4",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "id",
+          "nullable": false,
+          "primary_key": true,
+          "server_default": null,
+          "type": "CHAR(32)",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'s3'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "backend",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "bucket",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "object_key",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "sha256",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "size_bytes",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "content_type",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "etag",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": true,
+          "name": "version_id",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "metadata_json",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "JSON",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "'available'"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "status",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": {
+            "callable": "automation_core.time.utcnow",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "created_at",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        },
+        {
+          "default": {
+            "callable": "automation_core.time.utcnow",
+            "kind": "CallableColumnDefault"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "verified_at",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "DATETIME",
+          "unique": false
+        }
+      ],
+      "constraints": [
+        {
+          "columns": [
+            "backend",
+            "bucket",
+            "object_key"
+          ],
+          "kind": "unique",
+          "name": "uq_whatsapp_inbound_stored_object_location"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "backend"
+          ],
+          "name": "ix_whatsapp_inbound_stored_objects_backend",
+          "unique": false
+        },
+        {
+          "columns": [
+            "bucket"
+          ],
+          "name": "ix_whatsapp_inbound_stored_objects_bucket",
+          "unique": false
+        },
+        {
+          "columns": [
+            "content_type"
+          ],
+          "name": "ix_whatsapp_inbound_stored_objects_content_type",
+          "unique": false
+        },
+        {
+          "columns": [
+            "created_at"
+          ],
+          "name": "ix_whatsapp_inbound_stored_objects_created_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "etag"
+          ],
+          "name": "ix_whatsapp_inbound_stored_objects_etag",
+          "unique": false
+        },
+        {
+          "columns": [
+            "object_key"
+          ],
+          "name": "ix_whatsapp_inbound_stored_objects_object_key",
+          "unique": false
+        },
+        {
+          "columns": [
+            "sha256"
+          ],
+          "name": "ix_whatsapp_inbound_stored_objects_sha256",
+          "unique": false
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "name": "ix_whatsapp_inbound_stored_objects_status",
+          "unique": false
+        },
+        {
+          "columns": [
+            "verified_at"
+          ],
+          "name": "ix_whatsapp_inbound_stored_objects_verified_at",
+          "unique": false
+        },
+        {
+          "columns": [
+            "version_id"
+          ],
+          "name": "ix_whatsapp_inbound_stored_objects_version_id",
+          "unique": false
+        }
+      ],
+      "name": "whatsapp_inbound_stored_objects"
     },
     "whatsapp_recipient_scopes": {
       "columns": [

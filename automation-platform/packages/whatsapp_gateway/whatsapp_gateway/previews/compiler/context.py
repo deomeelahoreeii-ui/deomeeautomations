@@ -8,12 +8,22 @@ from sqlalchemy import select
 from sqlmodel import Session
 
 from automation_core.models import Job, JobStatus, JobType
+from antidengue_automation.deadline_policy import (
+    ResolvedDeadline,
+    deadline_from_snapshot,
+    resolve_deadline_policy,
+)
 from master_data.models import Wing
 from whatsapp_gateway.models import (
     WhatsAppAccount, WhatsAppApplication, WhatsAppAudience, WhatsAppAudienceMember,
     WhatsAppDispatchProfile, WhatsAppRecipientScope, WhatsAppReportType, WhatsAppTemplate,
 )
 from whatsapp_gateway.previews.compiler.errors import PreviewCompileError
+from whatsapp_gateway.configuration.dynamic_audiences import (
+    ResolvedAudienceMember,
+    resolve_dynamic_audience,
+)
+from whatsapp_gateway.previews.compiler.capabilities import PlannerCapability, profile_capability
 
 @dataclass(slots=True)
 class CompileContext:
@@ -27,17 +37,20 @@ class CompileContext:
     template: WhatsAppTemplate | None
     wing: Wing
     recipient_scope: WhatsAppRecipientScope | None
-    members: list[WhatsAppAudienceMember]
+    members: list[WhatsAppAudienceMember | ResolvedAudienceMember]
     audience_group_ids: set[uuid.UUID]
     audience_contact_ids: set[uuid.UUID]
     summary: dict[str, Any]
     whatsapp_summary: dict[str, Any]
     source_dispatch_plan: list[Any]
     source_plans: list[dict[str, Any]]
+    planner_capability: PlannerCapability | None = None
+    deadline: ResolvedDeadline | None = None
 
 
 def load_compile_context(
-    session: Session, *, source_job_id: uuid.UUID, dispatch_profile_id: uuid.UUID
+    session: Session, *, source_job_id: uuid.UUID, dispatch_profile_id: uuid.UUID,
+    deadline_snapshot: dict[str, Any] | None = None,
 ) -> CompileContext:
     source_job = session.get(Job, source_job_id)
     if source_job is None:
@@ -76,6 +89,10 @@ def load_compile_context(
             WhatsAppAudienceMember.enabled.is_(True),
         )
     ).all())
+    members.extend(resolve_dynamic_audience(
+        session, audience_id=audience.id, account=account,
+        granularity=profile.delivery_granularity,
+    ))
     audience_group_ids = {member.directory_group_id for member in members if member.directory_group_id}
     audience_contact_ids = {member.directory_contact_id for member in members if member.directory_contact_id}
 
@@ -85,6 +102,11 @@ def load_compile_context(
     if not isinstance(source_dispatch_plan, list):
         source_dispatch_plan = []
     source_plans = [plan for plan in source_dispatch_plan if isinstance(plan, dict)]
+    deadline = (
+        deadline_from_snapshot(deadline_snapshot)
+        if deadline_snapshot is not None
+        else resolve_deadline_policy(session)
+    )
     return CompileContext(
         session=session, source_job=source_job, profile=profile, application=application,
         report_type=report_type, audience=audience, account=account, template=template,
@@ -92,4 +114,6 @@ def load_compile_context(
         audience_group_ids=audience_group_ids, audience_contact_ids=audience_contact_ids,
         summary=summary, whatsapp_summary=whatsapp_summary or {},
         source_dispatch_plan=source_dispatch_plan, source_plans=source_plans,
+        planner_capability=profile_capability(session, profile),
+        deadline=deadline,
     )

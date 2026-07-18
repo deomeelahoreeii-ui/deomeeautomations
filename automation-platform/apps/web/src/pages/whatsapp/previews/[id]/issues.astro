@@ -27,13 +27,14 @@ const { id = "" } = Astro.params;
     const table = document.getElementById("preview-issues-table") as any;
     const el = <T extends HTMLElement>(key: string) => document.getElementById(key) as T;
     const tone = (severity: string) => severity === "blocked" ? "warning" : "inactive";
-    async function loadPage(pageIndex: number, pageSize: number) { const result = await actions.whatsapp.previewIssues({ id, severity: el<HTMLSelectElement>("issue-severity").value, page: pageIndex + 1, pageSize }); if (result.error) throw result.error; const data = result.data as any; el("issue-total").textContent = `${data.total} issue${data.total === 1 ? "" : "s"}`; return { rows: data.items, total: data.total }; }
+    async function loadPage(pageIndex: number, pageSize: number) { const result = await actions.whatsapp.previewIssues({ id, severity: el<HTMLSelectElement>("issue-severity").value, page: pageIndex + 1, pageSize }); if (result.error) throw result.error; const data = result.data as any; el("issue-total").textContent = `${data.total} unique issue${data.total === 1 ? "" : "s"}${data.affected_total ? ` · ${data.affected_total} affected` : ""}`; return { rows: data.items, total: data.total }; }
     try {
       const detail = await actions.whatsapp.preview({ id }); if (detail.error) throw detail.error; const preview = detail.data as any; el("preview-key").textContent = preview.preview_key; el("preview-state").textContent = preview.status; el("preview-state").className = `preview-state ${preview.status}`;
       await table.configure({ manualPagination: true, loadPage, columns: [
         { accessorKey: "severity", header: "Severity", enableSorting: false, cell: ({row}: any) => badge(row.original.severity, tone(row.original.severity)) },
         { accessorKey: "code", header: "Check", enableSorting: false, cell: ({row}: any) => String(row.original.code).replaceAll("_", " ") },
         { accessorKey: "message", header: "Explanation", enableSorting: false },
+        { accessorKey: "occurrence_count", header: "Occurrences", enableSorting: false, cell: ({row}: any) => String(row.original.occurrence_count || 1) },
         { accessorKey: "source_name", header: "Affected item", enableSorting: false, cell: ({row}: any) => stack(row.original.source_name, `${row.original.source_type}${row.original.source_detail ? ` · ${row.original.source_detail}` : ""}`) },
       ]});
     } catch (error) { await showError(error); }

@@ -14,9 +14,19 @@ from whatsapp_gateway.previews.compiler.routes import _plan_recipient_scope
 def persist_delivery(
     ctx: CompileContext, preview: WhatsAppDispatchPreview, state: DeliveryState, seen_signatures: set[str]
 ) -> None:
+    dynamic_scope_ids = list(
+        (state.plan.get("dynamic_audience") or {}).get("markaz_ids") or []
+    )
+    route_scope_ids = list(state.dispatch_route.get("scope_ids") or [])
+    route_identity = sorted(str(value) for value in (
+        dynamic_scope_ids
+        or route_scope_ids
+        or [state.dispatch_route.get("scope_id") or state.route_scope]
+    ) if value)
     dedupe_payload = {
         "target": state.target, "message": state.message,
         "attachments": [item.checksum_sha256 or item.path_snapshot for item in state.attachment_snapshots],
+        "route_identity": route_identity,
     }
     signature = hashlib.sha256(json.dumps(dedupe_payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
     if not state.source_skipped and signature in seen_signatures:
@@ -39,6 +49,8 @@ def persist_delivery(
         attachment_ids=[str(item.id) for item in state.attachment_snapshots],
         routing_snapshot={
             "dispatch_route": state.dispatch_route, "profile_version": ctx.profile.version,
+            "delivery_granularity": ctx.profile.delivery_granularity,
+            "route_identity": route_identity,
             "audience_id": str(ctx.audience.id), "account_id": str(ctx.account.id),
             "report_type_id": str(ctx.report_type.id),
             "template_id": str(ctx.template.id) if ctx.template else None,
@@ -52,8 +64,12 @@ def persist_delivery(
             "scoped_emis": state.plan.get("scoped_emis") or [],
             "delivery_kind": str(state.dispatch_route.get("delivery_kind") or "report"),
             "daily_claim": state.plan.get("daily_claim"),
+            "dynamic_audience": state.plan.get("dynamic_audience"),
             "contact_entity_type": state.contact_link.entity_type if state.contact_link else None,
-            "contact_entity_key": state.contact_link.entity_key if state.contact_link else None,
+            "contact_entity_key": state.contact_link.entity_key if state.contact_link else (
+                f"officer:{state.plan['dynamic_audience']['officer_id']}"
+                if state.plan.get("dynamic_audience") else None
+            ),
         },
         issues=state.problems, status=status, idempotency_key=idempotency_key,
     )

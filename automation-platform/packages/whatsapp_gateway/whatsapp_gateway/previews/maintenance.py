@@ -14,6 +14,11 @@ from whatsapp_gateway.models import (
     WhatsAppAudienceMember, WhatsAppDirectoryContact, WhatsAppDirectoryGroup,
     WhatsAppTemplate,
 )
+from whatsapp_gateway.configuration.dynamic_audiences import (
+    active_audience_sources,
+    dynamic_audience_fingerprint,
+    resolve_dynamic_audience,
+)
 from whatsapp_gateway.previews.artifact_storage import is_managed_preview_artifact, sha256_file
 
 def preview_is_stale(session: Session, preview: WhatsAppDispatchPreview, *, check_files: bool = False) -> bool:
@@ -34,6 +39,16 @@ def preview_is_stale(session: Session, preview: WhatsAppDispatchPreview, *, chec
     audience = session.get(WhatsAppAudience, profile.audience_id)
     if audience is None or not audience.enabled:
         return True
+    manual_members = list(session.scalars(
+        select(WhatsAppAudienceMember).where(
+            WhatsAppAudienceMember.audience_id == audience.id,
+            WhatsAppAudienceMember.enabled.is_(True),
+        )
+    ).all())
+    dynamic_members = resolve_dynamic_audience(
+        session, audience_id=audience.id,
+        granularity=profile.delivery_granularity,
+    )
     current_targets = sorted(
         session.scalars(
             select(WhatsAppAudienceMember.target_key).where(
@@ -42,19 +57,22 @@ def preview_is_stale(session: Session, preview: WhatsAppDispatchPreview, *, chec
             )
         ).all()
     )
+    current_targets.extend(member.target_key for member in dynamic_members)
+    current_targets.sort()
     if current_targets != sorted(audience_snapshot.get("target_keys") or []):
         return True
     current_routes = sorted(
         f"{member.target_key}:{member.route_scope_key}:{member.route_scope_value}"
-        for member in session.scalars(
-            select(WhatsAppAudienceMember).where(
-                WhatsAppAudienceMember.audience_id == audience.id,
-                WhatsAppAudienceMember.enabled.is_(True),
-            )
-        ).all()
+        for member in [*manual_members, *dynamic_members]
     )
     if current_routes != sorted(audience_snapshot.get("target_routes") or []):
         return True
+    frozen_dynamic_fingerprint = audience_snapshot.get("dynamic_fingerprint")
+    if active_audience_sources(session, audience.id) or frozen_dynamic_fingerprint is not None:
+        if dynamic_audience_fingerprint(
+            session, audience.id, granularity=profile.delivery_granularity,
+        ) != frozen_dynamic_fingerprint:
+            return True
     account_snapshot = snapshot.get("account") or {}
     account = session.get(WhatsAppAccount, profile.account_id)
     if account is None or not account.enabled or account.worker_key != account_snapshot.get("worker_key"):
@@ -85,6 +103,19 @@ def preview_is_stale(session: Session, preview: WhatsAppDispatchPreview, *, chec
 
 def preview_dict(session: Session, preview: WhatsAppDispatchPreview, *, check_files: bool = False) -> dict[str, Any]:
     stale = preview_is_stale(session, preview, check_files=check_files)
+    deliveries = list(session.scalars(select(WhatsAppDispatchPreviewDelivery).where(
+        WhatsAppDispatchPreviewDelivery.preview_id == preview.id,
+        WhatsAppDispatchPreviewDelivery.status != "skipped",
+    )).all())
+    unique_recipient_count = len({item.target_jid for item in deliveries if item.target_jid})
+    jurisdiction_ids = {
+        scope_id
+        for item in deliveries
+        for scope_id in (
+            ((item.routing_snapshot or {}).get("dynamic_audience") or {}).get("markaz_ids")
+            or []
+        )
+    }
     return {
         "id": str(preview.id),
         "preview_key": preview.preview_key,
@@ -107,6 +138,9 @@ def preview_dict(session: Session, preview: WhatsAppDispatchPreview, *, check_fi
         "blocked_count": preview.blocked_count,
         "skipped_count": preview.skipped_count,
         "delivery_count": preview.delivery_count,
+        "unique_recipient_count": unique_recipient_count,
+        "jurisdiction_count": len(jurisdiction_ids),
+        "additional_charge_route_count": max(0, len(deliveries) - unique_recipient_count),
         "artifact_count": preview.artifact_count,
         "issues": preview.issues,
         "configuration_snapshot": preview.configuration_snapshot,

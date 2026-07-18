@@ -44,6 +44,11 @@
 .notification-help-panel ol { display: grid; gap: .75rem; padding-left: 1.3rem; }
 .notification-note { border-radius: .75rem; padding: 1rem; margin: 1.25rem 0; background: color-mix(in srgb, var(--color-info, #0e7490) 10%, transparent); }
 .notification-note p { margin: .35rem 0 0; }
+.notification-mode-list { display: grid; gap: .65rem; margin-top: 1rem; }
+.notification-mode-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--color-base-300); border-radius: .6rem; padding: .75rem .85rem; }
+.notification-mode-row > span { display: grid; gap: .15rem; }
+.notification-mode-row small { color: var(--muted-color, #74829a); }
+.notification-mode-row.active { border-color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 8%, transparent); }
 @media (max-width: 900px) { .notification-settings-grid { grid-template-columns: 1fr; } .milestone-setting-row { align-items: flex-start; flex-wrap: wrap; } .milestone-setting-row > span { flex-basis: 100%; } }
 
 @plugin "daisyui/theme" {
@@ -896,6 +901,24 @@ input {
 .routing-profile-option:hover, .routing-profile-option:focus-within { background: rgba(15, 118, 110, .08); }
 
 /* AntiDengue-owned routing and exact-plan workspaces. */
+.routing-category-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 16px 0 10px; }
+.routing-category-tab { position: relative; display: grid; gap: 2px; min-width: 0; border: 1px solid #d7e0ea; border-radius: 10px; background: #fff; padding: 13px 48px 12px 15px; color: #526176; text-decoration: none; transition: border-color .15s ease, background .15s ease, box-shadow .15s ease; }
+.routing-category-tab:hover { border-color: #8db8c3; }
+.routing-category-tab.active { border-color: #0d7890; background: #edf8fa; box-shadow: inset 3px 0 #0d7890; color: #155d6d; }
+.routing-category-tab > span { color: #243247; font-size: 14px; font-weight: 750; }
+.routing-category-tab > small { overflow: hidden; color: #7c899c; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.routing-category-tab > b { position: absolute; top: 50%; right: 14px; min-width: 25px; border-radius: 999px; background: #edf1f6; padding: 4px 7px; color: #536176; font-size: 10px; text-align: center; transform: translateY(-50%); }
+.routing-category-tab.active > b { background: #d7eef2; color: #0d6c80; }
+.routing-level-switcher { display: flex; align-items: center; justify-content: space-between; gap: 20px; border: 1px solid #dfe6ee; border-radius: 10px; background: #fff; padding: 13px 15px; }
+.routing-level-switcher h2 { margin: 2px 0; color: #27364b; font-size: 13px; }
+.routing-level-switcher p { margin-bottom: 0; color: #7d899b; font-size: 9px; }
+.routing-level-switcher nav { display: inline-flex; flex: 0 0 auto; overflow: hidden; border: 1px solid #d2dbe6; border-radius: 8px; }
+.routing-level-tab { display: inline-flex; align-items: center; gap: 8px; border-right: 1px solid #d2dbe6; background: #f8fafc; padding: 8px 13px; color: #526176; font-size: 11px; font-weight: 700; text-decoration: none; }
+.routing-level-tab:last-child { border-right: 0; }
+.routing-level-tab:hover { background: #f0f5f8; }
+.routing-level-tab.active { background: #167792; color: #fff; }
+.routing-level-tab span { min-width: 19px; border-radius: 999px; background: rgba(100,116,139,.12); padding: 2px 5px; font-size: 8px; text-align: center; }
+.routing-level-tab.active span { background: rgba(255,255,255,.2); }
 .routing-metrics, .plan-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
 .plan-overview { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .routing-metrics article, .plan-overview article { border: 1px solid #dfe6ee; border-radius: 10px; background: #fff; padding: 15px 17px; }
@@ -968,6 +991,15 @@ input {
 [data-theme="automation-dark"] .plan-overview article,
 [data-theme="automation-dark"] .route-profile-card,
 [data-theme="automation-dark"] .plan-card { background: #111827; border-color: #334155; }
+[data-theme="automation-dark"] .routing-category-tab,
+[data-theme="automation-dark"] .routing-level-switcher { background: #111827; border-color: #334155; }
+[data-theme="automation-dark"] .routing-category-tab.active { background: #12303a; border-color: #2b8ba1; }
+[data-theme="automation-dark"] .routing-category-tab > span,
+[data-theme="automation-dark"] .routing-level-switcher h2 { color: #e5edf6; }
+[data-theme="automation-dark"] .routing-level-switcher nav,
+[data-theme="automation-dark"] .routing-level-tab { border-color: #334155; }
+[data-theme="automation-dark"] .routing-level-tab { background: #182234; color: #cbd5e1; }
+[data-theme="automation-dark"] .routing-level-tab.active { background: #167792; color: #fff; }
 [data-theme="automation-dark"] .routing-metrics strong,
 [data-theme="automation-dark"] .plan-overview strong,
 [data-theme="automation-dark"] .route-profile-card h3,
@@ -996,6 +1028,10 @@ input {
   .plan-card-status { border-right: 0; border-bottom: 1px solid #e5eaf0; }
 }
 @media (max-width: 720px) {
+  .routing-category-tabs { grid-template-columns: 1fr; }
+  .routing-level-switcher { align-items: stretch; flex-direction: column; }
+  .routing-level-switcher nav { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .routing-level-tab { justify-content: center; border-right: 1px solid #d2dbe6; }
   .routing-metrics, .plan-overview, .route-form-grid { grid-template-columns: 1fr; }
   .routing-workspace-heading, .plan-workspace-heading { align-items: stretch; flex-direction: column; }
   .routing-toolbar { justify-content: stretch; }

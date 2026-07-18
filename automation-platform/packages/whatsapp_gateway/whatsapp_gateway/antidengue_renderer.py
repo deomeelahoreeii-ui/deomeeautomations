@@ -31,6 +31,11 @@ from whatsapp_gateway.rendering.antidengue.simple_activity_report import (
     SIMPLE_ACTIVITY_RENDERER_KEY, SIMPLE_ACTIVITY_REPORT_KEY,
     RenderedSimpleActivityReport, render_simple_activity_report,
 )
+from whatsapp_gateway.rendering.antidengue.digest_models import (
+    CONSOLIDATED_DIGEST_RENDERER_KEY, CONSOLIDATED_DIGEST_REPORT_KEY,
+    DigestSchool, RenderedConsolidatedDigest,
+)
+from whatsapp_gateway.rendering.antidengue.digest_report import render_consolidated_action_digest
 
 __all__ = [
     "PAKISTAN_TIME", "RENDERER_KEY", "REQUIRED_COLUMNS", "WING_RENDERER_KEY",
@@ -45,4 +50,6 @@ __all__ = [
     "render_hotspot_distance_report",
     "SIMPLE_ACTIVITY_RENDERER_KEY", "SIMPLE_ACTIVITY_REPORT_KEY",
     "RenderedSimpleActivityReport", "render_simple_activity_report",
+    "CONSOLIDATED_DIGEST_RENDERER_KEY", "CONSOLIDATED_DIGEST_REPORT_KEY",
+    "DigestSchool", "RenderedConsolidatedDigest", "render_consolidated_action_digest",
 ]

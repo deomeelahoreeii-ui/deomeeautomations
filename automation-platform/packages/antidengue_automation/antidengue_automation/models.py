@@ -46,6 +46,20 @@ def utc_datetime_column(*, nullable: bool, index: bool = True) -> Column:
     return Column(UTCDateTime(), nullable=nullable, index=index)
 
 
+class AntiDengueDeadlinePolicy(SQLModel, table=True):
+    """Versioned operational deadline used by all AntiDengue delivery surfaces."""
+
+    __tablename__ = "antidengue_deadline_policies"
+
+    policy_key: str = Field(default="default", primary_key=True, max_length=80)
+    submission_deadline: str = Field(default="12:30", max_length=5)
+    timezone: str = Field(default="Asia/Karachi", max_length=80)
+    version: int = Field(default=1, ge=1)
+    updated_by: str = Field(default="system", max_length=120)
+    created_at: datetime = Field(default_factory=utcnow, sa_column=utc_datetime_column(nullable=False))
+    updated_at: datetime = Field(default_factory=utcnow, sa_column=utc_datetime_column(nullable=False))
+
+
 class AntiDengueSchedule(SQLModel, table=True):
     """Durable server-owned schedule for the proven dry-run dispatch planner."""
 
@@ -73,6 +87,7 @@ class AntiDengueSchedule(SQLModel, table=True):
     weekdays: list[int] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     times: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     timezone: str = Field(default="Asia/Karachi", index=True, max_length=80)
+    submission_deadline_override: str | None = Field(default=None, max_length=5)
     login_mode: str = Field(default="auto", index=True)
     dispatch_policy: str = Field(default="preview_only", index=True)
     dispatch_profile_id: uuid.UUID = Field(
@@ -136,6 +151,11 @@ class AntiDengueScheduleExecution(SQLModel, table=True):
         sa_column=Column(Uuid, ForeignKey("whatsapp_dispatch_profiles.id"), nullable=False, index=True)
     )
     dispatch_profile_ids: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    submission_deadline: str = Field(default="12:30", max_length=5)
+    submission_deadline_label: str = Field(default="12:30 PM", max_length=20)
+    deadline_timezone: str = Field(default="Asia/Karachi", max_length=80)
+    deadline_policy_version: int = Field(default=1, ge=1)
+    deadline_source: str = Field(default="global", max_length=30)
     overlap_deadline_at: datetime | None = Field(default=None, sa_column=utc_datetime_column(nullable=True))
     source_job_id: uuid.UUID | None = Field(default=None, foreign_key="jobs.id", index=True)
     preview_job_id: uuid.UUID | None = Field(default=None, foreign_key="jobs.id", index=True)

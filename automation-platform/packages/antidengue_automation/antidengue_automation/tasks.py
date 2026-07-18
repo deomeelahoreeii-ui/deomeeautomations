@@ -88,6 +88,7 @@ def run_antidengue_job(job_id: str) -> dict:
                 snapshot_path,
                 job_id=job_id,
                 dispatch_profile_ids=dispatch_profile_ids,
+                deadline_snapshot=dict(parameters.get("deadline_snapshot") or {}),
             )
     except Exception as exc:
         error = f"Could not freeze PostgreSQL runtime snapshot: {exc}"
@@ -167,6 +168,12 @@ def run_antidengue_job(job_id: str) -> dict:
         "ANTIDENGUE_RUNTIME_SNAPSHOT": str(snapshot_path),
         "PORTAL_REPORT_CUTOFF": str(parameters.get("report_cutoff") or ""),
         "PORTAL_REPORTS": portal_report_keys,
+        "ANTIDENGUE_SUBMISSION_DEADLINE": str(
+            dict(parameters.get("deadline_snapshot") or {}).get("label") or ""
+        ),
+        "ANTIDENGUE_SUBMISSION_DEADLINE_TIMEZONE": str(
+            dict(parameters.get("deadline_snapshot") or {}).get("timezone") or ""
+        ),
     }
     append_job_log(
         job_id,

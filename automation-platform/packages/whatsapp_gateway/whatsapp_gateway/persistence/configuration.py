@@ -197,6 +197,10 @@ class WhatsAppDispatchProfile(SQLModel, table=True):
             name="ck_whatsapp_profiles_delivery_mode",
         ),
         CheckConstraint(
+            "delivery_granularity IN ('recipient', 'scope')",
+            name="ck_whatsapp_profiles_delivery_granularity",
+        ),
+        CheckConstraint(
             "recipient_channel IN ('individual', 'group')",
             name="ck_whatsapp_profiles_recipient_channel",
         ),
@@ -222,6 +226,7 @@ class WhatsAppDispatchProfile(SQLModel, table=True):
     recipient_channel: str = Field(default="group", index=True)
     wing_id: uuid.UUID | None = Field(default=None, foreign_key="wings.id", index=True)
     delivery_mode: str = Field(default="mixed", index=True)
+    delivery_granularity: str = Field(default="recipient", index=True)
     require_approval: bool = True
     fallback_policy: str = Field(default="none", index=True)
     max_retries: int = 5

@@ -2,7 +2,8 @@
 
 from whatsapp_gateway.dispatch.approved_delivery import _publish_approved_deliveries
 from whatsapp_gateway.dispatch.task_entrypoints import (
-    compile_dispatch_preview_job, send_approved_preview_job,
+    compile_dispatch_preview_job, compile_dispatch_preview_v2_job,
+    send_approved_preview_job,
 )
 
 __all__ = [

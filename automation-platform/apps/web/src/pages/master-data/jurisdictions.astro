@@ -25,6 +25,15 @@ import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
     const total = document.getElementById("jurisdiction-total")!;
     let role: "aeo" | "ddeo" = "aeo";
 
+    function schoolLink(row: any) {
+      const link = document.createElement("a");
+      link.className = "table-link";
+      link.textContent = row.markaz_name || "Missing markaz";
+      link.href = `/master-data/schools?markaz_ref=${encodeURIComponent(row.markaz_ref)}`;
+      link.title = `View schools in ${link.textContent}`;
+      return link;
+    }
+
     const optionsResult = await actions.masterData.options();
     if (optionsResult.error) throw optionsResult.error;
     const meeWing = (optionsResult.data as any).wings.find((wing: any) => wing.code === "DEO MEE" || wing.name === "DEO MEE");
@@ -42,7 +51,11 @@ import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
         { accessorKey: "officer_name", header: "Officer", cell: ({ row }: any) => stack(row.original.officer_name || "Missing officer", row.original.mobile || "") },
         { accessorKey: "tehsil_name", header: "Tehsil" },
       ];
-      if (role === "aeo") columns.push({ accessorKey: "markaz_name", header: "Markaz" });
+      if (role === "aeo") columns.push({
+        accessorKey: "markaz_name",
+        header: "Markaz",
+        cell: ({ row }: any) => row.original.markaz_ref ? schoolLink(row.original) : "Missing markaz",
+      });
       columns.push({ id: "status", header: "Status", enableSorting: false, cell: () => badge("Active") });
       await table.configure({ columns, data: rows });
     }

@@ -7,6 +7,7 @@ from whatsapp_gateway.configuration.defaults import (
     DEFAULT_APPLICATIONS,
     DEFAULT_RECIPIENT_SCOPES,
     DEFAULT_REPORT_TYPES,
+    ensure_dynamic_aeo_markaz_profile,
 )
 
 def gateway_datetime(value: Any, fallback: datetime | None = None) -> datetime:
@@ -87,6 +88,10 @@ def ensure_defaults(session: Session) -> tuple[WhatsAppAccount, WhatsAppSettings
                         description=description,
                     )
                 )
+    session.flush()
+    ensure_dynamic_aeo_markaz_profile(
+        session, application=applications["antidengue"], account=account
+    )
     settings = session.scalar(
         select(WhatsAppSettings).where(
             WhatsAppSettings.default_account_id == account.id

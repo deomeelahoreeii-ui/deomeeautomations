@@ -7,6 +7,7 @@ from sqlmodel import Session, col, select
 
 from antidengue_automation.models import AntiDengueScheduleEvent, AntiDengueScheduleExecution
 from automation_core.config import get_settings
+from automation_core.notifications import ntfy_headers, ntfy_topic_url, ntfy_transport_enabled
 from automation_core.time import utcnow
 
 NOTIFICATION_EVENT_TYPES = {
@@ -40,7 +41,11 @@ def _eligible(details: dict, now) -> bool:
 def publish_pending_ntfy(session: Session, limit: int = 25) -> dict[str, int]:
     """Best-effort durable ntfy delivery, isolated from execution transitions."""
     settings = get_settings()
-    if not settings.antidengue_ntfy_enabled or not settings.antidengue_ntfy_topic.strip():
+    if (
+        not ntfy_transport_enabled(settings)
+        or not settings.antidengue_ntfy_enabled
+        or not settings.antidengue_ntfy_topic.strip()
+    ):
         return {"sent": 0, "failed": 0}
 
     now = utcnow()
@@ -52,7 +57,7 @@ def publish_pending_ntfy(session: Session, limit: int = 25) -> dict[str, int]:
     ).all()
     pending = list(reversed([event for event in events if _eligible(dict(event.details or {}), now)][:limit]))
     sent = failed = 0
-    url = f"{settings.antidengue_ntfy_base_url.rstrip('/')}/{settings.antidengue_ntfy_topic.strip()}"
+    url = ntfy_topic_url(settings.ntfy_publish_url, settings.antidengue_ntfy_topic)
     for event in pending:
         details = dict(event.details or {})
         previous = dict(details.get("ntfy_delivery") or {})
@@ -63,15 +68,14 @@ def publish_pending_ntfy(session: Session, limit: int = 25) -> dict[str, int]:
             "Title": title,
             "Tags": tag,
             "X-AntiDengue-Event-ID": str(event.id),
+            **ntfy_headers(settings),
         }
-        if settings.antidengue_ntfy_token:
-            headers["Authorization"] = f"Bearer {settings.antidengue_ntfy_token}"
         try:
             response = requests.post(
                 url,
                 data=event.message.encode("utf-8"),
                 headers=headers,
-                timeout=settings.antidengue_ntfy_timeout_seconds,
+                timeout=settings.ntfy_timeout_seconds,
             )
             response.raise_for_status()
             details["ntfy_delivery"] = {

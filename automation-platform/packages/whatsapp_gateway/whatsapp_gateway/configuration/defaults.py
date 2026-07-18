@@ -40,6 +40,11 @@ from whatsapp_gateway.models import (
     WhatsAppSettings,
     WhatsAppTemplate,
 )
+from whatsapp_gateway.persistence.audience_sources import WhatsAppAudienceSource
+from whatsapp_gateway.configuration.profile_granularity import (
+    ensure_dynamic_markaz_profile_granularity,
+)
+from whatsapp_gateway.rendering.antidengue.digest_models import CONSOLIDATED_DIGEST_DEFAULT_TEMPLATE
 from whatsapp_gateway.preview_service import (
     cleanup_unreferenced_preview_files,
     delete_preview_records,
@@ -64,6 +69,11 @@ DEFAULT_REPORT_TYPES = {
     "antidengue": [
         ("school_activity", "School activity report", "School-level activity evidence."),
         ("officer_summary", "Officer summary", "Officer coverage and follow-up summary."),
+        (
+            "markaz_dormant_summary",
+            "Markaz Dormant Summary",
+            "Dormant-school summary resolved from active AEO Markaz jurisdictions.",
+        ),
         ("wing_summary", "Wing summary", "Consolidated report for a wing audience."),
         (
             "hotspot_distance_activity",
@@ -75,6 +85,11 @@ DEFAULT_REPORT_TYPES = {
             "Simple activity timing review",
             "Before/after activity pairs below the published minimum time interval.",
         ),
+        (
+            "consolidated_action_digest",
+            "Consolidated Action Digest",
+            "One concise school-level digest and workbook covering dormant, distance and timing issues.",
+        ),
     ],
     "crm": [
         ("filtered_workbook", "Filtered workbook", "CRM workbook filtered for an audience."),
@@ -84,6 +99,198 @@ DEFAULT_REPORT_TYPES = {
         ("performance_report", "Performance report", "PMDU performance report for an audience."),
     ],
 }
+
+
+def ensure_dynamic_aeo_markaz_profile(
+    session: Session,
+    *,
+    application: WhatsAppApplication,
+    account: WhatsAppAccount,
+) -> None:
+    """Install the canonical dynamic MEE AEO route when the MEE wing exists."""
+    wing = session.scalar(
+        select(Wing).where(
+            Wing.active.is_(True),
+            or_(Wing.code == "DEO MEE", Wing.name == "DEO MEE"),
+        )
+    )
+    if wing is None:
+        return
+    report_type = session.scalar(select(WhatsAppReportType).where(
+        WhatsAppReportType.application_id == application.id,
+        WhatsAppReportType.key == "markaz_dormant_summary",
+    ))
+    recipient_scope = session.scalar(select(WhatsAppRecipientScope).where(
+        WhatsAppRecipientScope.application_id == application.id,
+        WhatsAppRecipientScope.channel == "individual",
+        WhatsAppRecipientScope.key == "aeo",
+    ))
+    if report_type is None or recipient_scope is None:
+        return
+    audience = session.scalar(select(WhatsAppAudience).where(
+        WhatsAppAudience.application_id == application.id,
+        WhatsAppAudience.key == "mee_aeo_markaz_dynamic",
+    ))
+    if audience is None:
+        audience = WhatsAppAudience(
+            application_id=application.id,
+            key="mee_aeo_markaz_dynamic",
+            name="MEE AEOs by active Markaz jurisdiction",
+            description="Resolved from active Master Data AEO jurisdictions at preview time.",
+        )
+        session.add(audience)
+        session.flush()
+    source = session.scalar(select(WhatsAppAudienceSource).where(
+        WhatsAppAudienceSource.audience_id == audience.id,
+        WhatsAppAudienceSource.source_type == "master_data_jurisdictions",
+        WhatsAppAudienceSource.recipient_role == "aeo",
+        WhatsAppAudienceSource.wing_id == wing.id,
+        WhatsAppAudienceSource.route_scope_key == "markaz",
+    ))
+    if source is None:
+        session.add(WhatsAppAudienceSource(
+            audience_id=audience.id,
+            recipient_role="aeo",
+            wing_id=wing.id,
+            route_scope_key="markaz",
+            aggregate_by_recipient=True,
+        ))
+    template = session.scalar(select(WhatsAppTemplate).where(
+        WhatsAppTemplate.key == "antidengue_markaz_dormant_aeo_v1"
+    ))
+    if template is None:
+        template = WhatsAppTemplate(
+            application_id=application.id,
+            report_type_id=report_type.id,
+            recipient_scope_id=recipient_scope.id,
+            recipient_channel="individual",
+            key="antidengue_markaz_dormant_aeo_v1",
+            name="AEO Markaz dormant report",
+            category="report",
+            body="{{report_body}}",
+        )
+        session.add(template)
+        session.flush()
+    profile = session.scalar(select(WhatsAppDispatchProfile).where(
+        WhatsAppDispatchProfile.application_id == application.id,
+        WhatsAppDispatchProfile.key == "mee_aeo_markaz_dormant_personal",
+    ))
+    if profile is None:
+        session.add(WhatsAppDispatchProfile(
+            application_id=application.id,
+            key="mee_aeo_markaz_dormant_personal",
+            name="Markaz Dormant Summary — MEE — AEO Personal",
+            report_type_id=report_type.id,
+            audience_id=audience.id,
+            account_id=account.id,
+            template_id=template.id,
+            recipient_scope_id=recipient_scope.id,
+            recipient_channel="individual",
+            wing_id=wing.id,
+            delivery_mode="individuals",
+            delivery_granularity="scope",
+            require_approval=True,
+            presentation_policy={
+                "message_style": "detailed",
+                "attachment_mode": "image_excel",
+                "image_content": "details",
+            },
+            guided_setup=True,
+            owns_audience=True,
+            owns_template=True,
+            notes="Dynamic Master Data jurisdiction audience; resolved and frozen per preview.",
+        ))
+
+
+def ensure_consolidated_digest_profiles(
+    session: Session,
+    *,
+    application: WhatsAppApplication,
+) -> None:
+    """Create additive digest routes that reuse each live dormant audience."""
+    report_types = {
+        item.id: item for item in session.scalars(select(WhatsAppReportType).where(
+            WhatsAppReportType.application_id == application.id
+        )).all()
+    }
+    digest_report = next(
+        (item for item in report_types.values() if item.key == "consolidated_action_digest"),
+        None,
+    )
+    if digest_report is None:
+        return
+    source_keys = {"wing_summary", "tehsil_dormant_summary", "markaz_dormant_summary"}
+    sources = [
+        profile for profile in session.scalars(select(WhatsAppDispatchProfile).where(
+            WhatsAppDispatchProfile.application_id == application.id,
+            WhatsAppDispatchProfile.enabled.is_(True),
+        )).all()
+        if (report_types.get(profile.report_type_id) and report_types[profile.report_type_id].key in source_keys)
+    ]
+    existing = list(session.scalars(select(WhatsAppDispatchProfile).where(
+        WhatsAppDispatchProfile.application_id == application.id,
+        WhatsAppDispatchProfile.report_type_id == digest_report.id,
+    )).all())
+    for profile in existing:
+        if profile.recipient_channel == "individual" and profile.delivery_granularity != "scope":
+            profile.delivery_granularity = "scope"
+            profile.version += 1
+            profile.updated_at = utcnow()
+            session.add(profile)
+        template = session.get(WhatsAppTemplate, profile.template_id) if profile.template_id else None
+        if template is not None and template.body.strip() == "{{report_body}}":
+            template.body = CONSOLIDATED_DIGEST_DEFAULT_TEMPLATE
+            session.add(template)
+    linked_source_ids = {
+        str((profile.presentation_policy or {}).get("digest_source_profile_id") or "")
+        for profile in existing
+    }
+    for source in sources:
+        if str(source.id) in linked_source_ids:
+            continue
+        fragment = source.id.hex[:12]
+        template = WhatsAppTemplate(
+            application_id=application.id,
+            report_type_id=digest_report.id,
+            recipient_scope_id=source.recipient_scope_id,
+            recipient_channel=source.recipient_channel,
+            key=f"antidengue_action_digest_{fragment}",
+            name=f"{source.name} — Action digest message"[:200],
+            category="report",
+            body=CONSOLIDATED_DIGEST_DEFAULT_TEMPLATE,
+        )
+        session.add(template)
+        session.flush()
+        base_key = re.sub(r"[^a-z0-9_]+", "_", f"{source.key}_action_digest".lower()).strip("_")[:100]
+        key, suffix = base_key, 2
+        while session.scalar(select(WhatsAppDispatchProfile.id).where(
+            WhatsAppDispatchProfile.application_id == application.id,
+            WhatsAppDispatchProfile.key == key,
+        )):
+            ending = f"_{suffix}"
+            key = f"{base_key[:100-len(ending)]}{ending}"
+            suffix += 1
+        session.add(WhatsAppDispatchProfile(
+            application_id=application.id, key=key,
+            name=f"{source.name} — Consolidated Action Digest"[:200],
+            report_type_id=digest_report.id, audience_id=source.audience_id,
+            account_id=source.account_id, template_id=template.id,
+            recipient_scope_id=source.recipient_scope_id,
+            recipient_channel=source.recipient_channel, wing_id=source.wing_id,
+            delivery_mode=source.delivery_mode, require_approval=source.require_approval,
+            delivery_granularity="scope" if source.recipient_channel == "individual" else "recipient",
+            fallback_policy=source.fallback_policy, max_retries=source.max_retries,
+            messages_per_minute=source.messages_per_minute,
+            presentation_policy={
+                "message_style": "summary", "attachment_mode": "excel",
+                "image_content": "summary", "digest_source_profile_id": str(source.id),
+            },
+            guided_setup=True, owns_audience=False, owns_template=True,
+            notes=f"Additive consolidated digest reusing the live audience from {source.name}.",
+        ))
+        linked_source_ids.add(str(source.id))
+
+
 
 
 DEFAULT_RECIPIENT_SCOPES = {
@@ -197,6 +404,18 @@ def ensure_defaults(session: Session) -> tuple[WhatsAppAccount, WhatsAppSettings
                         description=description,
                     )
                 )
+    session.flush()
+    ensure_dynamic_aeo_markaz_profile(
+        session, application=applications["antidengue"], account=account
+    )
+    session.flush()
+    ensure_consolidated_digest_profiles(
+        session, application=applications["antidengue"]
+    )
+    session.flush()
+    ensure_dynamic_markaz_profile_granularity(
+        session, application=applications["antidengue"]
+    )
     settings = session.scalar(
         select(WhatsAppSettings).where(
             WhatsAppSettings.default_account_id == account.id

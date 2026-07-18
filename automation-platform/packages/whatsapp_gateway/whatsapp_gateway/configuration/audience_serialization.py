@@ -44,6 +44,8 @@ from whatsapp_gateway.preview_service import (
     cleanup_unreferenced_preview_files,
     delete_preview_records,
 )
+from whatsapp_gateway.configuration.dynamic_audiences import resolve_dynamic_audience
+from whatsapp_gateway.persistence.audience_sources import WhatsAppAudienceSource
 def audience_dict(
     session: Session,
     item: WhatsAppAudience,
@@ -75,6 +77,13 @@ def audience_dict(
             WhatsAppDispatchProfile.enabled.is_(True),
         )
     ) or 0
+    dynamic_members = resolve_dynamic_audience(session, audience_id=item.id)
+    source_count = session.scalar(
+        select(func.count()).select_from(WhatsAppAudienceSource).where(
+            WhatsAppAudienceSource.audience_id == item.id,
+            WhatsAppAudienceSource.enabled.is_(True),
+        )
+    ) or 0
     return {
         "id": str(item.id),
         "application_id": str(item.application_id),
@@ -85,10 +94,12 @@ def audience_dict(
         "description": item.description,
         "enabled": item.enabled,
         "group_count": group_count,
-        "contact_count": contact_count,
-        "member_count": group_count + contact_count,
+        "contact_count": contact_count + len(dynamic_members),
+        "member_count": group_count + contact_count + len(dynamic_members),
+        "dynamic_member_count": len(dynamic_members),
+        "source_count": source_count,
         "disabled_member_count": disabled_member_count,
-        "configured_member_count": group_count + contact_count + disabled_member_count,
+        "configured_member_count": group_count + contact_count + len(dynamic_members) + disabled_member_count,
         "profile_count": profile_count,
         "updated_at": item.updated_at,
     }

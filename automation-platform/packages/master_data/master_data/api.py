@@ -29,6 +29,8 @@ from master_data.contacts import (
 )
 from master_data.postgres_repository import PostgresMasterDataRepository
 from master_data.schemas import MasterContactWrite, OfficerWrite, SchoolWrite
+from master_data.hierarchy import build_hierarchy
+from master_data.markaz_catalog import markaz_catalog
 
 router = APIRouter(prefix="/api/v1/master-data", tags=["master-data"])
 
@@ -104,6 +106,41 @@ def _delete_contact_link_previews(
 def read_dashboard() -> dict:
     try:
         return repository().dashboard()
+    except Exception as exc:
+        raise translate_error(exc) from exc
+
+
+@router.get("/hierarchy")
+def read_hierarchy(
+    include_inactive: bool = False,
+    district_id: uuid.UUID | None = None,
+    wing_id: uuid.UUID | None = None,
+    session: Session = Depends(get_session),
+) -> dict:
+    try:
+        return build_hierarchy(
+            session, include_inactive=include_inactive,
+            district_id=district_id, wing_id=wing_id,
+        )
+    except Exception as exc:
+        raise translate_error(exc) from exc
+
+
+@router.get("/markazes")
+def read_markazes(
+    search: str = "", wing_id: uuid.UUID | None = None,
+    tehsil_id: uuid.UUID | None = None,
+    coverage: str = Query(default="all", pattern="^(all|assigned|unassigned)$"),
+    include_inactive: bool = False, page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    session: Session = Depends(get_session),
+) -> dict:
+    try:
+        return markaz_catalog(
+            session, search=search, wing_id=wing_id, tehsil_id=tehsil_id,
+            coverage=coverage, include_inactive=include_inactive,
+            page=page, page_size=page_size,
+        )
     except Exception as exc:
         raise translate_error(exc) from exc
 

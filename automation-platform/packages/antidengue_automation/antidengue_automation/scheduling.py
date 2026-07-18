@@ -19,8 +19,7 @@ from antidengue_automation.models import (
     AntiDengueScheduleEvent,
     AntiDengueScheduleExecution,
 )
-from antidengue_automation.hotspot_routing import expand_hotspot_profile_ids
-from antidengue_automation.simple_activity_routing import expand_simple_activity_profile_ids
+from antidengue_automation.deadline_policy import resolve_deadline_policy
 from automation_core.job_service import (
     add_job,
     add_job_log,
@@ -36,6 +35,7 @@ from whatsapp_gateway.models import (
     WhatsAppApplication,
     WhatsAppDispatchPreview,
     WhatsAppDispatchProfile,
+    WhatsAppReportType,
 )
 from whatsapp_gateway.previews.approval import approve_preview
 from whatsapp_gateway.previews.schemas import PreviewApprovalInput
@@ -218,6 +218,30 @@ def validate_dispatch_profiles(
     session: Session, profile_ids: Iterable[uuid.UUID | str]
 ) -> list[WhatsAppDispatchProfile]:
     profiles = [validate_dispatch_profile(session, uuid.UUID(str(value))) for value in profile_ids]
+    report_keys = {
+        profile.id: report.key
+        for profile in profiles
+        if (report := session.get(WhatsAppReportType, profile.report_type_id)) is not None
+    }
+    digest_profiles = [profile for profile in profiles if report_keys.get(profile.id) == "consolidated_action_digest"]
+    detailed_keys = {
+        "wing_summary", "tehsil_dormant_summary", "markaz_dormant_summary",
+        "hotspot_distance_activity", "simple_activity_timing",
+    }
+    for digest in digest_profiles:
+        overlaps = [
+            profile for profile in profiles
+            if profile.id != digest.id
+            and report_keys.get(profile.id) in detailed_keys
+            and profile.audience_id == digest.audience_id
+            and profile.wing_id == digest.wing_id
+            and profile.recipient_scope_id == digest.recipient_scope_id
+            and profile.recipient_channel == digest.recipient_channel
+        ]
+        if overlaps:
+            raise ValueError(
+                "Choose either the Consolidated Action Digest or detailed profiles for the same audience; selecting both would send duplicate issue messages."
+            )
     return profiles
 
 
@@ -276,7 +300,11 @@ def append_milestone_once(
     if has_execution_event(session, execution, event_type):
         return None
     settings = get_settings()
-    ntfy_pending = settings.antidengue_ntfy_enabled and bool(settings.antidengue_ntfy_topic.strip())
+    ntfy_pending = (
+        settings.ntfy_enabled
+        and settings.antidengue_ntfy_enabled
+        and bool(settings.antidengue_ntfy_topic.strip())
+    )
     return append_execution_event(
         session,
         execution,
@@ -306,8 +334,6 @@ def create_execution(
     idempotency_key: str | None = None,
 ) -> AntiDengueScheduleExecution:
     profile_ids = normalize_dispatch_profile_ids(dispatch_profile_ids, dispatch_profile_id)
-    profile_ids = expand_hotspot_profile_ids(session, profile_ids)
-    profile_ids = expand_simple_activity_profile_ids(session, profile_ids)
     validate_dispatch_profiles(session, profile_ids)
     dispatch_profile_id = profile_ids[0]
     if dispatch_policy not in {"preview_only", "auto_send_when_clean"}:
@@ -315,6 +341,7 @@ def create_execution(
     if login_mode not in {"auto", "manual", "remote_approve"}:
         raise ValueError("Unsupported portal login mode")
     scheduled = as_utc(scheduled_for)
+    deadline = resolve_deadline_policy(session, schedule=schedule)
     if schedule:
         key = f"schedule:{schedule.id}:{scheduled.isoformat()}"
         overlap_minutes = schedule.overlap_grace_minutes
@@ -333,6 +360,11 @@ def create_execution(
         login_mode=login_mode,
         dispatch_profile_id=dispatch_profile_id,
         dispatch_profile_ids=[str(value) for value in profile_ids],
+        submission_deadline=deadline.time,
+        submission_deadline_label=deadline.label,
+        deadline_timezone=deadline.timezone,
+        deadline_policy_version=deadline.policy_version,
+        deadline_source=deadline.source,
         overlap_deadline_at=scheduled + timedelta(minutes=overlap_minutes),
         created_by=created_by,
     )
@@ -348,6 +380,10 @@ def create_execution(
             "trigger_type": trigger_type,
             "dispatch_policy": dispatch_policy,
             "scheduled_for": scheduled.isoformat(),
+            "submission_deadline": deadline.label,
+            "deadline_timezone": deadline.timezone,
+            "deadline_policy_version": deadline.policy_version,
+            "deadline_source": deadline.source,
         },
     )
     return item
@@ -494,6 +530,13 @@ def _queue_source_job(session: Session, execution: AntiDengueScheduleExecution) 
             "dispatch_policy": execution.dispatch_policy,
             "report_cutoff": execution.scheduled_for.isoformat(),
             "portal_reports": "dormant_users,hotspot_distance,simple_activity_list",
+            "deadline_snapshot": {
+                "time": execution.submission_deadline,
+                "label": execution.submission_deadline_label,
+                "timezone": execution.deadline_timezone,
+                "policy_version": execution.deadline_policy_version,
+                "source": execution.deadline_source,
+            },
         },
     )
     execution.source_job_id = job.id
@@ -529,6 +572,20 @@ def _queue_source_job(session: Session, execution: AntiDengueScheduleExecution) 
 def _queue_preview_job(session: Session, execution: AntiDengueScheduleExecution) -> bool:
     if execution.source_job_id is None:
         raise ValueError("Source job is missing")
+    from automation_core.worker_runtime import require_compatible_workers
+    from whatsapp_gateway.previews.compiler.capabilities import (
+        PREVIEW_COMPILER_QUEUE, PREVIEW_COMPILER_TASK, required_compiler_contract,
+    )
+
+    profile_ids = execution.dispatch_profile_ids or [str(execution.dispatch_profile_id)]
+    profiles = [
+        profile for value in profile_ids
+        if (profile := session.get(WhatsAppDispatchProfile, uuid.UUID(str(value)))) is not None
+    ]
+    if len(profiles) != len(profile_ids):
+        raise ValueError("One or more selected routing profiles no longer exist.")
+    compiler_contract = required_compiler_contract(session, profiles)
+    require_compatible_workers(session, compiler_contract)
     job = add_job(
         session,
         job_type=JobType.whatsapp_dispatch_preview.value,
@@ -539,6 +596,14 @@ def _queue_preview_job(session: Session, execution: AntiDengueScheduleExecution)
             "dispatch_profile_ids": execution.dispatch_profile_ids or [str(execution.dispatch_profile_id)],
             "created_by": f"antidengue-orchestrator:{execution.execution_code}",
             "orchestration_execution_id": str(execution.id),
+            "compiler_contract": compiler_contract,
+            "deadline_snapshot": {
+                "time": execution.submission_deadline,
+                "label": execution.submission_deadline_label,
+                "timezone": execution.deadline_timezone,
+                "policy_version": execution.deadline_policy_version,
+                "source": execution.deadline_source,
+            },
         },
     )
     execution.preview_job_id = job.id
@@ -549,8 +614,8 @@ def _queue_preview_job(session: Session, execution: AntiDengueScheduleExecution)
     stage_task(
         session,
         job=job,
-        task_name="whatsapp_gateway.compile_dispatch_preview",
-        queue="antidengue",
+        task_name=PREVIEW_COMPILER_TASK,
+        queue=PREVIEW_COMPILER_QUEUE,
         args=[str(job.id)],
         idempotency_key=f"execution:{execution.id}:preview",
     )

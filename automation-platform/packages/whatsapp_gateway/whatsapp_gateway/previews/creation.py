@@ -15,6 +15,8 @@ from automation_core.job_service import add_job, add_job_log, get_job
 from automation_core.models import Job, JobPublic, JobStatus, JobType
 from automation_core.task_outbox import publish_pending_tasks, stage_task
 from automation_core.time import utcnow
+from antidengue_automation.deadline_policy import resolve_deadline_policy
+from automation_core.worker_runtime import WorkerCapabilityUnavailable, require_compatible_workers
 from master_data.models import Officer, School, SchoolHead, Wing
 from whatsapp_gateway.models import (
     WhatsAppAccount, WhatsAppApplication, WhatsAppAudience, WhatsAppAudienceMember,
@@ -27,7 +29,11 @@ from whatsapp_gateway.preview_service import (
     cleanup_unreferenced_preview_files, delete_preview_records, entity_link_details,
     is_managed_preview_artifact, preview_dict, preview_is_stale, sha256_file,
 )
-from whatsapp_gateway.tasks import compile_dispatch_preview_job, send_approved_preview_job
+from whatsapp_gateway.tasks import compile_dispatch_preview_v2_job, send_approved_preview_job
+from whatsapp_gateway.previews.compiler.capabilities import (
+    PREVIEW_COMPILER_QUEUE, PREVIEW_COMPILER_TASK, UnsupportedPlannerCapability,
+    required_compiler_contract,
+)
 from whatsapp_gateway.previews.schemas import (
     PreviewInput, BulkPreviewInput, PreviewIdsInput, BulkPreviewApprovalInput,
     ContactLinkInput, PreviewApprovalInput,
@@ -51,6 +57,15 @@ def create_preview(
         raise HTTPException(status_code=422, detail="Select a successful source dry run")
     if profile is None or not profile.enabled:
         raise HTTPException(status_code=422, detail="Select an enabled dispatch profile")
+    try:
+        compiler_contract = required_compiler_contract(session, [profile])
+    except UnsupportedPlannerCapability as exc:
+        raise HTTPException(status_code=422, detail=exc.detail) from exc
+    try:
+        require_compatible_workers(session, compiler_contract)
+    except WorkerCapabilityUnavailable as exc:
+        raise HTTPException(status_code=503, detail=exc.detail()) from exc
+    deadline = resolve_deadline_policy(session)
     job = add_job(
         session,
         job_type=JobType.whatsapp_dispatch_preview.value,
@@ -59,14 +74,16 @@ def create_preview(
             "source_job_id": str(data.source_job_id),
             "dispatch_profile_id": str(data.dispatch_profile_id),
             "created_by": "web",
+            "compiler_contract": compiler_contract,
+            "deadline_snapshot": deadline.model_dump(),
         },
     )
     add_job_log(session, job.id, "Committed immutable dispatch preview request to the durable task outbox.")
     stage_task(
         session,
         job=job,
-        task_name="whatsapp_gateway.compile_dispatch_preview",
-        queue="antidengue",
+        task_name=PREVIEW_COMPILER_TASK,
+        queue=PREVIEW_COMPILER_QUEUE,
         args=[str(job.id)],
         idempotency_key=f"manual-preview:{job.id}",
     )

@@ -1,5 +1,12 @@
 ---
 import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
+
+const requestedView = Astro.url.searchParams.get("view");
+const initialCategory = requestedView === "hotspot" || requestedView === "simple" || requestedView === "digest" ? requestedView : "dormant";
+const requestedLevel = Astro.url.searchParams.get("level");
+const initialLevel = requestedLevel === "tehsil" || requestedLevel === "markaz" ? requestedLevel : "wing";
+const initialLevelLabel = initialLevel === "markaz" ? "Markaz" : initialLevel === "tehsil" ? "Tehsil" : "Wing";
+const initialCategoryLabel = initialCategory === "hotspot" ? "Hotspot distance" : initialCategory === "simple" ? "Simple activity timing" : initialCategory === "digest" ? "Action digest" : "Dormant users";
 ---
 
 <AntiDengueLayout
@@ -16,11 +23,21 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
     Routing profiles are reusable configuration, not send commands. Every run freezes the selected versions and validates every target before delivery.
   </div>
 
-  <nav class="routing-category-tabs" aria-label="Routing profile category" style="display:flex;gap:.6rem;margin:1rem 0">
-    <button class="btn btn-sm routing-category-tab" data-category="dormant" type="button">Dormant users <span class="badge" id="dormant-tab-count">—</span></button>
-    <button class="btn btn-sm routing-category-tab" data-category="hotspot" type="button">Hotspot distance <span class="badge" id="hotspot-tab-count">—</span></button>
-    <button class="btn btn-sm routing-category-tab" data-category="simple" type="button">Simple activity timing <span class="badge" id="simple-tab-count">—</span></button>
+  <nav class="routing-category-tabs" aria-label="Report type">
+    <a class:list={["routing-category-tab", { active: initialCategory === "dormant" }]} aria-current={initialCategory === "dormant" ? "page" : undefined} data-category="dormant" href={`/antidengue/routing?view=dormant&level=${initialLevel}`}><span>Dormant users</span><small>Messages and summaries</small><b id="dormant-tab-count">—</b></a>
+    <a class:list={["routing-category-tab", { active: initialCategory === "hotspot" }]} aria-current={initialCategory === "hotspot" ? "page" : undefined} data-category="hotspot" href={`/antidengue/routing?view=hotspot&level=${initialLevel}`}><span>Hotspot distance</span><small>Distance review messages</small><b id="hotspot-tab-count">—</b></a>
+    <a class:list={["routing-category-tab", { active: initialCategory === "simple" }]} aria-current={initialCategory === "simple" ? "page" : undefined} data-category="simple" href={`/antidengue/routing?view=simple&level=${initialLevel}`}><span>Simple activity timing</span><small>Timing review messages</small><b id="simple-tab-count">—</b></a>
+    <a class:list={["routing-category-tab", { active: initialCategory === "digest" }]} aria-current={initialCategory === "digest" ? "page" : undefined} data-category="digest" href={`/antidengue/routing?view=digest&level=${initialLevel}`}><span>Action digest</span><small>All three issues, one delivery</small><b id="digest-tab-count">—</b></a>
   </nav>
+
+  <section class="routing-level-switcher" aria-labelledby="routing-level-title">
+    <div><p class="eyebrow">Delivery level</p><h2 id="routing-level-title">Choose who this report is for</h2><p id="routing-level-description">Each level has its own message, audience and recipient route.</p></div>
+    <nav aria-label="Administrative level">
+      <a class:list={["routing-level-tab", { active: initialLevel === "wing" }]} aria-current={initialLevel === "wing" ? "page" : undefined} data-level="wing" href={`/antidengue/routing?view=${initialCategory}&level=wing`}>Wing <span id="wing-level-count">—</span></a>
+      <a class:list={["routing-level-tab", { active: initialLevel === "tehsil" }]} aria-current={initialLevel === "tehsil" ? "page" : undefined} data-level="tehsil" href={`/antidengue/routing?view=${initialCategory}&level=tehsil`}>Tehsil <span id="tehsil-level-count">—</span></a>
+      <a class:list={["routing-level-tab", { active: initialLevel === "markaz" }]} aria-current={initialLevel === "markaz" ? "page" : undefined} data-level="markaz" href={`/antidengue/routing?view=${initialCategory}&level=markaz`}>Markaz <span id="markaz-level-count">—</span></a>
+    </nav>
+  </section>
 
   <section class="routing-metrics" aria-label="AntiDengue routing summary">
     <article><span>Enabled profiles</span><strong id="enabled-count">—</strong><small id="profile-count">Loading configuration…</small></article>
@@ -30,7 +47,7 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
 
   <section class="panel routing-workspace-panel">
     <div class="panel-heading routing-workspace-heading">
-      <div><p class="eyebrow" id="routing-view-eyebrow">Dormant user reporting</p><h2 id="routing-view-title">Dormant user profiles</h2><p id="routing-view-description">Profiles that route dormant-user summaries and acknowledgements.</p></div>
+      <div><p class="eyebrow" id="routing-view-eyebrow">{initialCategoryLabel} · {initialLevelLabel}</p><h2 id="routing-view-title">{initialLevelLabel}-level {initialCategoryLabel.toLowerCase()} messages</h2><p id="routing-view-description">Only {initialLevelLabel}-level profiles and messages appear in this workspace.</p></div>
       <div class="routing-toolbar">
         <input class="input input-bordered input-sm" id="route-search" type="search" placeholder="Search report, wing or audience…" />
         <select class="select select-bordered select-sm" id="route-status"><option value="enabled">Enabled</option><option value="all">All profiles</option><option value="archived">Archived</option></select>
@@ -62,6 +79,7 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
             <label><span>Message template</span><select class="select select-bordered" id="route-template"><option value="">No template</option></select></label>
             <label><span>Message detail</span><select class="select select-bordered" id="route-message-style"><option value="summary">Concise summary</option><option value="detailed">Detailed list</option></select></label>
             <label><span>Attachments</span><select class="select select-bordered" id="route-attachments"><option value="image_excel">Image + Excel</option><option value="image">Image only</option><option value="excel">Excel only</option><option value="none">Message only</option></select></label>
+            <label><span>Delivery unit</span><select class="select select-bordered" id="route-granularity"><option value="recipient">One delivery per recipient</option><option value="scope">One delivery per jurisdiction</option></select></label>
             <label><span>Image content</span><select class="select select-bordered" id="route-image-content"><option value="details">Detailed rows</option><option value="summary">Summary</option></select></label>
             <label><span>Messages per minute</span><input class="input input-bordered" id="route-rate" type="number" min="1" max="120" value="20" /></label>
             <label><span>Maximum retries</span><input class="input input-bordered" id="route-retries" type="number" min="0" max="10" value="5" /></label>
@@ -77,16 +95,30 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
     <form method="dialog" class="modal-backdrop"><button>close</button></form>
   </dialog>
 
+  <dialog class="modal" id="clone-dialog"><div class="modal-box master-modal">
+    <div class="modal-title"><div><span class="eyebrow">REUSE LIVE ROUTING</span><h2 id="clone-title">Clone routing profile</h2><small id="clone-description">The audience and delivery configuration will be copied automatically.</small></div><button type="button" id="close-clone">×</button></div>
+    <form class="master-form" id="clone-form">
+      <input id="clone-source-id" type="hidden" /><input id="clone-activity" type="hidden" />
+      <label class="full"><span>New profile name *</span><input class="input input-bordered" id="clone-name" minlength="2" maxlength="200" required autofocus /></label>
+      <div class="notice full" id="clone-summary">The backend will reuse the source audience, active Master Data jurisdictions, AEO personal numbers, wing, recipient scope, connection, approval policy and delivery limits.</div>
+      <div class="form-message full" id="clone-message" role="status"></div>
+      <div class="form-actions"><button class="btn btn-sm" id="cancel-clone" type="button">Cancel</button><button class="btn btn-sm btn-primary" id="save-clone" type="submit">Create clone</button></div>
+    </form>
+  </div><form method="dialog" class="modal-backdrop"><button>close</button></form></dialog>
+
   <script>
     const API = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
     const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
     const dialog = el<HTMLDialogElement>("route-dialog");
+    const cloneDialog = el<HTMLDialogElement>("clone-dialog");
     let options: any = {};
     let profiles: any[] = [];
     let previewProfiles: any[] = [];
     let application: any = null;
     const requestedCategory = new URLSearchParams(window.location.search).get("view");
-    let activeCategory = requestedCategory === "hotspot" || requestedCategory === "simple" ? requestedCategory : "dormant";
+    const requestedLevel = new URLSearchParams(window.location.search).get("level");
+    let activeCategory = requestedCategory === "hotspot" || requestedCategory === "simple" || requestedCategory === "digest" ? requestedCategory : "dormant";
+    let activeLevel = requestedLevel === "tehsil" || requestedLevel === "markaz" ? requestedLevel : "wing";
 
     async function api(path: string, init?: RequestInit) {
       const response = await fetch(`${API}${path}`, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers || {}) } });
@@ -111,41 +143,102 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       const reportType = moduleItems("report_types").find((item: any) => item.id === profile.report_type_id);
       if (reportType?.key === "hotspot_distance_activity") return "hotspot";
       if (reportType?.key === "simple_activity_timing") return "simple";
+      if (reportType?.key === "consolidated_action_digest") return "digest";
       return "dormant";
     }
 
-    function categoryProfiles() {
-      return profiles.filter((profile) => profileCategory(profile) === activeCategory);
+    function scopeKey(profile: any) {
+      return moduleItems("recipient_scopes").find((item: any) => item.id === profile.recipient_scope_id)?.key || "";
+    }
+
+    function profileLevel(profile: any): "wing" | "tehsil" | "markaz" | "other" {
+      const key = scopeKey(profile);
+      if (key === "wing" || key === "deo") return "wing";
+      if (key === "tehsil" || key === "ddeo") return "tehsil";
+      if (key === "markaz" || key === "aeo") return "markaz";
+      const label = `${profile.recipient_scope_name || ""} ${profile.audience_name || ""}`.toLowerCase();
+      if (label.includes("markaz") || label.includes("aeo")) return "markaz";
+      if (label.includes("tehsil") || label.includes("ddeo")) return "tehsil";
+      if (label.includes("wing") || label.includes("deo")) return "wing";
+      return "other";
+    }
+
+    function categoryProfiles(category = activeCategory) {
+      return profiles.filter((profile) => profileCategory(profile) === category);
+    }
+
+    function workspaceProfiles() {
+      return categoryProfiles().filter((profile) => profileLevel(profile) === activeLevel);
+    }
+
+    function levelLabel(level = activeLevel) {
+      return level === "markaz" ? "Markaz" : level === "tehsil" ? "Tehsil" : "Wing";
+    }
+
+    function categoryLabel(category = activeCategory) {
+      return category === "hotspot" ? "Hotspot distance" : category === "simple" ? "Simple activity timing" : category === "digest" ? "Action digest" : "Dormant users";
+    }
+
+    function syncRoutingUrl() {
+      const url = new URL(window.location.href);
+      url.searchParams.set("view", activeCategory);
+      url.searchParams.set("level", activeLevel);
+      window.history.replaceState({}, "", url);
     }
 
     function updateCategoryNavigation() {
-      const dormant = profiles.filter((profile) => profileCategory(profile) === "dormant");
-      const hotspot = profiles.filter((profile) => profileCategory(profile) === "hotspot");
-      const simple = profiles.filter((profile) => profileCategory(profile) === "simple");
+      const dormant = categoryProfiles("dormant");
+      const hotspot = categoryProfiles("hotspot");
+      const simple = categoryProfiles("simple");
+      const digest = categoryProfiles("digest");
       el("dormant-tab-count").textContent = String(dormant.length);
       el("hotspot-tab-count").textContent = String(hotspot.length);
       el("simple-tab-count").textContent = String(simple.length);
-      document.querySelectorAll<HTMLButtonElement>(".routing-category-tab").forEach((button) => {
-        const selected = button.dataset.category === activeCategory;
-        button.classList.toggle("btn-primary", selected);
-        button.classList.toggle("btn-ghost", !selected);
-        button.setAttribute("aria-current", selected ? "page" : "false");
+      el("digest-tab-count").textContent = String(digest.length);
+      document.querySelectorAll<HTMLAnchorElement>(".routing-category-tab").forEach((link) => {
+        const selected = link.dataset.category === activeCategory;
+        link.classList.toggle("active", selected);
+        link.setAttribute("aria-current", selected ? "page" : "false");
+        const url = new URL(link.href); url.searchParams.set("level", activeLevel); link.href = url.pathname + url.search;
+      });
+      const scopedLevels = categoryProfiles();
+      for (const level of ["wing", "tehsil", "markaz"] as const) {
+        el(`${level}-level-count`).textContent = String(scopedLevels.filter((profile) => profileLevel(profile) === level).length);
+      }
+      document.querySelectorAll<HTMLAnchorElement>(".routing-level-tab").forEach((link) => {
+        const selected = link.dataset.level === activeLevel;
+        link.classList.toggle("active", selected);
+        link.setAttribute("aria-current", selected ? "page" : "false");
+        const url = new URL(link.href); url.searchParams.set("view", activeCategory); link.href = url.pathname + url.search;
       });
       const isHotspot = activeCategory === "hotspot";
       const isSimple = activeCategory === "simple";
-      el("routing-view-eyebrow").textContent = isSimple ? "Before/after timing routing" : isHotspot ? "Activity review routing" : "Dormant user reporting";
-      el("routing-view-title").textContent = isSimple ? "Simple Activity timing profiles" : isHotspot ? "Hotspot distance routing profiles" : "Dormant user routing profiles";
-      el("routing-view-description").textContent = isSimple ? "Profiles that route activities below the published minimum before/after interval." : isHotspot ? "Profiles that route classified hotspot-distance activity evidence to authorized groups." : "Profiles that route dormant-user summaries and zero-result acknowledgements.";
+      const isDigest = activeCategory === "digest";
+      const level = levelLabel();
+      const report = categoryLabel();
+      el("routing-view-eyebrow").textContent = `${report} · ${level}`;
+      el("routing-view-title").textContent = `${level}-level ${report.toLowerCase()} messages`;
+      el("routing-view-description").textContent = isDigest ? `One concise message and workbook covering all three issue types for ${level}-level recipients.` : isSimple ? `Timing-review messages routed only to ${level}-level recipients.` : isHotspot ? `Hotspot-distance review messages routed only to ${level}-level recipients.` : `Dormant-user summaries and acknowledgements routed only to ${level}-level recipients.`;
+      el("routing-level-description").textContent = `Viewing ${report.toLowerCase()} configuration. Choose a level to see only its message, audience and recipients.`;
       el<HTMLInputElement>("route-search").placeholder = isSimple ? "Search timing profile, wing or audience…" : isHotspot ? "Search hotspot profile, wing or audience…" : "Search dormant profile, wing or audience…";
-      const scoped = categoryProfiles();
+      const scoped = workspaceProfiles();
       const enabled = scoped.filter((item) => item.enabled);
       el("enabled-count").textContent = String(enabled.length);
-      el("profile-count").textContent = `${scoped.length} ${activeCategory === "simple" ? "timing" : activeCategory} profile${scoped.length === 1 ? "" : "s"}`;
+      el("profile-count").textContent = `${scoped.length} ${level} profile${scoped.length === 1 ? "" : "s"} in this report`;
       el("target-count").textContent = String(enabled.reduce((total, item) => total + targetCount(item), 0));
     }
 
+    function reportsForWorkspace() {
+      const reports = moduleItems("report_types");
+      if (activeCategory === "hotspot") return reports.filter((item: any) => item.key === "hotspot_distance_activity");
+      if (activeCategory === "simple") return reports.filter((item: any) => item.key === "simple_activity_timing");
+      if (activeCategory === "digest") return reports.filter((item: any) => item.key === "consolidated_action_digest");
+      const key = activeLevel === "markaz" ? "markaz_dormant_summary" : activeLevel === "tehsil" ? "tehsil_dormant_summary" : "wing_summary";
+      return reports.filter((item: any) => item.key === key);
+    }
+
     function populateFormOptions() {
-      el<HTMLSelectElement>("route-report").innerHTML = optionHtml(moduleItems("report_types"), (item) => item.name);
+      el<HTMLSelectElement>("route-report").innerHTML = optionHtml(reportsForWorkspace(), (item) => item.name);
       el<HTMLSelectElement>("route-audience").innerHTML = optionHtml(moduleItems("audiences"), (item) => item.name);
       el<HTMLSelectElement>("route-wing").innerHTML = optionHtml(options.wings || [], (item) => item.name);
       el<HTMLSelectElement>("route-account").innerHTML = optionHtml(options.accounts || [], (item) => `${item.name} · ${item.connected ? "connected" : item.status}`);
@@ -157,7 +250,9 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       const channel = value("route-channel");
       const scopes = moduleItems("recipient_scopes").filter((item: any) => item.channel === channel);
       el<HTMLSelectElement>("route-scope").innerHTML = optionHtml(scopes, (item) => item.name);
-      setValue("route-scope", selected || scopes[0]?.id || "");
+      const levelKeys = activeLevel === "markaz" ? ["markaz", "aeo"] : activeLevel === "tehsil" ? ["tehsil", "ddeo"] : ["wing", "deo"];
+      const preferred = scopes.find((item: any) => levelKeys.includes(item.key));
+      setValue("route-scope", selected || preferred?.id || scopes[0]?.id || "");
       populateTemplates();
     }
 
@@ -176,13 +271,13 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
     }
 
     function defaultReportId() {
-      const reportTypes = moduleItems("report_types");
+      const reportTypes = reportsForWorkspace();
       if (activeCategory === "hotspot") {
         return reportTypes.find((item: any) => item.key === "hotspot_distance_activity")?.id || "";
       }
       if (activeCategory === "simple") return reportTypes.find((item: any) => item.key === "simple_activity_timing")?.id || "";
-      return reportTypes.find((item: any) => item.key === "tehsil_dormant_summary")?.id
-        || reportTypes.find((item: any) => !["hotspot_distance_activity", "simple_activity_timing"].includes(item.key))?.id || "";
+      if (activeCategory === "digest") return reportTypes.find((item: any) => item.key === "consolidated_action_digest")?.id || "";
+      return reportTypes[0]?.id || "";
     }
 
     function openEditor(profile?: any) {
@@ -200,6 +295,7 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       populateTemplates(profile?.template_id || "");
       setValue("route-message-style", profile?.presentation_policy?.message_style || "summary");
       setValue("route-attachments", profile?.presentation_policy?.attachment_mode || "image_excel");
+      setValue("route-granularity", profile?.delivery_granularity || (activeLevel === "markaz" && (profile?.recipient_channel || "group") === "individual" ? "scope" : "recipient"));
       setValue("route-image-content", profile?.presentation_policy?.image_content || "details");
       setValue("route-rate", profile?.messages_per_minute ?? 20);
       setValue("route-retries", profile?.max_retries ?? 5);
@@ -233,17 +329,17 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
     function renderProfiles() {
       const search = value("route-search").toLowerCase();
       const status = value("route-status");
-      const visible = categoryProfiles().filter((profile) => {
+      const visible = workspaceProfiles().filter((profile) => {
         if (status === "enabled" && !profile.enabled) return false;
         if (status === "archived" && profile.enabled) return false;
         return `${profile.name} ${profile.report_type_name} ${profile.audience_name} ${profile.wing_name || ""}`.toLowerCase().includes(search);
       });
       const list = el("routing-list"); list.replaceChildren();
-      if (!visible.length) { list.innerHTML = '<p class="empty-state">No routing profiles match this view.</p>'; return; }
+      if (!visible.length) { list.innerHTML = `<p class="empty-state">No ${levelLabel()}-level ${categoryLabel().toLowerCase()} routing profiles match this view.</p>`; return; }
       for (const profile of visible) {
         const count = targetCount(profile);
         const card = document.createElement("article"); card.className = `route-profile-card${profile.enabled ? "" : " archived"}`;
-        card.innerHTML = `<header><div><span class="route-status"></span><h3></h3><p></p></div><span class="environment-pill"></span></header><div class="route-path"><div><span>Report</span><strong></strong></div><i>→</i><div><span>Audience</span><strong></strong></div><i>→</i><div><span>Recipients</span><strong></strong></div></div><div class="route-policy"><span></span><span></span><span></span></div><div class="route-card-actions"></div><div class="route-recipient-list" hidden></div>`;
+        card.innerHTML = `<header><div><span class="route-status"></span><h3></h3><p></p></div><span class="environment-pill"></span></header><div class="route-path"><div><span>Report</span><strong></strong></div><i>→</i><div><span>Audience</span><strong></strong></div><i>→</i><div><span>Recipients</span><strong></strong></div></div><div class="route-policy"><span></span><span></span><span></span><span></span></div><div class="route-card-actions"></div><div class="route-recipient-list" hidden></div>`;
         card.querySelector(".route-status")!.textContent = profile.enabled ? "Enabled" : "Archived";
         card.querySelector(".route-status")!.classList.add(profile.enabled ? "enabled" : "archived");
         card.querySelector("h3")!.textContent = profile.name;
@@ -252,14 +348,23 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
         const pathValues = card.querySelectorAll(".route-path strong");
         pathValues[0].textContent = profile.report_type_name; pathValues[1].textContent = profile.audience_name; pathValues[2].textContent = `${count} target${count === 1 ? "" : "s"}`;
         const policies = card.querySelectorAll(".route-policy span");
-        policies[0].textContent = profile.presentation_policy?.message_style === "detailed" ? "Detailed message" : "Summary message";
+        const template = (options.templates || []).find((item: any) => item.id === profile.template_id);
+        policies[0].textContent = template ? `Message: ${template.name}` : profile.presentation_policy?.message_style === "detailed" ? "Detailed message" : "Summary message";
         policies[1].textContent = String(profile.presentation_policy?.attachment_mode || "none").replaceAll("_", " + ");
         policies[2].textContent = profile.require_approval ? "Approval required" : "Automatic when allowed";
+        policies[3].textContent = profile.delivery_granularity === "scope" ? "One per jurisdiction" : "One per recipient";
         const actions = card.querySelector(".route-card-actions")!;
         const recipients = document.createElement("button"); recipients.className = "btn btn-xs"; recipients.type = "button"; recipients.textContent = "View recipients";
         recipients.addEventListener("click", () => void showRecipients(profile, card.querySelector(".route-recipient-list") as HTMLElement, recipients));
         const edit = document.createElement("button"); edit.className = "btn btn-xs btn-primary"; edit.type = "button"; edit.textContent = "Edit profile"; edit.addEventListener("click", () => openEditor(profile));
         actions.append(edit, recipients);
+        if (activeCategory === "dormant") {
+          const linkedHotspot = profiles.find((item) => profileCategory(item) === "hotspot" && item.presentation_policy?.linked_source_profile_id === profile.id);
+          const linkedSimple = profiles.find((item) => profileCategory(item) === "simple" && item.presentation_policy?.linked_source_profile_id === profile.id);
+          const hotspotClone = document.createElement("button"); hotspotClone.className = "btn btn-xs btn-ghost"; hotspotClone.type = "button"; hotspotClone.textContent = linkedHotspot ? "Hotspot clone exists" : "Clone to hotspot"; hotspotClone.disabled = Boolean(linkedHotspot); hotspotClone.addEventListener("click", () => openClone(profile, "hotspot"));
+          const simpleClone = document.createElement("button"); simpleClone.className = "btn btn-xs btn-ghost"; simpleClone.type = "button"; simpleClone.textContent = linkedSimple ? "Timing clone exists" : "Clone to timing"; simpleClone.disabled = Boolean(linkedSimple); simpleClone.addEventListener("click", () => openClone(profile, "simple"));
+          actions.append(hotspotClone, simpleClone);
+        }
         if (profile.enabled) {
           const archive = document.createElement("button"); archive.className = "btn btn-xs btn-ghost"; archive.type = "button"; archive.textContent = "Archive";
           archive.addEventListener("click", async () => { if (!confirm(`Archive ${profile.name}? Existing frozen plans remain auditable.`)) return; await api(`/api/v1/whatsapp/dispatch-profiles/${profile.id}`, { method: "DELETE" }); await loadRouting(); });
@@ -267,6 +372,17 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
         }
         list.append(card);
       }
+    }
+
+    function openClone(profile: any, activity: "hotspot" | "simple") {
+      const label = activity === "hotspot" ? "Hotspot distance" : "Simple Activity timing";
+      setValue("clone-source-id", profile.id); setValue("clone-activity", activity);
+      setValue("clone-name", `${profile.name} — ${activity === "hotspot" ? "Hotspot distance review" : "Simple Activity timing review"}`);
+      el("clone-title").textContent = `Clone for ${label}`;
+      el("clone-description").textContent = `Name the new profile. Everything else will be inherited safely from ${profile.name}.`;
+      el("clone-message").textContent = "";
+      cloneDialog.showModal();
+      window.setTimeout(() => { const input = el<HTMLInputElement>("clone-name"); input.focus(); input.select(); }, 0);
     }
 
     async function loadRouting() {
@@ -292,7 +408,7 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       try {
         await api("/api/v1/whatsapp/dispatch-profiles", { method: "POST", body: JSON.stringify({
           ...(id ? { id } : {}), application_id: application.id, key: value("route-key"), name: value("route-name"), report_type_id: value("route-report"), audience_id: value("route-audience"), account_id: value("route-account"),
-          ...(template ? { template_id: template } : {}), wing_id: value("route-wing"), recipient_channel: value("route-channel"), recipient_scope_id: value("route-scope"), delivery_mode: value("route-channel") === "group" ? "groups" : "individuals",
+          ...(template ? { template_id: template } : {}), wing_id: value("route-wing"), recipient_channel: value("route-channel"), recipient_scope_id: value("route-scope"), delivery_mode: value("route-channel") === "group" ? "groups" : "individuals", delivery_granularity: value("route-granularity"),
           require_approval: el<HTMLInputElement>("route-approval").checked, fallback_policy: "none", max_retries: Number(value("route-retries")), messages_per_minute: Number(value("route-rate")), enabled: value("route-enabled") === "true", notes: value("route-notes"),
           message_style: value("route-message-style"), attachment_mode: value("route-attachments"), image_content: value("route-image-content"),
         }) });
@@ -300,19 +416,29 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       } catch (error) { el("route-form-message").textContent = error instanceof Error ? error.message : "Could not save routing profile"; }
       finally { button.disabled = false; }
     });
+    el<HTMLFormElement>("clone-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = el<HTMLButtonElement>("save-clone"); button.disabled = true; el("clone-message").textContent = "Cloning and validating the live routing configuration…";
+      const activity = value("clone-activity") as "hotspot" | "simple";
+      try {
+        await api(`/api/v1/antidengue/routing-profiles/${value("clone-source-id")}/clone/${activity}`, { method: "POST", body: JSON.stringify({ name: value("clone-name") }) });
+        const source = profiles.find((item) => item.id === value("clone-source-id"));
+        cloneDialog.close(); activeCategory = activity; activeLevel = source ? (profileLevel(source) === "other" ? activeLevel : profileLevel(source) as "wing" | "tehsil" | "markaz") : activeLevel; syncRoutingUrl(); await loadRouting(); el("routing-message").textContent = `${activity === "hotspot" ? "Hotspot distance" : "Simple Activity timing"} profile cloned with its live audience and routing.`;
+      } catch (error) { el("clone-message").textContent = error instanceof Error ? error.message : "Could not clone routing profile"; }
+      finally { button.disabled = false; }
+    });
     el("route-name").addEventListener("input", () => { if (!value("route-id") && !el<HTMLInputElement>("route-key").dataset.edited) setValue("route-key", slug(value("route-name"))); });
     el("route-key").addEventListener("input", () => { el<HTMLInputElement>("route-key").dataset.edited = "true"; });
-    el("route-channel").addEventListener("change", () => populateScopes());
+    el("route-channel").addEventListener("change", () => {
+      populateScopes();
+      setValue("route-granularity", value("route-channel") === "individual" && activeLevel === "markaz" ? "scope" : "recipient");
+    });
     el("route-report").addEventListener("change", () => populateTemplates());
     el("route-scope").addEventListener("change", () => populateTemplates());
     el("add-route").addEventListener("click", () => { delete el<HTMLInputElement>("route-key").dataset.edited; openEditor(); });
     el("close-route").addEventListener("click", () => dialog.close()); el("cancel-route").addEventListener("click", () => dialog.close());
+    el("close-clone").addEventListener("click", () => cloneDialog.close()); el("cancel-clone").addEventListener("click", () => cloneDialog.close());
     el("route-search").addEventListener("input", renderProfiles); el("route-status").addEventListener("change", renderProfiles); el("refresh-routing").addEventListener("click", () => void loadRouting());
-    document.querySelectorAll<HTMLButtonElement>(".routing-category-tab").forEach((button) => button.addEventListener("click", () => {
-      activeCategory = button.dataset.category === "hotspot" || button.dataset.category === "simple" ? button.dataset.category : "dormant";
-      const url = new URL(window.location.href); url.searchParams.set("view", activeCategory); window.history.replaceState({}, "", url);
-      updateCategoryNavigation(); renderProfiles();
-    }));
     void loadRouting();
   </script>
 </AntiDengueLayout>

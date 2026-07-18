@@ -4,13 +4,76 @@ from collections import Counter, defaultdict
 from datetime import datetime
 
 from automation_core.models import Job
-from master_data.models import Tehsil, Wing
+from master_data.models import Markaz, Tehsil, Wing
 from whatsapp_gateway.rendering.antidengue.formatting import (
     _report_time, _school_count, _wing_display_name, _wing_label,
 )
 from whatsapp_gateway.rendering.antidengue.models import (
     RENDERER_KEY, WING_RENDERER_KEY, ScopedDormantSchool,
+    MARKAZ_RENDERER_KEY,
 )
+
+
+def _build_aeo_markaz_message(
+    *,
+    source_job: Job,
+    recipient_name: str,
+    wing: Wing,
+    markazes: list[Markaz],
+    schools: list[ScopedDormantSchool],
+    deadline: str,
+    policy: dict[str, str],
+) -> tuple[str, dict[str, str]]:
+    generated_at = _report_time(source_job)
+    title = f"Anti-Dengue Dormant Users - {generated_at:%d-%b-%Y - %I:%M %p}"
+    by_markaz: dict[str, list[ScopedDormantSchool]] = defaultdict(list)
+    for school in schools:
+        by_markaz[school.markaz].append(school)
+    lines = [
+        f"*{title}*",
+        f"*AEO:* {recipient_name}",
+        f"*Wing:* {_wing_label(wing)}",
+        f"*Assigned Markaz:* {len(markazes)}",
+        f"*Total dormant:* {_school_count(len(schools))}",
+        "",
+        "*MARKAZ SUMMARY*",
+    ]
+    for index, markaz in enumerate(sorted(markazes, key=lambda item: item.name.casefold()), start=1):
+        lines.append(f"{index}. {markaz.name}: {_school_count(len(by_markaz[markaz.name]))}")
+    if policy["message_style"] == "detailed":
+        lines.extend(["", "*SCHOOL DETAILS*"])
+        for markaz in sorted(markazes, key=lambda item: item.name.casefold()):
+            scoped = sorted(by_markaz[markaz.name], key=lambda item: (item.school_name.casefold(), item.emis))
+            lines.extend(["", f"*{markaz.name} - {_school_count(len(scoped))}*"])
+            lines.extend(f"{index}. {school.emis} - {school.school_name}" for index, school in enumerate(scoped, start=1))
+    try:
+        deadline_passed = generated_at.time() > datetime.strptime(deadline.strip(), "%I:%M %p").time()
+    except ValueError:
+        deadline_passed = False
+    deadline_message = (
+        f"The {deadline} submission deadline has passed. Please update activities on the portal immediately."
+        if deadline_passed else f"Please ensure activities are submitted before {deadline} today."
+    )
+    lines.extend(["", deadline_message])
+    if policy["attachment_mode"] != "none":
+        labels = []
+        if _has_attachment(policy, "image"):
+            labels.append("image report")
+        if _has_attachment(policy, "excel"):
+            labels.append("Excel workbook")
+        lines.extend(["", f"Attached: {' and '.join(labels)}."])
+    message = "\n".join(lines)
+    return message, {
+        "title": title,
+        "recipient_name": recipient_name,
+        "wing": _wing_label(wing),
+        "scope": ", ".join(item.name for item in markazes),
+        "markaz_count": str(len(markazes)),
+        "total_schools": str(len(schools)),
+        "report_body": message,
+        "deadline_message": deadline_message,
+        "renderer_key": MARKAZ_RENDERER_KEY,
+    }
 from whatsapp_gateway.rendering.antidengue.policy import (
     _has_attachment, normalize_presentation_policy,
 )

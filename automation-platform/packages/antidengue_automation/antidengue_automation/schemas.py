@@ -26,6 +26,7 @@ class AntiDengueScheduleCreate(SQLModel):
     weekdays: list[int] = Field(default_factory=list)
     times: list[str] = Field(default_factory=lambda: ["08:30"])
     timezone: str = Field(default="Asia/Karachi", min_length=1, max_length=80)
+    submission_deadline_override: str | None = Field(default=None, max_length=20)
     login_mode: Literal["auto", "manual", "remote_approve"] = "auto"
     dispatch_policy: Literal["preview_only", "auto_send_when_clean"] = "preview_only"
     dispatch_profile_id: uuid.UUID | None = None
@@ -43,6 +44,7 @@ class AntiDengueScheduleUpdate(SQLModel):
     weekdays: list[int] | None = None
     times: list[str] | None = None
     timezone: str | None = Field(default=None, min_length=1, max_length=80)
+    submission_deadline_override: str | None = Field(default=None, max_length=20)
     login_mode: Literal["auto", "manual", "remote_approve"] | None = None
     dispatch_policy: Literal["preview_only", "auto_send_when_clean"] | None = None
     dispatch_profile_id: uuid.UUID | None = None
@@ -61,3 +63,9 @@ class AntiDengueExecutionCreate(SQLModel):
 
 class AntiDengueRunNowRequest(SQLModel):
     created_by: str = Field(default="web-operator", max_length=120)
+
+
+class AntiDengueDeadlinePolicyUpdate(SQLModel):
+    submission_deadline: str = Field(min_length=1, max_length=20)
+    timezone: str = Field(default="Asia/Karachi", min_length=1, max_length=80)
+    updated_by: str = Field(default="web-operator", max_length=120)

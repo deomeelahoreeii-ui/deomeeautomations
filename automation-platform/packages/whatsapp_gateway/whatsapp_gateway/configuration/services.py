@@ -22,6 +22,7 @@ DEFAULT_REPORT_TYPES = {
         ("school_activity", "School activity report", "School-level activity evidence."),
         ("officer_summary", "Officer summary", "Officer coverage and follow-up summary."),
         ("wing_summary", "Wing summary", "Consolidated report for a wing audience."),
+        ("consolidated_action_digest", "Consolidated Action Digest", "One concise digest and workbook covering dormant, distance and timing issues."),
     ],
     "crm": [
         ("filtered_workbook", "Filtered workbook", "CRM workbook filtered for an audience."),
@@ -324,6 +325,7 @@ def dispatch_profile_dict(
         "wing_id": str(item.wing_id) if item.wing_id else None,
         "wing_name": wing.name if wing else None,
         "delivery_mode": item.delivery_mode,
+        "delivery_granularity": item.delivery_granularity,
         "require_approval": item.require_approval,
         "fallback_policy": item.fallback_policy,
         "max_retries": item.max_retries,

@@ -10,10 +10,8 @@ import antidengue_automation.models  # noqa: F401
 import automation_core.models  # noqa: F401
 import master_data.models  # noqa: F401
 import whatsapp_gateway.models  # noqa: F401
-from antidengue_automation.simple_activity_routing import configure_simple_activity_routes, expand_simple_activity_profile_ids
 from automation_core.models import Artifact, Job, JobStatus, JobType
 from master_data.models import Wing
-from whatsapp_gateway.models import WhatsAppAccount, WhatsAppApplication, WhatsAppAudience, WhatsAppDispatchProfile, WhatsAppReportType
 from whatsapp_gateway.rendering.antidengue.simple_activity_report import render_simple_activity_report
 from whatsapp_gateway.previews.compiler.errors import extend_unique_issues
 
@@ -24,11 +22,11 @@ def _engine():
 
 
 def test_simple_activity_renderer_scopes_rows_and_hides_attachment_claim(tmp_path: Path) -> None:
-    engine = _engine(); wing = Wing(id=uuid.uuid4(), district_id=uuid.uuid4(), department_id=uuid.uuid4(), name="MEE", code="MEE"); tehsil=uuid.uuid4()
+    engine = _engine(); wing = Wing(id=uuid.uuid4(), district_id=uuid.uuid4(), department_id=uuid.uuid4(), name="MEE", code="MEE"); tehsil=uuid.uuid4(); markaz=uuid.uuid4()
     path = tmp_path / "Simple Activity Timing Review - test.xlsx"
     workbook=Workbook(); sheet=workbook.active; sheet.title="Review Required"
     sheet.append(["School EMIS","School Name","Wing ID","Tehsil ID","Markaz ID","Tehsil","Markaz","Time Difference(Sec)","Activity(Lat,Long)","ID"])
-    sheet.append(["35210001","School A",str(wing.id),str(tehsil),"","CITY","M1",245,"31.52,74.35","a1"])
+    sheet.append(["35210001","School A",str(wing.id),str(tehsil),str(markaz),"CITY","M1",245,"31.52,74.35","a1"])
     sheet.append(["35210002","School B",str(uuid.uuid4()),str(tehsil),"","CITY","M2",100,"31.50,74.30","a2"])
     workbook.save(path); workbook.close()
     with Session(engine) as session:
@@ -41,6 +39,8 @@ def test_simple_activity_renderer_scopes_rows_and_hides_attachment_claim(tmp_pat
         assert "Google Maps:" not in rendered.message
         assert "attached Excel" not in rendered.message
         assert rendered.attachment_paths == []
+        markaz_rendered=render_simple_activity_report(session,source_job=job,wing=wing,recipient_name="AEO One",scope_key="markaz",scope_value="",scope_values=[str(markaz)],scope_label="M1",presentation_policy={"attachment_mode":"none"})
+        assert [row.emis for row in markaz_rendered.rows] == ["35210001"]
 
 
 def test_unmapped_simple_activity_rows_are_a_detailed_source_issue_not_a_delivery_issue(tmp_path: Path) -> None:
@@ -84,14 +84,3 @@ def test_simple_activity_message_caps_text_but_preserves_full_attachment(tmp_pat
         assert "17 additional school(s)" in rendered.message
         assert len(rendered.attachment_paths) == 1
         assert any(issue["severity"] == "info" for issue in rendered.issues)
-
-
-def test_simple_activity_routes_expand_from_any_dormant_source() -> None:
-    engine=_engine()
-    with Session(engine) as session:
-        account=WhatsAppAccount(name="Primary",worker_key="simple-routing"); app=WhatsAppApplication(key="antidengue",name="AntiDengue");session.add_all([account,app]);session.flush()
-        dormant=WhatsAppReportType(application_id=app.id,key="tehsil_dormant_summary",name="Dormant"); simple=WhatsAppReportType(application_id=app.id,key="simple_activity_timing",name="Simple timing"); audience=WhatsAppAudience(application_id=app.id,key="a",name="A");session.add_all([dormant,simple,audience]);session.flush()
-        sources=[WhatsAppDispatchProfile(application_id=app.id,key=f"s{i}",name=f"Source {i}",report_type_id=dormant.id,audience_id=audience.id,account_id=account.id,recipient_channel="group",delivery_mode="groups") for i in (1,2)];session.add_all(sources);session.commit()
-        configured=configure_simple_activity_routes(session,[item.id for item in sources]); assert configured["enabled_count"]==2
-        derived={uuid.UUID(item["simple_activity_profile_id"]) for item in configured["items"]}
-        assert set(expand_simple_activity_profile_ids(session,[sources[0].id])) == {sources[0].id,*derived}

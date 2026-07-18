@@ -29,6 +29,11 @@ from antidengue_automation.scheduling import (
 from automation_api.main import app
 from automation_core.database import get_session
 from automation_core.models import Job, JobLog, JobStatus, JobType
+from automation_core.worker_runtime import register_worker_runtime
+from whatsapp_gateway.previews.compiler.capabilities import (
+    PREVIEW_COMPILER_PROTOCOL, PREVIEW_COMPILER_QUEUE,
+    compiler_build_id, compiler_capabilities, compiler_fingerprint,
+)
 from whatsapp_gateway.models import (
     WhatsAppAccount,
     WhatsAppApplication,
@@ -44,6 +49,14 @@ class FakeTask:
 
 
 def seed_profile(session: Session) -> WhatsAppDispatchProfile:
+    register_worker_runtime(
+        session, worker_name="test-preview-worker",
+        queues=[PREVIEW_COMPILER_QUEUE],
+        protocols={"antidengue_preview": PREVIEW_COMPILER_PROTOCOL},
+        capabilities=compiler_capabilities(),
+        capability_fingerprint=compiler_fingerprint(),
+        build_id=compiler_build_id(), database_fingerprint="test",
+    )
     account = WhatsAppAccount(name="Primary", worker_key=f"worker-{uuid.uuid4().hex}")
     application = WhatsAppApplication(key=f"antidengue-{uuid.uuid4().hex}", name="AntiDengue")
     # validate_dispatch_profile requires the canonical key.
@@ -120,6 +133,50 @@ def test_due_tick_creates_only_latest_missed_occurrence() -> None:
         assert persisted.scheduled_for.astimezone(
             __import__("zoneinfo").ZoneInfo("Asia/Karachi")
         ).strftime("%H:%M") == "09:05"
+
+
+def test_execution_persists_only_explicitly_selected_profiles() -> None:
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        source = seed_profile(session)
+        activity_report = WhatsAppReportType(
+            application_id=source.application_id,
+            key="hotspot_distance_activity",
+            name="Hotspot distance",
+        )
+        session.add(activity_report)
+        session.flush()
+        activity = WhatsAppDispatchProfile(
+            application_id=source.application_id,
+            key="markaz-hotspot",
+            name="Markaz hotspot",
+            report_type_id=activity_report.id,
+            audience_id=source.audience_id,
+            account_id=source.account_id,
+            recipient_channel="group",
+            delivery_mode="groups",
+            presentation_policy={"linked_source_profile_id": str(source.id)},
+        )
+        session.add(activity)
+        session.commit()
+
+        execution = create_execution(
+            session,
+            schedule=None,
+            scheduled_for=datetime.now(UTC),
+            trigger_type="manual_preview",
+            dispatch_policy="preview_only",
+            login_mode="auto",
+            dispatch_profile_id=source.id,
+            dispatch_profile_ids=[activity.id],
+            created_by="test",
+        )
+
+        assert execution.dispatch_profile_id == activity.id
+        assert execution.dispatch_profile_ids == [str(activity.id)]
 
 
 def test_preview_only_execution_never_uses_direct_live_source_job() -> None:

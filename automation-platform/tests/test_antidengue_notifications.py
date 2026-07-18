@@ -20,11 +20,12 @@ def test_ntfy_delivery_is_retry_safe_and_does_not_republish(monkeypatch) -> None
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     SQLModel.metadata.create_all(engine)
     settings = SimpleNamespace(
+        ntfy_enabled=True,
+        ntfy_publish_url="https://ntfy.example",
+        ntfy_token="secret",
+        ntfy_timeout_seconds=2.0,
         antidengue_ntfy_enabled=True,
-        antidengue_ntfy_base_url="https://ntfy.example",
         antidengue_ntfy_topic="operations",
-        antidengue_ntfy_token="secret",
-        antidengue_ntfy_timeout_seconds=2.0,
     )
     monkeypatch.setattr("antidengue_automation.notifications.get_settings", lambda: settings)
     calls = []

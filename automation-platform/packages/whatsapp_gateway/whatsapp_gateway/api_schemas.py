@@ -77,6 +77,15 @@ class AudienceMemberInput(BaseModel):
     route_scope_value: str = PydanticField(default="", max_length=100)
     route_scope_label: str = PydanticField(default="", max_length=200)
 
+class AudienceSourceInput(BaseModel):
+    id: uuid.UUID | None = None
+    source_type: Literal["master_data_jurisdictions"] = "master_data_jurisdictions"
+    recipient_role: Literal["aeo", "ddeo"]
+    wing_id: uuid.UUID
+    route_scope_key: Literal["markaz", "tehsil"]
+    aggregate_by_recipient: bool = True
+    enabled: bool = True
+
 class DispatchProfileInput(BaseModel):
     id: uuid.UUID | None = None
     application_id: uuid.UUID
@@ -90,6 +99,7 @@ class DispatchProfileInput(BaseModel):
     recipient_channel: Literal["individual", "group"] = "group"
     wing_id: uuid.UUID | None = None
     delivery_mode: Literal["groups", "individuals"] = "groups"
+    delivery_granularity: Literal["recipient", "scope"] = "recipient"
     require_approval: bool = True
     fallback_policy: Literal["none", "same_scope"] = "none"
     max_retries: int = PydanticField(default=5, ge=0, le=10)

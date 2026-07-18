@@ -44,6 +44,7 @@ from whatsapp_gateway.preview_service import (
     cleanup_unreferenced_preview_files,
     delete_preview_records,
 )
+from whatsapp_gateway.persistence.audience_sources import WhatsAppAudienceSource
 def _delete_profile_records(
     session: Session,
     profile: WhatsAppDispatchProfile,
@@ -89,6 +90,13 @@ def _delete_audience_records(
     ).all()
     for member in members:
         session.delete(member)
+    sources = session.scalars(
+        select(WhatsAppAudienceSource).where(
+            WhatsAppAudienceSource.audience_id == audience.id
+        )
+    ).all()
+    for source in sources:
+        session.delete(source)
     session.flush()
     session.delete(audience)
     session.flush()

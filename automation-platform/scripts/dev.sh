@@ -293,13 +293,25 @@ wait_for_platform_worker() {
       && grep -q "crm_filters.run_sheet_to_pdf_job" <<<"$output" \
       && grep -q "whatsapp_gateway.build_inbound_export" <<<"$output" \
       && grep -q "whatsapp_gateway.process_inbound_batch" <<<"$output" \
+      && grep -q "whatsapp_gateway.compile_dispatch_preview.v2" <<<"$output" \
       && grep -q "crm_domain.publish_complaint_case" <<<"$output"; then
-      return 0
+      if "$UV" run python - <<'PYWORKERCAP'
+from sqlmodel import Session
+from automation_core.database import engine
+from automation_core.worker_runtime import require_compatible_workers
+from whatsapp_gateway.previews.compiler.capabilities import local_compiler_runtime
+required = local_compiler_runtime()
+with Session(engine) as session:
+    require_compatible_workers(session, required)
+PYWORKERCAP
+      then
+        return 0
+      fi
     fi
     sleep 1
   done
   printf '%s\n' "$output" >&2
-  fail "The Celery worker did not register the CRM, Paperless publication, WhatsApp export, and inbound processing tasks."
+  fail "The Celery worker did not register the CRM, Paperless publication, WhatsApp export, inbound processing tasks, and durable preview compiler capabilities."
 }
 
 whatsapp_worker_health_json() {
@@ -793,6 +805,28 @@ if [[ "$rabbitmq_ready" != true ]]; then
 fi
 echo "Docker RabbitMQ is healthy."
 
+if (
+  cd "$ROOT"
+  "$UV" run python - <<'PYNTFY'
+from automation_core.config import get_settings
+raise SystemExit(0 if get_settings().ntfy_enabled else 1)
+PYNTFY
+); then
+  info "Checking local ntfy notification server"
+  docker compose -f "$COMPOSE_FILE" up -d ntfy
+  ntfy_health_url="$(
+    cd "$ROOT"
+    "$UV" run python - <<'PYNTFYURL'
+from automation_core.config import get_settings
+print(f"{get_settings().ntfy_publish_url}/v1/health")
+PYNTFYURL
+  )"
+  wait_for_http "$ntfy_health_url" "ntfy" 30
+  echo "Local ntfy is healthy."
+else
+  info "ntfy transport disabled by NTFY_ENABLED=false"
+fi
+
 info "Checking NATS"
 wait_for_port 4222 2 \
   || fail "NATS is not listening on port 4222. Start your NATS server before the development stack."
@@ -808,18 +842,16 @@ info "Recovering jobs left active by an earlier development process"
 "$UV" run python scripts/recover_antidengue_executions.py
 
 info "Starting FastAPI"
-"$UV" run uvicorn automation_api.main:app --reload --port "$API_PORT" &
+"$UV" run uvicorn automation_api.main:app \
+  --reload \
+  --timeout-graceful-shutdown 5 \
+  --port "$API_PORT" &
 pids+=("$!")
 
-info "Starting one Celery worker for AntiDengue, CRM, and WhatsApp exports"
-"$UV" run celery \
-  -A automation_worker.main.celery_app worker \
-  --queues=antidengue,crm,whatsapp \
-  --concurrency=1 \
-  --hostname=automation@%h \
-  --without-gossip \
-  --without-mingle \
-  --loglevel=INFO &
+info "Starting auto-reloading Celery worker for AntiDengue, previews, CRM, and WhatsApp exports"
+platform_worker_command="$UV run celery -A automation_worker.main.celery_app worker --queues=antidengue,antidengue-preview-v2,crm,whatsapp --concurrency=1 --hostname=automation@%h --without-gossip --without-mingle --loglevel=INFO"
+"$UV" run watchfiles --filter python --sigint-timeout 8 \
+  "$platform_worker_command" packages apps/api &
 pids+=("$!")
 
 if whatsapp_worker_inbound_ready; then

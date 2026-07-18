@@ -13,6 +13,11 @@ from whatsapp_gateway.rendering.antidengue.messages import (
 )
 from whatsapp_gateway.rendering.antidengue.wing_report import render_wing_dormant_report
 from whatsapp_gateway.rendering.antidengue.tehsil_report import render_tehsil_dormant_report
+from whatsapp_gateway.rendering.antidengue.digest_models import (
+    CONSOLIDATED_DIGEST_RENDERER_KEY, CONSOLIDATED_DIGEST_REPORT_KEY,
+    DigestSchool, RenderedConsolidatedDigest,
+)
+from whatsapp_gateway.rendering.antidengue.digest_report import render_consolidated_action_digest
 
 __all__ = [
     "PAKISTAN_TIME", "RENDERER_KEY", "REQUIRED_COLUMNS", "WING_RENDERER_KEY",
@@ -20,4 +25,6 @@ __all__ = [
     "ScopedDormantSchool", "_has_attachment", "_build_message", "_build_wing_message",
     "normalize_presentation_policy", "render_wing_dormant_report",
     "render_tehsil_dormant_report",
+    "CONSOLIDATED_DIGEST_RENDERER_KEY", "CONSOLIDATED_DIGEST_REPORT_KEY",
+    "DigestSchool", "RenderedConsolidatedDigest", "render_consolidated_action_digest",
 ]

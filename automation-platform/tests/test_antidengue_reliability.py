@@ -25,6 +25,7 @@ from automation_api.main import app
 from automation_core.database import get_session
 from automation_core.job_service import add_job, claim_job_running
 from automation_core.models import Job, JobStatus, JobType, TaskOutbox
+from automation_core.worker_runtime import register_worker_runtime
 from automation_core.task_outbox import publish_pending_tasks, stage_task
 from whatsapp_gateway.models import (
     WhatsAppAccount,
@@ -36,10 +37,22 @@ from whatsapp_gateway.models import (
 )
 from whatsapp_gateway.previews.maintenance import delete_preview_records
 from whatsapp_gateway.dispatch.task_entrypoints import send_approved_preview_job
+from whatsapp_gateway.previews.compiler.capabilities import (
+    PREVIEW_COMPILER_PROTOCOL, PREVIEW_COMPILER_QUEUE,
+    compiler_build_id, compiler_capabilities, compiler_fingerprint,
+)
 
 
 def seed_profile(session: Session) -> WhatsAppDispatchProfile:
     """Create the minimal canonical AntiDengue routing graph for this module."""
+    register_worker_runtime(
+        session, worker_name="test-preview-worker",
+        queues=[PREVIEW_COMPILER_QUEUE],
+        protocols={"antidengue_preview": PREVIEW_COMPILER_PROTOCOL},
+        capabilities=compiler_capabilities(),
+        capability_fingerprint=compiler_fingerprint(),
+        build_id=compiler_build_id(), database_fingerprint="test",
+    )
     account = WhatsAppAccount(name="Primary", worker_key=f"worker-{uuid.uuid4().hex}")
     application = WhatsAppApplication(key="antidengue", name="AntiDengue")
     session.add(account)

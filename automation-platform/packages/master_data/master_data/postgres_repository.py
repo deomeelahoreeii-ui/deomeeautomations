@@ -705,7 +705,11 @@ class PostgresMasterDataRepository:
                     "active": jurisdiction.active,
                     "officer_name": officer.name,
                     "mobile": officer.mobile,
+                    "tehsil_ref": str(jurisdiction.tehsil_id),
                     "tehsil_name": session.get(Tehsil, jurisdiction.tehsil_id).name,
+                    "markaz_ref": (
+                        str(jurisdiction.markaz_id) if jurisdiction.markaz_id else ""
+                    ),
                     "markaz_name": (
                         session.get(Markaz, jurisdiction.markaz_id).name
                         if jurisdiction.markaz_id

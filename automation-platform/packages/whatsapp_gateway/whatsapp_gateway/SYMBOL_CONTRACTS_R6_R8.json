@@ -30,17 +30,17 @@
     "source": "antidengue_renderer.py"
   },
   "_canonical_report_artifact": {
-    "ast_sha256": "0b9428ee8efd8abbe9460a615b570c975d1bffee951ae4ed4aaaea004e4773c7",
+    "ast_sha256": "f1836d1bdf897bfe59565140b9e5c643e8603949fcca0b226f0af10dbb4ee5fc",
     "destination_file": "rendering/antidengue/source_data.py",
     "source": "antidengue_renderer.py"
   },
   "_ensure_excel_attachment": {
-    "ast_sha256": "2aafb5ef01519ae37fb23e2e6428de226c8fc3168d47caebb2aaf1a7d5a86a5d",
+    "ast_sha256": "897f259aac424ba00e8d1744c93da65e6e5f61ee3c3a96a1fb6e00a4855bff38",
     "destination_file": "rendering/antidengue/excel.py",
     "source": "antidengue_renderer.py"
   },
   "_ensure_image_attachment": {
-    "ast_sha256": "fbf7df7eda04ead26bd4fa030d70284332a6491bda937eb917c26e1ad53f7140",
+    "ast_sha256": "a528eb0dc22abbc7def56549fc39ba7e2841ede995c6b3e064fcd30493485222",
     "destination_file": "rendering/antidengue/images.py",
     "source": "antidengue_renderer.py"
   },
@@ -100,7 +100,7 @@
     "source": "antidengue_renderer.py"
   },
   "compile_dispatch_preview_job": {
-    "ast_sha256": "1d6e9626cde4d1d0b6e0c1ce7f478efa46a5343485b76857eca4440fc68724f7",
+    "ast_sha256": "c342101f967ae606556bec4c2f3aa593d38e0ee95e7b6df337e5d77a55a7bc88",
     "destination_file": "dispatch/task_entrypoints.py",
     "source": "tasks.py"
   },
@@ -120,7 +120,7 @@
     "source": "antidengue_renderer.py"
   },
   "send_approved_preview_job": {
-    "ast_sha256": "e0c199b07a3588fd6342a427228a0fde47b0e6d8ea74d15248b11a01db6b48d7",
+    "ast_sha256": "effb22fd0d7f4f0309fbd7abb09b71626b34548fd39e54cfd3c45e82e730d61a",
     "destination_file": "dispatch/task_entrypoints.py",
     "source": "tasks.py"
   }

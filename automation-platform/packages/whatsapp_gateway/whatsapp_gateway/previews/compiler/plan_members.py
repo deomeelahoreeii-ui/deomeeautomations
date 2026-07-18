@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import copy
-import uuid
+import copy, uuid
 from typing import Any
 
 from master_data.models import Tehsil
-from automation_core.config import get_settings
 from whatsapp_gateway.antidengue_renderer import (
     HOTSPOT_RENDERER_KEY, HOTSPOT_REPORT_KEY,
     RENDERER_KEY as TEHSIL_DORMANT_RENDERER_KEY, WING_RENDERER_KEY,
@@ -20,10 +18,8 @@ from whatsapp_gateway.previews.compiler.routes import (
     _canonical_contact_target, _plan_matches_audience_route, _plan_recipient_channel,
     _plan_recipient_scope, _plan_target, _retarget_group_plan,
 )
-from whatsapp_gateway.previews.compiler.zero_result_acknowledgements import (
-    build_zero_result_plan,
-)
-
+from whatsapp_gateway.previews.compiler.zero_result_acknowledgements import build_zero_result_plan
+from whatsapp_gateway.previews.compiler.consolidated_plan import plan_consolidated_group_member
 def plan_group_member(
     ctx: CompileContext, member: WhatsAppAudienceMember, batch_issues: list[dict[str, Any]]
 ) -> tuple[dict[str, Any] | None, bool]:
@@ -33,8 +29,11 @@ def plan_group_member(
     if directory_group is None:
         batch_issues.append(issue("missing_audience_target", "blocked", "An audience group no longer exists in the synchronized directory."))
         return None, False
+    planner_key = ctx.planner_capability.planner_key if ctx.planner_capability else ""
+    if planner_key == "group_digest":
+        return plan_consolidated_group_member(ctx, member, directory_group, batch_issues)
     expected_scope = recipient_scope.key if recipient_scope else member.route_scope_key
-    if report_type.key == SIMPLE_ACTIVITY_REPORT_KEY:
+    if planner_key == "group_activity" and report_type.key == SIMPLE_ACTIVITY_REPORT_KEY:
         if member.route_scope_key != expected_scope:
             batch_issues.append(issue("audience_scope_mismatch", "blocked", f"{directory_group.name} must be bound to this profile's {expected_scope or 'configured'} scope."))
             return None, True
@@ -68,7 +67,7 @@ def plan_group_member(
                     "wing": wing.name, "wing_id": str(wing.id), "row_count": len(rendered.rows),
                     "delivery_kind": "simple_activity_timing_review"}},
         }, True
-    if report_type.key == HOTSPOT_REPORT_KEY:
+    if planner_key == "group_activity" and report_type.key == HOTSPOT_REPORT_KEY:
         if member.route_scope_key != expected_scope:
             batch_issues.append(issue(
                 "audience_scope_mismatch", "blocked",
@@ -160,7 +159,8 @@ def plan_group_member(
             tehsil_id = uuid.UUID(member.route_scope_value)
             rendered = render_tehsil_dormant_report(
                 session, source_job=ctx.source_job, wing=wing, tehsil_id=tehsil_id,
-                recipient_name=directory_group.name, deadline=get_settings().antidengue_submission_deadline,
+                recipient_name=directory_group.name,
+                deadline=ctx.deadline.label if ctx.deadline else "12:30 PM",
                 presentation_policy=profile.presentation_policy,
             )
         except (ValueError, OSError) as exc:

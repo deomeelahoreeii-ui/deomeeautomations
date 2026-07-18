@@ -1,4 +1,31 @@
 services:
+  ntfy:
+    image: binwiederhier/ntfy:v2.26.0
+    command: serve
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Karachi}
+      NTFY_BASE_URL: ${NTFY_PUBLIC_BASE_URL:-http://localhost:2586}
+      NTFY_LISTEN_HTTP: :80
+      NTFY_CACHE_FILE: /var/lib/ntfy/cache.db
+      NTFY_CACHE_DURATION: ${NTFY_CACHE_DURATION:-72h}
+      NTFY_KEEPALIVE_INTERVAL: ${NTFY_KEEPALIVE_INTERVAL:-45s}
+      NTFY_AUTH_FILE: /var/lib/ntfy/user.db
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      NTFY_ENABLE_LOGIN: "true"
+    ports:
+      # Localhost is the secure default. Set NTFY_BIND_ADDRESS to the laptop's
+      # LAN IP only when LAN clients should connect directly.
+      - "${NTFY_BIND_ADDRESS:-127.0.0.1}:${NTFY_PORT:-2586}:80"
+    volumes:
+      - ntfy-data:/var/lib/ntfy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --tries=1 http://127.0.0.1:80/v1/health -O - | grep -q '\"healthy\":true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
   postgres:
     image: postgres:latest
     environment:
@@ -55,6 +82,14 @@ services:
       ARTIFACT_ROOT: /app/data/artifacts
       LEGACY_UV_BIN: uv
       API_CORS_ORIGINS: http://localhost:4321
+      NTFY_ENABLED: ${NTFY_ENABLED:-false}
+      NTFY_PUBLISH_URL: http://ntfy:80
+      NTFY_PUBLIC_BASE_URL: ${NTFY_PUBLIC_BASE_URL:-http://localhost:2586}
+      NTFY_EXPOSURE_MODE: ${NTFY_EXPOSURE_MODE:-local}
+      NTFY_TOKEN: ${NTFY_TOKEN:-}
+      NTFY_TIMEOUT_SECONDS: ${NTFY_TIMEOUT_SECONDS:-5}
+      ANTIDENGUE_NTFY_ENABLED: ${ANTIDENGUE_NTFY_ENABLED:-false}
+      ANTIDENGUE_NTFY_TOPIC: ${ANTIDENGUE_NTFY_TOPIC:-automation-antidengue}
     ports:
       - "8020:8000"
     volumes:
@@ -76,13 +111,25 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      ntfy:
+        condition: service_healthy
 
   worker:
     image: automation-platform-python:latest
     build:
       context: .
       dockerfile: infra/docker/python.Dockerfile
-    command: uv run celery -A automation_worker.main.celery_app worker --loglevel=INFO
+    command: uv run celery -A automation_worker.main.celery_app worker --queues=antidengue,antidengue-preview-v2,crm,whatsapp --loglevel=INFO
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"from sqlmodel import Session; from automation_core.database import engine; from automation_core.worker_runtime import require_compatible_workers; from whatsapp_gateway.previews.compiler.capabilities import local_compiler_runtime; s=Session(engine); require_compatible_workers(s, local_compiler_runtime()); s.close()\""
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 15s
     environment:
       DATABASE_URL: postgresql+psycopg://automation:automation@postgres:5432/automation_platform
       CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
@@ -100,6 +147,45 @@ services:
       rabbitmq:
         condition: service_healthy
       redis:
+        condition: service_healthy
+
+  scheduler:
+    image: automation-platform-python:latest
+    build:
+      context: .
+      dockerfile: infra/docker/python.Dockerfile
+    command: uv run python -m antidengue_automation.scheduler_service
+    environment:
+      DATABASE_URL: postgresql+psycopg://automation:automation@postgres:5432/automation_platform
+      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DEOMEE_ROOT: /workspace/deomeeautomations
+      CRM_PROJECT_ROOT: /workspace/deomeeautomations/crm-management-system
+      ARTIFACT_ROOT: /app/data/artifacts
+      LEGACY_UV_BIN: uv
+      ANTIDENGUE_SCHEDULER_ENABLED: ${ANTIDENGUE_SCHEDULER_ENABLED:-true}
+      ANTIDENGUE_SCHEDULER_INTERVAL_SECONDS: ${ANTIDENGUE_SCHEDULER_INTERVAL_SECONDS:-10}
+      NTFY_ENABLED: ${NTFY_ENABLED:-false}
+      # Containers publish over the private Compose network. Subscribers use
+      # NTFY_PUBLIC_BASE_URL, which can later be LAN, Tailscale, or Cloudflare.
+      NTFY_PUBLISH_URL: http://ntfy:80
+      NTFY_PUBLIC_BASE_URL: ${NTFY_PUBLIC_BASE_URL:-http://localhost:2586}
+      NTFY_EXPOSURE_MODE: ${NTFY_EXPOSURE_MODE:-local}
+      NTFY_TOKEN: ${NTFY_TOKEN:-}
+      NTFY_TIMEOUT_SECONDS: ${NTFY_TIMEOUT_SECONDS:-5}
+      ANTIDENGUE_NTFY_ENABLED: ${ANTIDENGUE_NTFY_ENABLED:-false}
+      ANTIDENGUE_NTFY_TOPIC: ${ANTIDENGUE_NTFY_TOPIC:-automation-antidengue}
+    volumes:
+      - ..:/workspace/deomeeautomations
+      - api-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ntfy:
         condition: service_healthy
 
   flower:
@@ -132,6 +218,7 @@ services:
         condition: service_healthy
 
 volumes:
+  ntfy-data:
   postgres-data:
   rabbitmq-data:
   redis-data:

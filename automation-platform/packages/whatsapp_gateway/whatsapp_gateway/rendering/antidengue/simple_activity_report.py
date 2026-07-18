@@ -130,11 +130,12 @@ def _attachment(session: Session, job: Job, source: Artifact, header: list[str],
     return artifact, path, hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def render_simple_activity_report(session: Session, *, source_job: Job, wing: Wing, recipient_name: str, scope_key: str, scope_value: str, scope_label: str, presentation_policy: dict[str, Any] | None = None) -> RenderedSimpleActivityReport:
+def render_simple_activity_report(session: Session, *, source_job: Job, wing: Wing, recipient_name: str, scope_key: str, scope_value: str, scope_label: str, presentation_policy: dict[str, Any] | None = None, scope_values: list[str] | None = None) -> RenderedSimpleActivityReport:
     source, source_path, header, all_rows = _source(session, source_job)
     rows = [row for row in all_rows if row.wing_id == str(wing.id)]
-    if scope_key == "tehsil": rows = [row for row in rows if row.tehsil_id == scope_value]
-    elif scope_key == "markaz": rows = [row for row in rows if row.markaz_id == scope_value]
+    accepted_scope_values = set(scope_values or [scope_value])
+    if scope_key == "tehsil": rows = [row for row in rows if row.tehsil_id in accepted_scope_values]
+    elif scope_key == "markaz": rows = [row for row in rows if row.markaz_id in accepted_scope_values]
     elif scope_key not in {"district", "wing"}: raise ValueError(f"Simple Activity timing delivery does not support {scope_key or 'an unbound'} scope")
     issues = []
     source_issues = []

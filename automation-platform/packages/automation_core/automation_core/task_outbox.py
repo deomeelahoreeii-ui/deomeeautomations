@@ -176,6 +176,12 @@ def requeue_job_task(session: Session, job: Job, *, reason: str) -> TaskOutbox |
         "whatsapp.dispatch_send": ("whatsapp_gateway.send_approved_preview", "antidengue"),
     }
     mapped = task_map.get(job.type)
+    if job.type == "whatsapp.dispatch_preview" and job.parameters.get("compiler_contract"):
+        from whatsapp_gateway.previews.compiler.capabilities import (
+            PREVIEW_COMPILER_QUEUE, PREVIEW_COMPILER_TASK,
+        )
+
+        mapped = (PREVIEW_COMPILER_TASK, PREVIEW_COMPILER_QUEUE)
     if mapped is None:
         return None
     job.status = JobStatus.queued.value

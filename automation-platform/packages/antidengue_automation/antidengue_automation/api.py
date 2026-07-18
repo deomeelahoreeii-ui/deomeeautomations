@@ -18,11 +18,18 @@ from antidengue_automation.models import (
     AntiDengueScheduleExecution,
 )
 from antidengue_automation.schemas import (
+    AntiDengueDeadlinePolicyUpdate,
     AntiDengueExecutionCreate,
     AntiDengueRunNowRequest,
     AntiDengueRunRequest,
     AntiDengueScheduleCreate,
     AntiDengueScheduleUpdate,
+)
+from antidengue_automation.deadline_policy import (
+    get_or_create_deadline_policy,
+    normalize_deadline,
+    policy_dict,
+    update_deadline_policy,
 )
 from antidengue_automation.scheduling import (
     ACTIVE_EXECUTION_STATUSES,
@@ -44,8 +51,6 @@ from antidengue_automation.scheduling import (
 )
 from antidengue_automation.tasks import run_antidengue_job
 from antidengue_automation.notifications import NOTIFICATION_EVENT_TYPES
-from antidengue_automation.hotspot_routing import expand_hotspot_profile_ids
-from antidengue_automation.simple_activity_routing import expand_simple_activity_profile_ids
 from automation_core.database import get_session, session_scope
 from automation_core.job_service import (
     add_job,
@@ -69,6 +74,7 @@ from automation_core.models import (
 )
 from automation_core.storage_catalog import archive_source_file, ensure_source_file_local
 from automation_core.config import get_settings
+from automation_core.notifications import ntfy_health
 from automation_core.task_outbox import publish_pending_tasks, stage_task
 from automation_core.time import utcnow
 from whatsapp_gateway.models import (
@@ -523,6 +529,7 @@ def _schedule_dict(item: AntiDengueSchedule) -> dict:
         "weekdays": item.weekdays,
         "times": item.times,
         "timezone": item.timezone,
+        "submission_deadline_override": item.submission_deadline_override,
         "login_mode": item.login_mode,
         "dispatch_policy": item.dispatch_policy,
         "dispatch_profile_id": str(item.dispatch_profile_id),
@@ -561,6 +568,11 @@ def _execution_dict(
         "login_mode": item.login_mode,
         "dispatch_profile_id": str(item.dispatch_profile_id),
         "dispatch_profile_ids": profile_ids,
+        "submission_deadline": item.submission_deadline,
+        "submission_deadline_label": item.submission_deadline_label,
+        "deadline_timezone": item.deadline_timezone,
+        "deadline_policy_version": item.deadline_policy_version,
+        "deadline_source": item.deadline_source,
         "source_job_id": str(item.source_job_id) if item.source_job_id else None,
         "preview_job_id": str(item.preview_job_id) if item.preview_job_id else None,
         "preview_id": str(item.preview_id) if item.preview_id else None,
@@ -581,6 +593,31 @@ def _execution_dict(
         data["logs"] = combined_execution_logs(session, item)
         data["preview_url"] = f"/whatsapp/previews/{item.preview_id}" if item.preview_id else None
     return data
+
+
+@router.get("/deadline-policy")
+def read_antidengue_deadline_policy(session: Session = Depends(get_session)) -> dict:
+    policy = get_or_create_deadline_policy(session)
+    session.commit()
+    session.refresh(policy)
+    return policy_dict(policy)
+
+
+@router.put("/deadline-policy")
+def replace_antidengue_deadline_policy(
+    data: AntiDengueDeadlinePolicyUpdate,
+    session: Session = Depends(get_session),
+) -> dict:
+    try:
+        policy = update_deadline_policy(
+            session,
+            submission_deadline=data.submission_deadline,
+            timezone=data.timezone,
+            updated_by=data.updated_by,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return policy_dict(policy)
 
 
 @router.get("/schedules")
@@ -644,6 +681,11 @@ def create_antidengue_schedule(
         )
         profile_ids = normalize_dispatch_profile_ids(data.dispatch_profile_ids, data.dispatch_profile_id)
         validate_dispatch_profiles(session, profile_ids)
+        deadline_override = (
+            normalize_deadline(data.submission_deadline_override)
+            if data.submission_deadline_override
+            else None
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     item = AntiDengueSchedule(
@@ -654,6 +696,7 @@ def create_antidengue_schedule(
         weekdays=list(spec.weekdays),
         times=list(spec.times),
         timezone=spec.timezone,
+        submission_deadline_override=deadline_override,
         login_mode=data.login_mode,
         dispatch_policy=data.dispatch_policy,
         dispatch_profile_id=profile_ids[0],
@@ -700,6 +743,15 @@ def update_antidengue_schedule(
             validate_dispatch_profiles(session, profile_ids)
             values["dispatch_profile_id"] = profile_ids[0]
             values["dispatch_profile_ids"] = [str(value) for value in profile_ids]
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if "submission_deadline_override" in values:
+        try:
+            values["submission_deadline_override"] = (
+                normalize_deadline(values["submission_deadline_override"])
+                if values["submission_deadline_override"]
+                else None
+            )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     recurrence_type = values.get("recurrence_type", item.recurrence_type)
@@ -760,10 +812,13 @@ def run_antidengue_schedule_now(
     if schedule is None or schedule.archived_at is not None:
         raise HTTPException(status_code=404, detail="AntiDengue schedule not found")
     lock_execution_scope(session, f"schedule-run-now:{schedule.id}")
-    profile_ids = expand_hotspot_profile_ids(
-        session, schedule.dispatch_profile_ids or [str(schedule.dispatch_profile_id)]
-    )
-    profile_ids = expand_simple_activity_profile_ids(session, profile_ids)
+    try:
+        profile_ids = normalize_dispatch_profile_ids(
+            schedule.dispatch_profile_ids, schedule.dispatch_profile_id
+        )
+        validate_dispatch_profiles(session, profile_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     item = find_equivalent_active_execution(
         session,
         dispatch_profile_ids=profile_ids,
@@ -806,8 +861,6 @@ def create_antidengue_execution(
     trigger = "manual_send" if data.dispatch_policy == "auto_send_when_clean" else "manual_preview"
     try:
         profile_ids = normalize_dispatch_profile_ids(data.dispatch_profile_ids, data.dispatch_profile_id)
-        profile_ids = expand_hotspot_profile_ids(session, profile_ids)
-        profile_ids = expand_simple_activity_profile_ids(session, profile_ids)
         validate_dispatch_profiles(session, profile_ids)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1113,8 +1166,17 @@ async def stream_antidengue_notifications(request: Request) -> StreamingResponse
 @router.get("/notification-settings")
 def get_antidengue_notification_settings() -> dict:
     settings = get_settings()
+    health = ntfy_health(settings)
+    channel_enabled = (
+        settings.ntfy_enabled
+        and settings.antidengue_ntfy_enabled
+        and bool(settings.antidengue_ntfy_topic.strip())
+    )
     return {
         "browser_audio": True,
-        "ntfy_enabled": settings.antidengue_ntfy_enabled and bool(settings.antidengue_ntfy_topic.strip()),
-        "ntfy_server": settings.antidengue_ntfy_base_url if settings.antidengue_ntfy_enabled else None,
+        "ntfy_enabled": channel_enabled,
+        "ntfy_reachable": health["reachable"],
+        "ntfy_server": settings.ntfy_public_base_url if channel_enabled else None,
+        "ntfy_exposure_mode": settings.ntfy_exposure_mode,
+        "ntfy_topic": settings.antidengue_ntfy_topic if channel_enabled else None,
     }

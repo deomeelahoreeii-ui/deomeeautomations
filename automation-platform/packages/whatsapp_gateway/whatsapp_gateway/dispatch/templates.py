@@ -77,6 +77,18 @@ def save_template(
             status_code=422,
             detail="Activity-review templates must include {{school_activity_details}} or {{report_body}} so evidence cannot be omitted.",
         )
+    if (
+        report_type is not None
+        and report_type.key == "consolidated_action_digest"
+        and data.category == "report"
+        and not set(PLACEHOLDER_RE.findall(data.body)).intersection(
+            {"report_body", "message", "school_details"}
+        )
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Action-digest templates must include {{school_details}} or {{report_body}} so affected schools and issue icons cannot be omitted.",
+        )
     if data.category == "report" and (
         application is None
         or report_type is None

@@ -1,6 +1,14 @@
 ---
 import DataTable from "../../components/DataTable.astro";
 import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
+
+const requestedView = Astro.url.searchParams.get("view");
+const initialCategory = requestedView === "hotspot" || requestedView === "simple" || requestedView === "digest" ? requestedView : "dormant";
+const requestedLevel = Astro.url.searchParams.get("level");
+const initialLevel = requestedLevel === "tehsil" || requestedLevel === "markaz" ? requestedLevel : "wing";
+const initialLevelLabel = initialLevel === "markaz" ? "Markaz" : initialLevel === "tehsil" ? "Tehsil" : "Wing";
+const initialCategoryLabel = initialCategory === "hotspot" ? "Hotspot distance" : initialCategory === "simple" ? "Simple activity timing" : initialCategory === "digest" ? "Action digest" : "Dormant users";
+const showAcknowledgements = initialCategory === "dormant" && initialLevel === "tehsil";
 ---
 
 <AntiDengueLayout
@@ -8,26 +16,42 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
   description="Manage the message pools used by AntiDengue reporting and review exactly what can be sent."
   page="messages"
 >
-  <button class="btn btn-sm btn-primary" id="add-variant" slot="actions">＋ Add acknowledgement</button>
+  <button class="btn btn-sm btn-primary" id="add-variant" slot="actions" hidden={!showAcknowledgements}>＋ Add acknowledgement</button>
 
   <div class="notice">
     <strong>Saved message configuration</strong><br />
     Changes apply to future Test Runs, Send Now runs and schedules. Already-created previews remain frozen with their original text.
   </div>
 
+  <nav class="routing-category-tabs" aria-label="Message report type">
+    <a class:list={["routing-category-tab", { active: initialCategory === "dormant" }]} aria-current={initialCategory === "dormant" ? "page" : undefined} data-category="dormant" href={`/antidengue/messages?view=dormant&level=${initialLevel}`}><span>Dormant users</span><small>Summaries and acknowledgements</small><b id="dormant-tab-count">—</b></a>
+    <a class:list={["routing-category-tab", { active: initialCategory === "hotspot" }]} aria-current={initialCategory === "hotspot" ? "page" : undefined} data-category="hotspot" href={`/antidengue/messages?view=hotspot&level=${initialLevel}`}><span>Hotspot distance</span><small>Distance review messages</small><b id="hotspot-tab-count">—</b></a>
+    <a class:list={["routing-category-tab", { active: initialCategory === "simple" }]} aria-current={initialCategory === "simple" ? "page" : undefined} data-category="simple" href={`/antidengue/messages?view=simple&level=${initialLevel}`}><span>Simple activity timing</span><small>Timing review messages</small><b id="simple-tab-count">—</b></a>
+    <a class:list={["routing-category-tab", { active: initialCategory === "digest" }]} aria-current={initialCategory === "digest" ? "page" : undefined} data-category="digest" href={`/antidengue/messages?view=digest&level=${initialLevel}`}><span>Action digest</span><small>One message and workbook</small><b id="digest-tab-count">—</b></a>
+  </nav>
+
+  <section class="routing-level-switcher" aria-labelledby="message-level-title">
+    <div><p class="eyebrow">Message audience level</p><h2 id="message-level-title">Choose which recipients the wording belongs to</h2><p id="message-level-description">Each level shows only its assigned message templates and routing profiles.</p></div>
+    <nav aria-label="Message administrative level">
+      <a class:list={["routing-level-tab", { active: initialLevel === "wing" }]} aria-current={initialLevel === "wing" ? "page" : undefined} data-level="wing" href={`/antidengue/messages?view=${initialCategory}&level=wing`}>Wing <span id="wing-level-count">—</span></a>
+      <a class:list={["routing-level-tab", { active: initialLevel === "tehsil" }]} aria-current={initialLevel === "tehsil" ? "page" : undefined} data-level="tehsil" href={`/antidengue/messages?view=${initialCategory}&level=tehsil`}>Tehsil <span id="tehsil-level-count">—</span></a>
+      <a class:list={["routing-level-tab", { active: initialLevel === "markaz" }]} aria-current={initialLevel === "markaz" ? "page" : undefined} data-level="markaz" href={`/antidengue/messages?view=${initialCategory}&level=markaz`}>Markaz <span id="markaz-level-count">—</span></a>
+    </nav>
+  </section>
+
   <section style="margin-top:1.25rem">
     <div class="panel-heading">
       <div>
-        <p class="eyebrow">Report and profile messages</p>
-        <h2>Messages used by each routing profile</h2>
-        <p>Profiles sharing one template are shown together. Edit the shared default once, or assign a separate template from Routing when wording must differ.</p>
+        <p class="eyebrow" id="message-view-eyebrow">{initialCategoryLabel} · {initialLevelLabel}</p>
+        <h2 id="message-view-title">{initialLevelLabel}-level {initialCategoryLabel.toLowerCase()} messages</h2>
+        <p id="message-view-description">Only templates used by {initialLevelLabel}-level {initialCategoryLabel.toLowerCase()} routing profiles appear here. Shared templates remain grouped.</p>
       </div>
       <span class="badge" id="report-message-count">Loading…</span>
     </div>
     <div id="report-message-groups" style="display:grid;gap:1rem;margin-top:1rem"></div>
   </section>
 
-  <section class="notification-settings-grid" style="margin-top:1.5rem">
+  <section class="notification-settings-grid" id="acknowledgement-workspace" style="margin-top:1.5rem" hidden={!showAcknowledgements}>
     <article class="panel notification-settings-panel">
       <div class="panel-heading">
         <div><p class="eyebrow">Message category</p><h2>Zero dormant schools</h2><p>Positive acknowledgement sent to the configured tehsil group instead of a report attachment.</p></div>
@@ -41,7 +65,7 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
     </aside>
   </section>
 
-  <article class="master-card" style="margin-top: 1.25rem">
+  <article class="master-card" id="acknowledgement-table-card" style="margin-top: 1.25rem" hidden={!showAcknowledgements}>
     <DataTable id="acknowledgement-table" pageSize={10} emptyText="No acknowledgement variants are configured. Add and enable at least one variant." />
   </article>
 
@@ -89,16 +113,50 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
     const dialog = document.getElementById("variant-dialog") as HTMLDialogElement;
     const reportDialog = document.getElementById("report-template-dialog") as HTMLDialogElement;
     const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const requestedCategory = new URLSearchParams(window.location.search).get("view");
+    const requestedLevel = new URLSearchParams(window.location.search).get("level");
+    const activeCategory = requestedCategory === "hotspot" || requestedCategory === "simple" || requestedCategory === "digest" ? requestedCategory : "dormant";
+    const activeLevel = requestedLevel === "tehsil" || requestedLevel === "markaz" ? requestedLevel : "wing";
+    const API = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+    let configuration: any = {};
     let application: any;
     let reportType: any;
     let hotspotReportType: any;
     let simpleActivityReportType: any;
+    let digestReportType: any;
     let tehsilScope: any;
     let variants: any[] = [];
     let allTemplates: any[] = [];
     let profiles: any[] = [];
     let editingReportTemplate: any;
     let editingTemplateProfiles: any[] = [];
+
+    function reportCategory(profile: any): "dormant" | "hotspot" | "simple" | "digest" {
+      const report = (configuration.report_types || []).find((item: any) => item.id === profile.report_type_id);
+      if (report?.key === "hotspot_distance_activity") return "hotspot";
+      if (report?.key === "simple_activity_timing") return "simple";
+      if (report?.key === "consolidated_action_digest") return "digest";
+      return "dormant";
+    }
+
+    function profileLevel(profile: any): "wing" | "tehsil" | "markaz" | "other" {
+      const scope = (configuration.recipient_scopes || []).find((item: any) => item.id === profile.recipient_scope_id);
+      if (scope?.key === "wing" || scope?.key === "deo") return "wing";
+      if (scope?.key === "tehsil" || scope?.key === "ddeo") return "tehsil";
+      if (scope?.key === "markaz" || scope?.key === "aeo") return "markaz";
+      const label = `${profile.recipient_scope_name || ""} ${profile.audience_name || ""}`.toLowerCase();
+      if (label.includes("markaz") || label.includes("aeo")) return "markaz";
+      if (label.includes("tehsil") || label.includes("ddeo")) return "tehsil";
+      if (label.includes("wing") || label.includes("deo")) return "wing";
+      return "other";
+    }
+
+    function templatesAssignedTo(assignedProfiles: any[]) {
+      const templateIds = new Set(assignedProfiles.map((profile) => profile.template_id).filter(Boolean));
+      return allTemplates.filter((item: any) =>
+        item.application_id === application.id && item.category === "report" && templateIds.has(item.id)
+      );
+    }
 
     const hotspotDefaultTemplate = `🚨 *Anti-Dengue Activities Requiring Review*
 👥 *Group:* {{group_name}}
@@ -145,17 +203,37 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
 ⏱️ *Time Difference:* 245 seconds (4 min 5 sec)`,
       attachment_note: "📎 The attached Excel file contains every selected activity and its timing evidence.",
     };
+    const digestSample: Record<string, string> = {
+      generated_at: "18 Jul 2026 · 11:00 AM", group_name: "Head Teachers — CITY",
+      wing_name: "DEO MEE", scope_name: "CITY", school_count: "3",
+      dormant_summary: "2 schools", hotspot_summary: "2 schools", timing_summary: "1 school",
+      school_details: `*LAHORE KHAS — MALE* · 1 school
+1. \`35220591\` — GES CHAH MIRAN · 💤
+
+*NIAZBAIG — MALE* · 2 schools
+2. \`35220191\` — GPS KHAN PUR · 💤 📏 ⏱️
+3. \`35220192\` — GES EXAMPLE · 📏`,
+      deadline: "12:30 PM",
+    };
 
     async function resolveConfiguration() {
-      const result = await actions.whatsapp.configurationOptions();
+      const [result, deadlineResponse] = await Promise.all([
+        actions.whatsapp.configurationOptions(),
+        fetch(`${API}/api/v1/antidengue/deadline-policy`),
+      ]);
       if (result.error) throw result.error;
+      if (!deadlineResponse.ok) throw new Error("Could not load the AntiDengue deadline policy.");
+      const deadlinePolicy = await deadlineResponse.json();
+      digestSample.deadline = deadlinePolicy.submission_deadline_label;
       const options = result.data as any;
+      configuration = options;
       application = options.applications.find((item: any) => item.key === "antidengue");
       reportType = options.report_types.find((item: any) => item.application_key === "antidengue" && item.key === "tehsil_dormant_summary");
       hotspotReportType = options.report_types.find((item: any) => item.application_key === "antidengue" && item.key === "hotspot_distance_activity");
       simpleActivityReportType = options.report_types.find((item: any) => item.application_key === "antidengue" && item.key === "simple_activity_timing");
+      digestReportType = options.report_types.find((item: any) => item.application_key === "antidengue" && item.key === "consolidated_action_digest");
       tehsilScope = options.recipient_scopes.find((item: any) => item.application_key === "antidengue" && item.channel === "group" && item.key === "tehsil");
-      if (!application || !reportType || !hotspotReportType || !simpleActivityReportType || !tehsilScope) throw new Error("AntiDengue message configuration is incomplete.");
+      if (!application || !reportType || !hotspotReportType || !simpleActivityReportType || !digestReportType || !tehsilScope) throw new Error("AntiDengue message configuration is incomplete.");
     }
 
     async function loadVariants() {
@@ -178,7 +256,8 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       return item.body;
     }
 
-    function renderSample(body: string, activityReview: boolean, assignedProfiles: any[] = editingTemplateProfiles, simple = false) {
+    function renderSample(body: string, activityReview: boolean, assignedProfiles: any[] = editingTemplateProfiles, simple = false, digest = false) {
+      if (digest) return body.replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_match, key) => digestSample[key] || `[${key}]`);
       if (!activityReview) return body.replace(/{{\s*report_body\s*}}/g, "[The generated report body appears here]");
       const hasAttachment = assignedProfiles.some((profile) => profile.presentation_policy?.attachment_mode !== "none");
       const source = simple ? simpleSample : hotspotSample;
@@ -191,16 +270,19 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       editingTemplateProfiles = assignedProfiles;
       const hotspot = item.report_type_id === hotspotReportType.id;
       const simple = item.report_type_id === simpleActivityReportType.id;
+      const digest = item.report_type_id === digestReportType.id;
       const body = reportTemplateBody(item);
       el("report-template-title").textContent = `Edit · ${item.report_type_name}`;
       el<HTMLInputElement>("report-template-id").value = item.id;
       el<HTMLInputElement>("report-template-category").value = `${item.report_type_name} · ${item.recipient_scope_name}`;
       el<HTMLInputElement>("report-template-profiles").value = assignedProfiles.map((profile) => profile.name).join(", ");
       el<HTMLTextAreaElement>("report-template-body").value = body;
-      el("report-template-help").innerHTML = hotspot || simple
+      el("report-template-help").innerHTML = digest
+        ? "<strong>Action digest variables</strong><br><code>{{generated_at}}</code>, <code>{{group_name}}</code>, <code>{{wing_name}}</code>, <code>{{scope_name}}</code>, <code>{{school_count}}</code>, issue summaries, <code>{{school_details}}</code>, and <code>{{deadline}}</code>. Keep <code>{{school_details}}</code> so every listed school retains its issue icons."
+        : hotspot || simple
         ? `<strong>${simple ? "Simple Activity timing" : "Hotspot"} variables</strong><br><code>{{group_name}}</code>, <code>{{scope_name}}</code>, <code>{{report_window}}</code>, <code>{{school_activity_details}}</code>, <code>{{attachment_note}}</code>, and <code>{{disclaimer}}</code>. The school evidence block is required. <code>{{attachment_note}}</code> is automatically empty for Message only profiles.`
         : "<strong>Native report variable</strong><br>Keep <code>{{report_body}}</code> in this template to include the generated report details.";
-      el("report-template-preview").textContent = renderSample(body, hotspot || simple, assignedProfiles, simple);
+      el("report-template-preview").textContent = renderSample(body, hotspot || simple, assignedProfiles, simple, digest);
       reportDialog.showModal();
     }
 
@@ -213,16 +295,23 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       if (profileResult.error) throw profileResult.error;
       allTemplates = templateResult.data as any[];
       profiles = ((profileResult.data as any).items || []).filter((item: any) => item.enabled);
-      const reportTemplates = allTemplates.filter((item: any) =>
-        item.application_id === application.id && item.category === "report" &&
-        profiles.some((profile) => profile.template_id === item.id)
-      );
+      const categoryProfiles = profiles.filter((profile) => reportCategory(profile) === activeCategory);
+      const workspaceProfiles = categoryProfiles.filter((profile) => profileLevel(profile) === activeLevel);
+      const reportTemplates = templatesAssignedTo(workspaceProfiles);
+      for (const category of ["dormant", "hotspot", "simple", "digest"] as const) {
+        const count = templatesAssignedTo(profiles.filter((profile) => reportCategory(profile) === category)).length;
+        el(`${category}-tab-count`).textContent = String(count);
+      }
+      for (const level of ["wing", "tehsil", "markaz"] as const) {
+        const count = templatesAssignedTo(categoryProfiles.filter((profile) => profileLevel(profile) === level)).length;
+        el(`${level}-level-count`).textContent = String(count);
+      }
       const container = el("report-message-groups");
       container.replaceChildren();
       for (const item of reportTemplates.sort((a, b) =>
         `${a.report_type_name}:${a.recipient_scope_name}`.localeCompare(`${b.report_type_name}:${b.recipient_scope_name}`)
       )) {
-        const assigned = profiles.filter((profile) => profile.template_id === item.id);
+        const assigned = workspaceProfiles.filter((profile) => profile.template_id === item.id);
         const card = document.createElement("article");
         card.className = "panel";
         card.style.padding = "1.15rem";
@@ -248,8 +337,8 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
         card.append(heading, body);
         container.append(card);
       }
-      if (!reportTemplates.length) container.textContent = "No enabled AntiDengue profile has an assigned report template.";
-      el("report-message-count").textContent = `${reportTemplates.length} configured`;
+      if (!reportTemplates.length) container.textContent = `No enabled ${activeLevel}-level ${activeCategory === "simple" ? "simple activity timing" : activeCategory === "hotspot" ? "hotspot distance" : activeCategory === "digest" ? "action digest" : "dormant user"} profile has an assigned message template.`;
+      el("report-message-count").textContent = `${reportTemplates.length} message${reportTemplates.length === 1 ? "" : "s"}`;
       await loadVariants();
     }
 
@@ -304,7 +393,8 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
     el<HTMLTextAreaElement>("report-template-body").addEventListener("input", () => {
       const hotspot = editingReportTemplate?.report_type_id === hotspotReportType.id;
       const simple = editingReportTemplate?.report_type_id === simpleActivityReportType.id;
-      el("report-template-preview").textContent = renderSample(el<HTMLTextAreaElement>("report-template-body").value, hotspot || simple, editingTemplateProfiles, simple);
+      const digest = editingReportTemplate?.report_type_id === digestReportType.id;
+      el("report-template-preview").textContent = renderSample(el<HTMLTextAreaElement>("report-template-body").value, hotspot || simple, editingTemplateProfiles, simple, digest);
     });
     el("report-template-form").addEventListener("submit", async (event) => {
       event.preventDefault();

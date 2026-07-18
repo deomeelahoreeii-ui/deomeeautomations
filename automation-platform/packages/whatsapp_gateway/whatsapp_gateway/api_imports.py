@@ -55,6 +55,7 @@ from whatsapp_gateway.models import (
     WhatsAppSettings,
     WhatsAppTemplate,
 )
+from whatsapp_gateway.persistence.audience_sources import WhatsAppAudienceSource
 
 from whatsapp_gateway.preview_service import (
     cleanup_unreferenced_preview_files,

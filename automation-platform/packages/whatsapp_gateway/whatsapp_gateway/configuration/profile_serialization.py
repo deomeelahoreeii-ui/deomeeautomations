@@ -73,6 +73,7 @@ def dispatch_profile_dict(
         "wing_id": str(item.wing_id) if item.wing_id else None,
         "wing_name": wing.name if wing else None,
         "delivery_mode": item.delivery_mode,
+        "delivery_granularity": item.delivery_granularity,
         "require_approval": item.require_approval,
         "fallback_policy": item.fallback_policy,
         "max_retries": item.max_retries,

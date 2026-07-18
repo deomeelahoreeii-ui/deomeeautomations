@@ -82,6 +82,23 @@ class TaskOutbox(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False, index=True))
 
 
+class AutomationWorkerRuntime(SQLModel, table=True):
+    """Durable, expiring declaration of a worker's executable contracts."""
+
+    __tablename__ = "automation_worker_runtimes"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    worker_name: str = Field(unique=True, index=True, max_length=180)
+    queues: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    protocols: dict[str, int] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    capabilities: dict[str, int] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    capability_fingerprint: str = Field(default="", index=True, max_length=64)
+    build_id: str = Field(default="", index=True, max_length=180)
+    database_fingerprint: str = Field(default="", index=True, max_length=64)
+    started_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False))
+    last_seen_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False, index=True))
+
+
 class JobPublic(JobBase):
     id: uuid.UUID
 

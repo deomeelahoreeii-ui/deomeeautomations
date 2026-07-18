@@ -1,0 +1,160 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import DataTable from "../../components/DataTable.astro";
+---
+
+<AppLayout
+  title="Notification Control Plane"
+  eyebrow="Management / Notifications"
+  description="ntfy transport health, channel routing and durable delivery activity across automation modules."
+  active="notifications"
+>
+  <div slot="actions" class="table-actions">
+    <button class="btn btn-sm" id="open-server" type="button">Open ntfy</button>
+    <button class="btn btn-sm" id="send-test" type="button">Send test</button>
+    <button class="btn btn-sm btn-primary" id="refresh" type="button">↻ Check notifications</button>
+  </div>
+
+  <div class="notice" id="transport-notice">
+    <strong>ntfy is a shared platform transport.</strong><br />Modules own their topics and durable events; the exposure adapter can change without changing publishers.
+  </div>
+
+  <section class="stat-grid" style="margin-top:1.25rem">
+    <article class="stat-card"><span>Origin health</span><strong id="health">Checking…</strong><small id="origin">—</small></article>
+    <article class="stat-card"><span>Exposure</span><strong id="mode">—</strong><small id="public-url">—</small></article>
+    <article class="stat-card"><span>Delivered</span><strong id="sent-count">—</strong><small id="last-sent">—</small></article>
+    <article class="stat-card"><span>Needs attention</span><strong id="attention-count">—</strong><small id="delivery-summary">—</small></article>
+  </section>
+
+  <section class="notification-settings-grid">
+    <article class="panel notification-settings-panel">
+      <div class="panel-heading"><div><p class="eyebrow">Channel registry</p><h2>Module routes</h2></div><span class="badge" id="auth-status">—</span></div>
+      <div class="inbound-storage-health" id="channels"><p>Loading channels…</p></div>
+    </article>
+    <aside class="panel notification-help-panel">
+      <p class="eyebrow">Exposure adapter</p><h2>Portable local origin</h2>
+      <div class="notification-mode-list" id="modes"></div>
+      <p class="field-help">Use <code>./scripts/ntfy.sh mode …</code> on the server. Tailscale and Cloudflare remain disabled until their adapter is installed.</p>
+    </aside>
+  </section>
+
+  <section class="master-card" style="margin-top:1.25rem">
+    <div class="inbound-card-heading">
+      <div><p class="eyebrow">Delivery ledger</p><h2>Durable ntfy attempts</h2></div>
+      <div class="table-actions">
+        <select class="select select-bordered select-sm" id="status-filter">
+          <option value="">All statuses</option><option value="pending">Pending</option><option value="retrying">Retrying</option><option value="sent">Sent</option>
+        </select>
+        <select class="select select-bordered select-sm" id="event-filter">
+          <option value="">All milestones</option>
+          <option value="antidengue.execution.started">Run started</option>
+          <option value="antidengue.report.downloaded">Report downloaded</option>
+          <option value="antidengue.messages.sent">Messages sent</option>
+        </select>
+      </div>
+    </div>
+    <DataTable id="notification-table" pageSize={25} emptyText="No ntfy deliveries match these filters." />
+  </section>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { badge, stack } from "../../scripts/table-cells";
+    import { confirmAction, showError, showSuccess } from "../../scripts/alerts";
+
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const table = el<any>("notification-table");
+    let overview: any = null;
+    const labels: Record<string, string> = {
+      "antidengue.execution.started": "Run started",
+      "antidengue.report.downloaded": "Report downloaded",
+      "antidengue.messages.sent": "Messages sent",
+    };
+    const formatDate = (value: unknown) => value ? new Date(String(value)).toLocaleString() : "Never";
+
+    function renderModes(data: any) {
+      const container = el("modes");
+      container.replaceChildren();
+      for (const mode of data.available_modes || []) {
+        const row = document.createElement("div");
+        row.className = `notification-mode-row${mode === data.transport.exposure_mode ? " active" : ""}`;
+        const copy = document.createElement("span");
+        const strong = document.createElement("strong"); strong.textContent = mode[0].toUpperCase() + mode.slice(1);
+        const small = document.createElement("small"); small.textContent = mode === data.transport.exposure_mode ? "Current adapter" : mode === "lan" ? "Direct private network" : mode === "local" ? "This laptop only" : "Available later";
+        copy.append(strong, small);
+        row.append(copy, badge(mode === data.transport.exposure_mode ? "Active" : "Off", mode === data.transport.exposure_mode ? "" : "inactive"));
+        container.append(row);
+      }
+    }
+
+    function renderChannels(data: any) {
+      const container = el("channels");
+      container.replaceChildren();
+      for (const channel of data.channels || []) {
+        const row = document.createElement("div");
+        const copy = document.createElement("span");
+        const strong = document.createElement("strong"); strong.textContent = channel.name;
+        const small = document.createElement("small"); small.textContent = `${channel.topic} · ${channel.event_types.length} milestones · ${channel.publisher}`;
+        copy.append(strong, small);
+        row.append(copy, badge(channel.enabled ? "Enabled" : "Disabled", channel.enabled ? "" : "inactive"));
+        container.append(row);
+      }
+    }
+
+    async function loadOverview() {
+      const result = await actions.notifications.overview();
+      if (result.error) throw result.error;
+      overview = result.data as any;
+      const transport = overview.transport;
+      const statuses = overview.deliveries.statuses || {};
+      const attention = Number(statuses.pending || 0) + Number(statuses.retrying || 0) + Number(statuses.failed || 0);
+      el("health").textContent = transport.reachable ? "Healthy" : transport.enabled ? "Unavailable" : "Disabled";
+      el("origin").textContent = transport.publish_url;
+      el("mode").textContent = String(transport.exposure_mode || "—").toUpperCase();
+      el("public-url").textContent = transport.public_base_url;
+      el("sent-count").textContent = String(statuses.sent || 0);
+      el("last-sent").textContent = `Last delivery: ${formatDate(overview.deliveries.last_sent_at)}`;
+      el("attention-count").textContent = String(attention);
+      el("delivery-summary").textContent = Object.entries(statuses).map(([key, value]) => `${key}: ${value}`).join(" · ") || "No delivery records";
+      el("auth-status").textContent = transport.token_configured ? "Token configured" : "No token";
+      renderChannels(overview);
+      renderModes(overview);
+    }
+
+    async function loadPage(pageIndex: number, pageSize: number) {
+      const result = await actions.notifications.deliveries({
+        status: el<HTMLSelectElement>("status-filter").value,
+        eventType: el<HTMLSelectElement>("event-filter").value,
+        page: pageIndex + 1,
+        pageSize,
+      });
+      if (result.error) throw result.error;
+      const data = result.data as any;
+      return { rows: data.items, total: data.total };
+    }
+
+    await customElements.whenDefined("astro-data-table");
+    await table.configure({ manualPagination: true, loadPage, columns: [
+      { accessorKey: "event_type", header: "Milestone", cell: ({ row }: any) => stack(labels[row.original.event_type] || row.original.event_type, row.original.execution_code || row.original.module_key) },
+      { accessorKey: "message", header: "Message", cell: ({ row }: any) => stack(row.original.message, formatDate(row.original.created_at)) },
+      { accessorKey: "status", header: "Delivery", cell: ({ row }: any) => badge(row.original.status, row.original.status === "retrying" || row.original.status === "failed" ? "danger" : row.original.status === "pending" ? "inactive" : "") },
+      { accessorKey: "attempts", header: "Attempts" },
+      { accessorKey: "sent_at", header: "Sent / retry", cell: ({ row }: any) => stack(formatDate(row.original.sent_at || row.original.next_attempt_at), row.original.last_error || "") },
+    ] });
+
+    for (const id of ["status-filter", "event-filter"]) el(id).addEventListener("change", () => void table.refresh(true));
+    el("refresh").addEventListener("click", async () => { try { await loadOverview(); await table.refresh(false); } catch (error) { await showError(error); } });
+    el("open-server").addEventListener("click", () => {
+      const channel = overview?.channels?.find((item: any) => item.enabled) || overview?.channels?.[0];
+      if (overview?.transport?.public_base_url && channel?.topic) window.open(`${overview.transport.public_base_url}/${encodeURIComponent(channel.topic)}`, "_blank", "noopener");
+    });
+    el("send-test").addEventListener("click", async () => {
+      if (!await confirmAction("Send an ntfy test?", "A real notification will be published to the AntiDengue operations topic.", "Send test")) return;
+      const result = await actions.notifications.sendTest({ channel: "antidengue", message: "Notification Control Plane test" });
+      if (result.error) return void await showError(result.error);
+      const data = result.data as any;
+      await showSuccess("Test delivered", `ntfy accepted message ${data.id || "successfully"} on ${data.topic}.`);
+      await loadOverview();
+    });
+    try { await loadOverview(); } catch (error) { await showError(error); }
+  </script>
+</AppLayout>

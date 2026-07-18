@@ -1,0 +1,111 @@
+---
+import DataTable from "../../../components/DataTable.astro";
+import MasterDataLayout from "../../../layouts/MasterDataLayout.astro";
+
+const views: Record<string, { title: string; description: string; singular: string }> = {
+  "ceo-offices": { title: "CEO Offices", description: "District-level organizational offices and their complete education structure.", singular: "CEO office" },
+  "deo-offices": { title: "DEO Offices", description: "Administrative wing offices with DDEO, AEO and school coverage.", singular: "DEO office" },
+  "ddeos": { title: "DDEOs", description: "Named DDEO officers, tehsil jurisdictions and the AEOs reporting through them.", singular: "DDEO" },
+  "aeos": { title: "AEOs", description: "Named AEO officers, Markaz jurisdictions, personal numbers and school coverage.", singular: "AEO" },
+  "vacant-ddeo-posts": { title: "Vacant DDEO Posts", description: "Wing and tehsil combinations without an active DDEO assignment.", singular: "vacant DDEO post" },
+};
+const view = Astro.params.view || "";
+const config = views[view];
+if (!config) return Astro.redirect("/master-data/hierarchy", 302);
+---
+
+<MasterDataLayout title={config.title} description={config.description} page="hierarchy">
+  <a class="btn btn-sm" href="/master-data/hierarchy" slot="actions">← Hierarchy</a>
+
+  <section class="hierarchy-summary hierarchy-directory-summary" id="directory-summary">
+    {Array.from({ length: 5 }, () => <article class="master-stat"><span>Loading</span><strong>—</strong><small>{config.singular}</small></article>)}
+  </section>
+
+  <div class="toolbar hierarchy-directory-toolbar" id="hierarchy-directory" data-view={view} data-singular={config.singular}>
+    <input class="input input-bordered input-sm search-input" id="directory-search" placeholder={`Search ${config.title.toLowerCase()}, scopes or contacts…`} />
+    <select class="select select-bordered select-sm" id="directory-wing"><option value="">All DEO wings</option></select>
+    <select class="select select-bordered select-sm" id="directory-status"><option value="">All statuses</option><option value="active">Active</option><option value="vacant">Vacant</option><option value="inactive">Inactive</option></select>
+    <label class="hierarchy-archive-toggle"><input class="checkbox checkbox-sm" id="directory-inactive" type="checkbox" /> Include archived</label>
+    <span class="toolbar-status" id="directory-total">Loading…</span>
+  </div>
+
+  <article class="master-card">
+    <DataTable id="directory-table" pageSize={20} emptyText={`No ${config.title.toLowerCase()} match these filters.`} />
+  </article>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { badge, stack } from "../../../scripts/table-cells";
+
+    type DirectoryNode = any & { parent_label: string; wing_id: string; wing_label: string };
+    const host = document.getElementById("hierarchy-directory") as HTMLElement;
+    const view = host.dataset.view || "", singular = host.dataset.singular || "record";
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const table = el<any>("directory-table"), query = new URLSearchParams(window.location.search);
+    let allRows: DirectoryNode[] = [], searchTimer: number | undefined;
+    const escapeHtml = (value: unknown) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]!));
+    const desiredType = view === "ceo-offices" ? "ceo" : view === "deo-offices" ? "deo" : view === "aeos" ? "aeo" : "ddeo";
+    const wantsVacancy = view === "vacant-ddeo-posts";
+    function flatten(items: any[], ancestors: any[] = []): DirectoryNode[] {
+      return items.flatMap((node) => {
+        const deo = node.type === "deo" ? node : [...ancestors].reverse().find((item) => item.type === "deo");
+        const row = { ...node, parent_label: ancestors.at(-1)?.label || "—", wing_id: deo?.entity_id || "", wing_label: deo?.label || "—" };
+        return [row, ...flatten(node.children || [], [...ancestors, node])];
+      });
+    }
+    function relevant(node: DirectoryNode) {
+      return node.type === desiredType && (wantsVacancy ? node.status === "vacant" : node.status !== "vacant");
+    }
+    function filteredRows() {
+      const search = el<HTMLInputElement>("directory-search").value.trim().toLowerCase();
+      const wing = el<HTMLSelectElement>("directory-wing").value, status = el<HTMLSelectElement>("directory-status").value;
+      return allRows.filter((node) => (!search || `${node.label} ${node.subtitle} ${node.contact || ""} ${node.parent_label} ${node.wing_label}`.toLowerCase().includes(search)) && (!wing || node.wing_id === wing) && (!status || node.status === status));
+    }
+    function renderSummary(rows: DirectoryNode[]) {
+      const totals = [
+        [view === "vacant-ddeo-posts" ? "Vacant posts" : "Records", rows.length, singular],
+        ["Schools", rows.reduce((total, node) => total + Number(node.metrics?.schools || 0), 0), "Covered records"],
+        ["DDEOs", rows.reduce((total, node) => total + Number(node.metrics?.ddeos || (node.type === "ddeo" && node.status !== "vacant" ? 1 : 0)), 0), "Hierarchy count"],
+        ["AEOs", rows.reduce((total, node) => total + Number(node.metrics?.aeos || (node.type === "aeo" ? 1 : 0)), 0), "Hierarchy count"],
+        ["Markazes", rows.reduce((total, node) => total + Number(node.metrics?.markazes || 0), 0), "Administrative scopes"],
+      ];
+      el("directory-summary").innerHTML = totals.map(([label, value, note]) => `<article class="master-stat"><span>${escapeHtml(label)}</span><strong>${Number(value).toLocaleString()}</strong><small>${escapeHtml(note)}</small></article>`).join("");
+    }
+    function linkCell(label: string, note: string, href: string) {
+      const link = document.createElement("a"); link.className = "table-link"; link.href = href; link.append(stack(label, note)); return link;
+    }
+    function coverageCell(node: DirectoryNode) {
+      const metrics = Object.entries(node.metrics || {}).filter(([, value]) => Number(value) > 0).slice(0, 3).map(([key, value]) => `${value} ${key.replaceAll("_", " ")}`).join(" · ");
+      return stack(metrics || "No recorded coverage", node.markazes?.map((item: any) => item.name).join(", ") || "");
+    }
+    function refresh() {
+      const rows = filteredRows(); renderSummary(rows); el("directory-total").textContent = `${rows.length} ${singular}${rows.length === 1 ? "" : "s"}`; void table.setData(rows);
+    }
+    async function load() {
+      const result = await actions.masterData.hierarchy({ includeInactive: el<HTMLInputElement>("directory-inactive").checked });
+      if (result.error) throw result.error;
+      const data = result.data as any; allRows = flatten(data.roots || []).filter(relevant);
+      el<HTMLSelectElement>("directory-wing").innerHTML = `<option value="">All DEO wings</option>${(data.filters.wings || []).map((wing: any) => `<option value="${wing.id}">${escapeHtml(wing.code || wing.name)}</option>`).join("")}`;
+      el<HTMLSelectElement>("directory-wing").value = query.get("wing_id") || "";
+      el<HTMLSelectElement>("directory-status").value = wantsVacancy ? "vacant" : "";
+      const entityId = query.get("entity_id"), tehsilId = query.get("tehsil_id");
+      if (entityId) allRows = allRows.filter((node) => node.entity_id === entityId);
+      if (tehsilId) allRows = allRows.filter((node) => (node.scopes || []).some((scope: any) => scope.id === tehsilId));
+      refresh();
+    }
+    await customElements.whenDefined("astro-data-table");
+    await table.configure({ data: [], columns: [
+      { accessorKey: "label", header: "Office / officer", cell: ({ row }: any) => linkCell(row.original.label, row.original.role, row.original.href) },
+      { accessorKey: "wing_label", header: "DEO wing", cell: ({ row }: any) => stack(row.original.wing_label, row.original.parent_label !== row.original.wing_label ? row.original.parent_label : "") },
+      { accessorKey: "subtitle", header: "Jurisdiction", cell: ({ row }: any) => stack(row.original.subtitle || "No scope") },
+      { accessorKey: "contact", header: "Contact", cell: ({ row }: any) => stack(row.original.contact || "Organizational office") },
+      { id: "coverage", header: "Coverage", cell: ({ row }: any) => coverageCell(row.original) },
+      { accessorKey: "status", header: "Status", cell: ({ row }: any) => badge(row.original.status, row.original.status === "active" ? "active" : "warning") },
+      { id: "related", header: "Related data", enableSorting: false, cell: ({ row }: any) => linkCell("Open coverage", "Schools or jurisdictions", row.original.coverage_href || row.original.href) },
+    ] });
+    el("directory-search").addEventListener("input", () => { if (searchTimer) clearTimeout(searchTimer); searchTimer = window.setTimeout(refresh, 160); });
+    el("directory-wing").addEventListener("change", refresh); el("directory-status").addEventListener("change", refresh);
+    el("directory-inactive").addEventListener("change", () => void load());
+    void load().catch((error) => { console.error(error); el("directory-total").textContent = "Directory unavailable"; });
+  </script>
+</MasterDataLayout>

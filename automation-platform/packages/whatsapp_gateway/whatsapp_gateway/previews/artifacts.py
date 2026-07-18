@@ -76,10 +76,20 @@ def preview_issues(
     preview = session.get(WhatsAppDispatchPreview, preview_id)
     if preview is None:
         raise HTTPException(status_code=404, detail="Dispatch preview not found")
-    issues: list[dict[str, Any]] = [
-        {**item, "source_type": "batch", "source_name": preview.preview_key}
-        for item in preview.issues
-    ]
+    issues: list[dict[str, Any]] = []
+    for item in preview.issues:
+        affected_count = int(item.get("affected_count") or 0)
+        affected_type = str(item.get("affected_entity_type") or "item")
+        samples = [str(value.get("label") or value.get("key") or "") for value in item.get("affected_items") or []]
+        issues.append({
+            **item,
+            "source_type": "batch",
+            "source_name": (
+                f"{affected_count} {affected_type}{'' if affected_count == 1 else 's'}"
+                if affected_count else preview.preview_key
+            ),
+            "source_detail": " · ".join(value for value in samples if value),
+        })
     deliveries = session.scalars(
         select(WhatsAppDispatchPreviewDelivery)
         .where(WhatsAppDispatchPreviewDelivery.preview_id == preview_id)
@@ -117,6 +127,7 @@ def preview_issues(
     return {
         "items": issues[start : start + page_size],
         "total": len(issues),
+        "affected_total": sum(int(item.get("affected_count") or 0) for item in issues),
         "page": page,
         "page_size": page_size,
     }

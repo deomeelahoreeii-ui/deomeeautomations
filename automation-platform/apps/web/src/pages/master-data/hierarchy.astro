@@ -1,0 +1,194 @@
+---
+import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
+---
+
+<MasterDataLayout
+  title="Administrative Hierarchy"
+  description="Explore district leadership offices, DEO wings, DDEO coverage and AEO jurisdictions."
+  page="hierarchy"
+>
+  <button class="btn btn-sm btn-primary" id="hierarchy-refresh" slot="actions">↻ Refresh</button>
+
+  <section class="hierarchy-summary" id="hierarchy-summary" aria-label="Hierarchy totals">
+    {Array.from({ length: 8 }, () => <article class="master-stat"><span>Loading</span><strong>—</strong><small>Active structure</small></article>)}
+  </section>
+
+  <div class="toolbar hierarchy-toolbar">
+    <input class="input input-bordered input-sm search-input" id="hierarchy-search" placeholder="Search office, officer, tehsil or Markaz…" />
+    <select class="select select-bordered select-sm" id="hierarchy-district"><option value="">All districts</option></select>
+    <select class="select select-bordered select-sm" id="hierarchy-wing"><option value="">All DEO wings</option></select>
+    <label class="hierarchy-archive-toggle"><input class="checkbox checkbox-sm" id="hierarchy-inactive" type="checkbox" /> Include archived</label>
+    <button class="btn btn-sm" id="hierarchy-expand" type="button">Expand all</button>
+    <button class="btn btn-sm" id="hierarchy-collapse" type="button">Collapse to DEOs</button>
+    <button class="btn btn-sm" id="hierarchy-fit" type="button">Fit chart</button>
+    <span class="toolbar-status" id="hierarchy-status">Loading…</span>
+  </div>
+
+  <section class="master-card hierarchy-workspace">
+    <header class="master-card-header hierarchy-heading">
+      <div><h2>Reporting structure</h2><p>Double-click a card to follow its primary Master Data link. Select it for complete details.</p></div>
+      <div class="hierarchy-legend" aria-label="Hierarchy legend">
+        <span><i class="ceo"></i>CEO office</span><span><i class="deo"></i>DEO office</span>
+        <span><i class="ddeo"></i>DDEO</span><span><i class="aeo"></i>AEO</span><span><i class="vacant"></i>Coverage gap</span>
+      </div>
+    </header>
+    <div class="hierarchy-canvas-wrap">
+      <svg id="hierarchy-chart" class="hierarchy-chart" role="img" aria-label="Administrative reporting hierarchy">
+        <g class="hierarchy-viewport"><g class="hierarchy-links"></g><g class="hierarchy-nodes"></g></g>
+      </svg>
+      <div class="hierarchy-empty" id="hierarchy-empty" hidden><strong>No hierarchy matched</strong><span>Change the district, wing or search filter.</span></div>
+      <aside class="hierarchy-detail" id="hierarchy-detail" aria-live="polite">
+        <button type="button" id="hierarchy-detail-close" aria-label="Close details">×</button>
+        <p class="eyebrow" id="hierarchy-detail-role">SELECT A CARD</p>
+        <h3 id="hierarchy-detail-title">Hierarchy details</h3>
+        <p id="hierarchy-detail-subtitle">Choose any office or officer to inspect its coverage.</p>
+        <div id="hierarchy-detail-body"></div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="master-card hierarchy-list-card">
+    <div class="master-card-header"><div><h2>Accessible hierarchy list</h2><p>The same structure without pan or zoom.</p></div></div>
+    <div class="hierarchy-list" id="hierarchy-list"></div>
+  </section>
+
+  <script>
+    import { hierarchy, select, tree, zoom, zoomIdentity } from "d3";
+    import { actions } from "astro:actions";
+
+    type NodeData = {
+      id: string; entity_id?: string; type: string; role: string; label: string;
+      subtitle: string; contact?: string; status: string; href?: string;
+      metrics: Record<string, number>; markazes?: Array<{id:string;name:string;schools:number;href:string}>;
+      children?: NodeData[];
+    };
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const svg = select<SVGSVGElement, unknown>("#hierarchy-chart");
+    const viewport = svg.select<SVGGElement>(".hierarchy-viewport");
+    const zoomBehavior = zoom<SVGSVGElement, unknown>().scaleExtent([0.15, 2.4]).on("zoom", (event) => viewport.attr("transform", event.transform));
+    svg.call(zoomBehavior);
+    let payload: any = null;
+    let roots: NodeData[] = [];
+    let collapsed = new Set<string>();
+    let search = "";
+    let fitTransform = zoomIdentity;
+    const labels: Record<string, [string, string, string]> = {
+      ceo_offices: ["CEO offices", "District roots", "/master-data/hierarchy/ceo-offices"], deo_offices: ["DEO offices", "Administrative wings", "/master-data/hierarchy/deo-offices"],
+      ddeos: ["DDEOs", "Named officers", "/master-data/hierarchy/ddeos"], aeos: ["AEOs", "Named officers", "/master-data/hierarchy/aeos"],
+      markazes: ["Markazes", "AEO scopes", "/master-data/markazes"], schools: ["Schools", "Active records", "/master-data/schools"],
+      vacant_ddeo_posts: ["Vacant DDEO posts", "Coverage gaps", "/master-data/hierarchy/vacant-ddeo-posts"], unassigned_markazes: ["Unassigned Markazes", "Need AEO coverage", "/master-data/markazes?coverage=unassigned"],
+    };
+    const escapeHtml = (value: unknown) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]!));
+    const metricLabel = (key: string) => ({deo_offices:"DEOs",ddeos:"DDEOs",expected_ddeos:"expected",aeos:"AEOs",markazes:"Markazes",schools:"schools",tehsils:"tehsils",unassigned_markazes:"unassigned"}[key] || key.replaceAll("_", " "));
+
+    function populateSelect(id: string, rows: any[], placeholder: string) {
+      const node = el<HTMLSelectElement>(id), current = node.value;
+      node.innerHTML = `<option value="">${placeholder}</option>${rows.map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.code || row.name)}</option>`).join("")}`;
+      node.value = [...node.options].some((option) => option.value === current) ? current : "";
+    }
+    function renderSummary() {
+      el("hierarchy-summary").innerHTML = Object.entries(labels).map(([key, [label, note, href]]) => {
+        const value = Number(payload?.summary?.[key] || 0), tone = key.includes("vacant") || key.includes("unassigned") ? (value ? "warning" : "") : "";
+        return `<a class="master-stat hierarchy-stat-link ${tone}" href="${href}"><span>${label}</span><strong>${value.toLocaleString()}</strong><small>${note}</small><i>Open →</i></a>`;
+      }).join("");
+    }
+    function walk(items: NodeData[], callback: (node: NodeData, ancestors: NodeData[]) => void, ancestors: NodeData[] = []) {
+      for (const item of items) { callback(item, ancestors); walk(item.children || [], callback, [...ancestors, item]); }
+    }
+    function initialCollapse() {
+      collapsed = new Set<string>();
+      walk(roots, (node) => {
+        if (node.type === "ddeo" || (node.type === "deo" && Number(node.metrics.ddeos || 0) === 0)) collapsed.add(node.id);
+      });
+    }
+    function visibleRoots(): NodeData[] {
+      const district = el<HTMLSelectElement>("hierarchy-district").value;
+      const wing = el<HTMLSelectElement>("hierarchy-wing").value;
+      return roots.filter((root) => !district || root.entity_id === district).map((root) => ({
+        ...root,
+        children: (root.children || []).filter((node) => !wing || node.entity_id === wing),
+      })).filter((root) => root.children?.length || !wing);
+    }
+    function searchMatches(items: NodeData[]) {
+      const matches = new Set<string>();
+      if (!search) return matches;
+      walk(items, (node, ancestors) => {
+        const haystack = `${node.role} ${node.label} ${node.subtitle} ${node.contact || ""} ${(node.markazes || []).map((x) => x.name).join(" ")}`.toLowerCase();
+        if (haystack.includes(search)) { matches.add(node.id); ancestors.forEach((item) => { matches.add(item.id); collapsed.delete(item.id); }); }
+      });
+      return matches;
+    }
+    function renderChart({ fit = false } = {}) {
+      const items = visibleRoots();
+      const matches = searchMatches(items);
+      const graphData: NodeData = items.length === 1 ? items[0] : {
+        id: "portfolio", type: "portfolio", role: "DISTRICTS", label: "District offices",
+        subtitle: `${items.length} CEO offices`, status: "active", metrics: {}, children: items,
+      };
+      const root = hierarchy<NodeData>(graphData, (node) => collapsed.has(node.id) ? undefined : node.children);
+      tree<NodeData>().nodeSize([226, 272])(root);
+      const descendants = root.descendants();
+      el("hierarchy-empty").hidden = descendants.length > 0;
+      const links = viewport.select<SVGGElement>(".hierarchy-links").selectAll<SVGPathElement, any>("path").data(root.links(), (item: any) => item.target.data.id);
+      links.join("path").attr("class", "hierarchy-link").attr("d", (item: any) => `M${item.source.x},${item.source.y + 70} C${item.source.x},${(item.source.y + item.target.y) / 2} ${item.target.x},${(item.source.y + item.target.y) / 2} ${item.target.x},${item.target.y - 70}`);
+      const nodes = viewport.select<SVGGElement>(".hierarchy-nodes").selectAll<SVGGElement, any>("g.hierarchy-node").data(descendants, (item: any) => item.data.id);
+      nodes.exit().remove();
+      const entered = nodes.enter().append("g").attr("class", "hierarchy-node");
+      entered.append("foreignObject").attr("x", -98).attr("y", -70).attr("width", 196).attr("height", 142).append("xhtml:button").attr("type", "button");
+      entered.append("circle").attr("class", "hierarchy-toggle").attr("cy", 82).attr("r", 11);
+      entered.append("text").attr("class", "hierarchy-toggle-label").attr("y", 86).attr("text-anchor", "middle");
+      const merged = entered.merge(nodes as any).attr("transform", (item: any) => `translate(${item.x},${item.y})`).classed("is-dimmed", (item: any) => Boolean(search && !matches.has(item.data.id))).classed("is-match", (item: any) => Boolean(search && matches.has(item.data.id)));
+      merged.select("foreignObject button").attr("class", (item: any) => `hierarchy-node-card ${item.data.type} ${item.data.status}`).html((item: any) => {
+        const node = item.data as NodeData;
+        const metrics = Object.entries(node.metrics || {}).slice(0, 3).map(([key, value]) => `<span><b>${Number(value).toLocaleString()}</b>${escapeHtml(metricLabel(key))}</span>`).join("");
+        return `<small>${escapeHtml(node.role)}${node.status === "vacant" ? " · VACANT" : ""}</small><strong>${escapeHtml(node.label)}</strong><em>${escapeHtml(node.subtitle || "No scope")}</em><div>${metrics}</div>`;
+      }).on("click", (_event: Event, item: any) => showDetails(item.data)).on("dblclick", (_event: Event, item: any) => { if (item.data.href) window.location.assign(item.data.href); });
+      merged.select("circle.hierarchy-toggle").attr("hidden", (item: any) => (item.data.children || []).length ? null : true).on("click", (event: Event, item: any) => { event.stopPropagation(); collapsed.has(item.data.id) ? collapsed.delete(item.data.id) : collapsed.add(item.data.id); renderChart(); });
+      merged.select("text.hierarchy-toggle-label").attr("hidden", (item: any) => (item.data.children || []).length ? null : true).text((item: any) => collapsed.has(item.data.id) ? "+" : "−").on("click", (event: Event, item: any) => { event.stopPropagation(); collapsed.has(item.data.id) ? collapsed.delete(item.data.id) : collapsed.add(item.data.id); renderChart(); });
+      const chart = el<SVGSVGElement>("hierarchy-chart"), width = chart.clientWidth || 1200, height = chart.clientHeight || 720;
+      const xs = descendants.map((item) => item.x), ys = descendants.map((item) => item.y);
+      const minX = Math.min(...xs) - 125, maxX = Math.max(...xs) + 125, minY = Math.min(...ys) - 100, maxY = Math.max(...ys) + 110;
+      const scale = Math.min(1, width / Math.max(1, maxX - minX), height / Math.max(1, maxY - minY)) * .92;
+      fitTransform = zoomIdentity.translate((width - (minX + maxX) * scale) / 2, 35 - minY * scale).scale(scale);
+      if (fit) svg.transition().duration(280).call(zoomBehavior.transform, fitTransform);
+      el("hierarchy-status").textContent = `${descendants.filter((item) => item.data.type !== "portfolio").length} visible nodes · ${payload.issues.length} coverage issue${payload.issues.length === 1 ? "" : "s"}`;
+    }
+    function showDetails(node: NodeData) {
+      el("hierarchy-detail").classList.add("open");
+      el("hierarchy-detail-role").textContent = `${node.role} · ${node.status}`;
+      el("hierarchy-detail-title").textContent = node.label;
+      el("hierarchy-detail-subtitle").textContent = node.subtitle || "No administrative scope";
+      const metrics = Object.entries(node.metrics || {}).map(([key, value]) => `<article><strong>${Number(value).toLocaleString()}</strong><span>${escapeHtml(metricLabel(key))}</span></article>`).join("");
+      const contact = node.contact ? `<p class="hierarchy-contact"><span>Personal number</span><strong>${escapeHtml(node.contact)}</strong></p>` : "";
+      const markazes = (node.markazes || []).length ? `<div class="hierarchy-detail-markazes"><h4>Markaz jurisdictions</h4>${node.markazes!.map((item) => `<a href="${item.href}"><span>${escapeHtml(item.name)}</span><b>${item.schools} schools →</b></a>`).join("")}</div>` : "";
+      const action = node.href ? `<a class="btn btn-sm btn-primary" href="${node.href}">Open ${escapeHtml(node.role)} page →</a>` : "";
+      const coverage = (node as any).coverage_href ? `<a class="btn btn-sm" href="${(node as any).coverage_href}">Open coverage data</a>` : "";
+      el("hierarchy-detail-body").innerHTML = `<div class="hierarchy-detail-metrics">${metrics}</div>${contact}${markazes}<div class="hierarchy-detail-actions">${action}${coverage}</div>`;
+    }
+    function renderList() {
+      const renderNode = (node: NodeData): string => `<li><details ${node.type === "ceo" || node.type === "deo" ? "open" : ""}><summary><span class="hierarchy-list-role ${node.type}">${escapeHtml(node.role)}</span><strong>${escapeHtml(node.label)}</strong><small>${escapeHtml(node.subtitle)}</small><b>${Object.entries(node.metrics || {}).slice(0, 2).map(([key, value]) => `${value} ${metricLabel(key)}`).join(" · ")}</b></summary>${(node.children || []).length ? `<ul>${node.children!.map(renderNode).join("")}</ul>` : ""}</details></li>`;
+      el("hierarchy-list").innerHTML = `<ul>${visibleRoots().map(renderNode).join("")}</ul>`;
+    }
+    async function loadHierarchy() {
+      el("hierarchy-status").textContent = "Loading hierarchy…";
+      const result = await actions.masterData.hierarchy({ includeInactive: el<HTMLInputElement>("hierarchy-inactive").checked });
+      if (result.error) throw result.error;
+      payload = result.data as any; roots = payload.roots || [];
+      populateSelect("hierarchy-district", payload.filters.districts || [], "All districts");
+      populateSelect("hierarchy-wing", payload.filters.wings || [], "All DEO wings");
+      renderSummary(); initialCollapse(); renderChart({ fit: true }); renderList();
+    }
+    let searchTimer: number | undefined;
+    el<HTMLInputElement>("hierarchy-search").addEventListener("input", (event) => { if (searchTimer) clearTimeout(searchTimer); searchTimer = window.setTimeout(() => { search = (event.target as HTMLInputElement).value.trim().toLowerCase(); renderChart({ fit: Boolean(search) }); }, 160); });
+    el("hierarchy-district").addEventListener("change", () => { renderChart({ fit: true }); renderList(); });
+    el("hierarchy-wing").addEventListener("change", () => { renderChart({ fit: true }); renderList(); });
+    el("hierarchy-inactive").addEventListener("change", () => void loadHierarchy());
+    el("hierarchy-refresh").addEventListener("click", () => void loadHierarchy());
+    el("hierarchy-expand").addEventListener("click", () => { collapsed.clear(); renderChart({ fit: true }); });
+    el("hierarchy-collapse").addEventListener("click", () => { collapsed.clear(); walk(roots, (node) => { if (node.type === "deo" || node.type === "ddeo") collapsed.add(node.id); }); renderChart({ fit: true }); });
+    el("hierarchy-fit").addEventListener("click", () => svg.transition().duration(280).call(zoomBehavior.transform, fitTransform));
+    el("hierarchy-detail-close").addEventListener("click", () => el("hierarchy-detail").classList.remove("open"));
+    window.addEventListener("resize", () => renderChart());
+    void loadHierarchy().catch((error) => { console.error(error); el("hierarchy-status").textContent = "Hierarchy unavailable"; });
+  </script>
+</MasterDataLayout>

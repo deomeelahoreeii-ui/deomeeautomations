@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import re
 import uuid
-from datetime import date
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse
-from sqlalchemy import func, or_, select
-from sqlalchemy.exc import IntegrityError
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlmodel import Session
 
 from automation_core.database import get_session
@@ -18,127 +14,28 @@ from automation_core.models import Job, JobPublic, JobStatus, JobType
 from automation_core.task_outbox import publish_pending_tasks, stage_task
 from automation_core.time import utcnow
 from automation_core.storage_catalog import ensure_stored_path
-from master_data.models import Officer, School, SchoolHead, Wing
 from whatsapp_gateway.models import (
-    WhatsAppAccount, WhatsAppApplication, WhatsAppAudience, WhatsAppAudienceMember,
-    WhatsAppContactLink, WhatsAppDirectoryContact, WhatsAppDispatchPreview,
+    WhatsAppAccount, WhatsAppDispatchPreview,
     WhatsAppDispatchPreviewArtifact, WhatsAppDispatchPreviewDelivery,
     WhatsAppDispatchApproval, WhatsAppDispatchProfile, WhatsAppDelivery,
-    WhatsAppDailyMessageClaim,
-    WhatsAppRecipientScope, WhatsAppReportType, WhatsAppSettings,
-    WhatsAppTemplate,
+    WhatsAppSettings,
 )
 from whatsapp_gateway.preview_service import (
-    cleanup_unreferenced_preview_files, delete_preview_records, entity_link_details,
-    is_managed_preview_artifact, preview_dict, preview_is_stale, sha256_file,
+    preview_is_stale,
 )
-from whatsapp_gateway.tasks import compile_dispatch_preview_job, send_approved_preview_job
 from whatsapp_gateway.previews.schemas import (
-    PreviewInput, BulkPreviewInput, PreviewIdsInput, BulkPreviewApprovalInput,
-    ContactLinkInput, PreviewApprovalInput,
+    BulkPreviewApprovalInput, PreviewApprovalInput,
 )
-from whatsapp_gateway.previews.serialization import _artifact_dict, _delivery_dict, _digits, _with_approval
+from whatsapp_gateway.previews.approval_claims import (
+    claim_daily_message, complete_noop_approval,
+)
+from whatsapp_gateway.previews.approval_bulk import approve_previews_bulk as _approve_previews_bulk
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp-previews"])
+# Preserve the established private hooks used by integrations during migration.
+_claim_daily_message = claim_daily_message
+_complete_noop_approval = complete_noop_approval
 
-
-def _complete_noop_approval(
-    session: Session,
-    preview: WhatsAppDispatchPreview,
-    data: PreviewApprovalInput,
-    *,
-    skipped_count: int,
-) -> Job:
-    now = utcnow()
-    job = add_job(
-        session,
-        job_type=JobType.whatsapp_dispatch_send.value,
-        title=f"No new deliveries for preview {preview.preview_key}",
-        parameters={"preview_id": str(preview.id), "no_op": True},
-    )
-    job.status = JobStatus.succeeded.value
-    job.started_at = now
-    job.finished_at = now
-    job.result = {
-        "delivered": 0,
-        "failed": 0,
-        "skipped": skipped_count,
-        "no_op": True,
-        "message": "Nothing new to send; eligible acknowledgements were already sent today.",
-    }
-    approval = WhatsAppDispatchApproval(
-        preview_id=preview.id,
-        job_id=job.id,
-        approved_by=data.approved_by.strip() or "web-operator",
-        warnings_acknowledged=data.acknowledge_warnings,
-        preview_content_sha256=preview.content_sha256,
-        delivery_count=0,
-        status="completed",
-        completed_at=now,
-    )
-    session.add(approval)
-    session.add(job)
-    add_job_log(
-        session,
-        job.id,
-        f"No new deliveries: {skipped_count} once-daily acknowledgement(s) were already claimed.",
-    )
-    session.commit()
-    session.refresh(job)
-    return job
-
-
-def _claim_daily_message(
-    session: Session,
-    *,
-    preview: WhatsAppDispatchPreview,
-    frozen: WhatsAppDispatchPreviewDelivery,
-    approval: WhatsAppDispatchApproval,
-    account: WhatsAppAccount,
-) -> bool:
-    snapshot = frozen.routing_snapshot or {}
-    raw = snapshot.get("daily_claim")
-    if not isinstance(raw, dict):
-        return True
-    required = {
-        "semantic_key",
-        "business_date",
-        "purpose",
-        "scope_key",
-        "scope_value",
-        "scope_label",
-        "template_key",
-    }
-    if not required.issubset(raw):
-        raise HTTPException(status_code=409, detail="A frozen daily acknowledgement claim is incomplete")
-    template_id = raw.get("template_id")
-    parsed_template_id = uuid.UUID(str(template_id)) if template_id else None
-    if parsed_template_id and session.get(WhatsAppTemplate, parsed_template_id) is None:
-        parsed_template_id = None
-    claim = WhatsAppDailyMessageClaim(
-        semantic_key=str(raw["semantic_key"]),
-        business_date=date.fromisoformat(str(raw["business_date"])),
-        purpose=str(raw["purpose"]),
-        account_id=account.id,
-        application_id=preview.application_id,
-        report_type_id=uuid.UUID(str(snapshot.get("report_type_id"))),
-        template_id=parsed_template_id,
-        preview_id=preview.id,
-        preview_delivery_id=frozen.id,
-        approval_id=approval.id,
-        target_jid=frozen.target_jid,
-        scope_key=str(raw["scope_key"]),
-        scope_value=str(raw["scope_value"]),
-        scope_label=str(raw["scope_label"]),
-        template_key=str(raw["template_key"]),
-    )
-    try:
-        with session.begin_nested():
-            session.add(claim)
-            session.flush()
-        return True
-    except IntegrityError:
-        return False
 
 @router.post(
     "/previews/{preview_id}/approve",
@@ -179,7 +76,7 @@ async def approve_preview(
         .order_by(WhatsAppDispatchPreviewDelivery.sequence)
     ).all()
     if not frozen_deliveries:
-        return _complete_noop_approval(
+        return complete_noop_approval(
             session,
             preview,
             data,
@@ -259,7 +156,7 @@ async def approve_preview(
     session.flush()
     claimed_deliveries: list[WhatsAppDispatchPreviewDelivery] = []
     for frozen in frozen_deliveries:
-        if not _claim_daily_message(
+        if not claim_daily_message(
             session,
             preview=preview,
             frozen=frozen,
@@ -327,41 +224,11 @@ async def approve_preview(
     queued = get_job(session, job.id)
     assert queued is not None
     return queued
+
+
 @router.post("/preview-bulk/approve", status_code=status.HTTP_202_ACCEPTED)
 async def approve_previews_bulk(
     data: BulkPreviewApprovalInput,
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    preview_ids = list(dict.fromkeys(data.preview_ids))
-    if not preview_ids or len(preview_ids) > 50:
-        raise HTTPException(status_code=422, detail="Select between 1 and 50 previews")
-    previews = session.scalars(
-        select(WhatsAppDispatchPreview).where(WhatsAppDispatchPreview.id.in_(preview_ids))
-    ).all()
-    if len(previews) != len(preview_ids):
-        raise HTTPException(status_code=404, detail="One or more selected previews no longer exist")
-    if any(item.status != "ready" or item.blocked_count for item in previews):
-        raise HTTPException(status_code=409, detail="Remove blocked previews from the selection")
-    if any(preview_is_stale(session, item, check_files=True) for item in previews):
-        raise HTTPException(status_code=409, detail="Remove stale previews and compile them again")
-    if any(item.warning_count for item in previews) and not data.acknowledge_warnings:
-        raise HTTPException(status_code=422, detail="Acknowledge warnings for the selected previews")
-    approved_ids = set(session.scalars(
-        select(WhatsAppDispatchApproval.preview_id).where(
-            WhatsAppDispatchApproval.preview_id.in_(preview_ids)
-        )
-    ).all())
-    if approved_ids:
-        raise HTTPException(status_code=409, detail="Remove already approved previews from the selection")
-
-    jobs: list[JobPublic] = []
-    for preview_id in preview_ids:
-        jobs.append(await approve_preview(
-            preview_id,
-            PreviewApprovalInput(
-                acknowledge_warnings=data.acknowledge_warnings,
-                approved_by=data.approved_by,
-            ),
-            session,
-        ))
-    return {"jobs": jobs, "count": len(jobs)}
+    return await _approve_previews_bulk(data, session)

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import uuid
+
 from sqlalchemy import or_, select
 
-from master_data.models import Wing
+from master_data.models import Officer, Wing
 from whatsapp_gateway.antidengue_renderer import normalize_presentation_policy
 from whatsapp_gateway.models import (
     WhatsAppContactLink, WhatsAppDirectoryContact, WhatsAppDirectoryGroup, WhatsAppGroup,
 )
+from whatsapp_gateway.configuration.dynamic_audiences import resolve_audience_source
+from whatsapp_gateway.persistence.audience_sources import WhatsAppAudienceSource
 from whatsapp_gateway.previews.compiler.artifact_snapshots import ArtifactSnapshotStore
 from whatsapp_gateway.previews.compiler.attachments import _classify_attachment_wings, _classify_scoped_emis_wings
 from whatsapp_gateway.previews.compiler.context import CompileContext
@@ -56,6 +60,49 @@ def resolve_recipient(ctx: CompileContext, state: DeliveryState) -> None:
                 if configured_group.wing_id != wing.id:
                     state.problems.append(issue("cross_wing_route", "blocked",
                         f"The group belongs to {state.target_wing.name if state.target_wing else 'another wing'}, not {wing.name}."))
+    elif not state.source_skipped and state.plan.get("dynamic_audience"):
+        dynamic = state.plan["dynamic_audience"]
+        try:
+            source_id = uuid.UUID(str(dynamic.get("source_id") or ""))
+            member_id = uuid.UUID(str(dynamic.get("member_id") or ""))
+            officer_id = uuid.UUID(str(dynamic.get("officer_id") or ""))
+        except ValueError:
+            state.problems.append(issue("invalid_dynamic_recipient", "blocked", "The frozen Master Data recipient identity is invalid."))
+        else:
+            source = session.get(WhatsAppAudienceSource, source_id)
+            officer = session.get(Officer, officer_id)
+            current = (
+                resolve_audience_source(
+                    session, source=source, account=account,
+                    granularity=profile.delivery_granularity,
+                )
+                if source is not None and source.enabled else []
+            )
+            current_member = next((item for item in current if item.id == member_id), None)
+            if source is None or source.audience_id != ctx.audience.id or not source.enabled:
+                state.problems.append(issue("inactive_dynamic_source", "blocked", "The Master Data audience source is no longer active."))
+            elif current_member is None or officer is None or not officer.active:
+                state.problems.append(issue("inactive_dynamic_recipient", "blocked", "The resolved AEO is no longer active in this audience."))
+            elif current_member.source_fingerprint != dynamic.get("fingerprint"):
+                state.problems.append(issue("changed_dynamic_recipient", "blocked", "The AEO jurisdiction changed while this preview was being compiled."))
+            elif current_member.target_jid != state.target:
+                state.problems.append(issue("changed_dynamic_mobile", "blocked", "The AEO mobile number changed while this preview was being compiled."))
+            elif len({item.officer_id for item in current if item.target_jid == state.target}) > 1:
+                state.problems.append(issue(
+                    "duplicate_dynamic_mobile", "blocked",
+                    "More than one resolved AEO route uses this personal mobile number.",
+                ))
+            if not state.target:
+                state.problems.append(issue("missing_dynamic_mobile", "blocked", "The assigned AEO has no valid personal mobile number."))
+            state.target_wing = wing
+            state.directory_contact = session.scalar(select(WhatsAppDirectoryContact).where(
+                WhatsAppDirectoryContact.account_id == account.id,
+                or_(WhatsAppDirectoryContact.phone_jid == state.target,
+                    WhatsAppDirectoryContact.canonical_key == state.target))) if state.target else None
+            if state.directory_contact and not state.directory_contact.active:
+                state.problems.append(issue("inactive_contact", "warning", "The matched directory contact is inactive; delivery will use the authoritative Master Data number."))
+            elif state.directory_contact is None and state.target:
+                state.problems.append(issue("master_data_phone_target", "warning", "This AEO will be addressed directly from the verified Master Data mobile number."))
     elif not state.source_skipped:
         if profile.delivery_mode == "groups":
             state.problems.append(issue("delivery_mode_mismatch", "blocked", "An individual route cannot use a groups-only profile."))

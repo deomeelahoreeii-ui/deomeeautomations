@@ -9,12 +9,14 @@ from whatsapp_gateway.configuration.audience_routing import (
 )
 from whatsapp_gateway.configuration.deletion import _delete_audience_records
 from whatsapp_gateway.directory.master_contacts import resolved_contact_name
+from whatsapp_gateway.configuration.dynamic_audiences import resolve_dynamic_audience
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp"])
 
 
 class AudienceMemberEnabledInput(BaseModel):
     enabled: bool
+
 
 @router.get("/audiences")
 def audiences(
@@ -139,15 +141,15 @@ def audience_members(
     if audience_item is None:
         raise HTTPException(status_code=404, detail="Audience not found")
     filters = [WhatsAppAudienceMember.audience_id == audience_id]
-    total = session.scalar(
+    manual_total = session.scalar(
         select(func.count()).select_from(WhatsAppAudienceMember).where(*filters)
     ) or 0
+    dynamic = resolve_dynamic_audience(session, audience_id=audience_id)
+    total = manual_total + len(dynamic)
     records = session.scalars(
         select(WhatsAppAudienceMember)
         .where(*filters)
         .order_by(WhatsAppAudienceMember.target_type, WhatsAppAudienceMember.created_at)
-        .limit(page_size)
-        .offset((page - 1) * page_size)
     ).all()
     items: list[dict[str, Any]] = []
     for member in records:
@@ -194,7 +196,27 @@ def audience_members(
                 "route_scope_value": member.route_scope_value,
                 "route_scope_label": member.route_scope_label,
             })
-    return {"items": items, "total": total, "page": page, "page_size": page_size}
+    dynamic_items = [
+        {
+            "id": str(member.id),
+            "enabled": True,
+            "target_type": "contact",
+            "target_id": str(member.officer_id),
+            "name": session.get(Officer, member.officer_id).name,
+            "identifier": member.target_jid or "Missing valid mobile",
+            "available": bool(member.target_jid),
+            "detail": f"{len(member.scope_ids)} {member.route_scope_key}{'' if len(member.scope_ids) == 1 else 'es'} · {len(member.school_ids)} schools",
+            "route_scope_key": member.route_scope_key,
+            "route_scope_value": member.route_scope_value,
+            "route_scope_label": member.route_scope_label,
+            "dynamic": True,
+            "source_id": str(member.source_id),
+        }
+        for member in dynamic
+    ]
+    combined = [*items, *dynamic_items]
+    start = (page - 1) * page_size
+    return {"items": combined[start:start + page_size], "total": total, "page": page, "page_size": page_size}
 
 @router.post("/audiences/{audience_id}/members", status_code=status.HTTP_201_CREATED)
 def add_audience_member(

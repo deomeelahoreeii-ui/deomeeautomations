@@ -15,7 +15,7 @@ const { id = "" } = Astro.params;
   <DispatchPreviewNav id={id} active="overview" />
 
   <section class="preview-metrics">
-    <article class="ready"><span>Ready</span><strong id="ready-count">—</strong><small>Safe planned deliveries</small></article>
+    <article class="ready"><span>Ready</span><strong id="ready-count">—</strong><small id="ready-detail">Safe planned deliveries</small></article>
     <article class="warning"><span>Warnings</span><strong id="warning-count">—</strong><small>Review recommended</small></article>
     <article class="blocked"><span>Blocked</span><strong id="blocked-count">—</strong><small>Cannot be approved</small></article>
     <article><span>Attachments</span><strong id="artifact-count">—</strong><small>Files used by planned deliveries</small></article>
@@ -68,6 +68,7 @@ const { id = "" } = Astro.params;
       el("preview-state").textContent = data.status;
       el("preview-state").className = `preview-state ${data.status}`;
       for (const [key, value] of [["ready-count", data.ready_count], ["warning-count", data.warning_count], ["blocked-count", data.blocked_count], ["artifact-count", data.artifact_count]]) el(key).textContent = String(value);
+      el("ready-detail").textContent = data.jurisdiction_count ? `${data.jurisdiction_count} jurisdictions · ${data.unique_recipient_count} recipients${data.additional_charge_route_count ? ` · ${data.additional_charge_route_count} additional-charge routes` : ""}` : `${data.unique_recipient_count} unique recipients`;
       for (const [key, value] of [["application-name", data.application_name], ["report-type", data.report_type_name], ["wing-name", data.wing_name], ["profile-name", `${data.profile_name} · v${data.profile_version}`], ["audience-name", data.audience_name], ["account-name", data.account_name], ["template-name", data.template_name], ["profile-version", `Version ${data.profile_version}`], ["frozen-at", formatDate(data.frozen_at)]]) el(key).textContent = value;
       el("content-hash").textContent = data.content_sha256;
       const source = el("source-job"); source.textContent = data.source_job_id.slice(0, 8); source.href = `/?job_id=${data.source_job_id}`;

@@ -9,6 +9,7 @@ from whatsapp_gateway import models
 from whatsapp_gateway.persistence import (
     WhatsAppAccount,
     WhatsAppActivity,
+    WhatsAppDailyMessageClaim,
     WhatsAppApplication,
     WhatsAppAudience,
     WhatsAppAudienceMember,
@@ -25,10 +26,17 @@ from whatsapp_gateway.persistence import (
     WhatsAppGroupMember,
     WhatsAppIdentityAlias,
     WhatsAppInboundAttachment,
+    WhatsAppInboundBatch,
+    WhatsAppInboundBatchEvent,
+    WhatsAppInboundBatchItem,
     WhatsAppInboundExportItem,
     WhatsAppInboundExportRun,
     WhatsAppInboundHistoryRequest,
     WhatsAppInboundMessage,
+    WhatsAppInboundProcessingEvent,
+    WhatsAppInboundProcessingItem,
+    WhatsAppInboundProcessingRun,
+    WhatsAppInboundStoredObject,
     WhatsAppRecipientScope,
     WhatsAppReportType,
     WhatsAppSettings,
@@ -39,6 +47,7 @@ from whatsapp_gateway.persistence import (
 EXPECTED_MODELS = {
     "WhatsAppAccount": WhatsAppAccount,
     "WhatsAppActivity": WhatsAppActivity,
+    "WhatsAppDailyMessageClaim": WhatsAppDailyMessageClaim,
     "WhatsAppApplication": WhatsAppApplication,
     "WhatsAppAudience": WhatsAppAudience,
     "WhatsAppAudienceMember": WhatsAppAudienceMember,
@@ -55,10 +64,17 @@ EXPECTED_MODELS = {
     "WhatsAppGroupMember": WhatsAppGroupMember,
     "WhatsAppIdentityAlias": WhatsAppIdentityAlias,
     "WhatsAppInboundAttachment": WhatsAppInboundAttachment,
+    "WhatsAppInboundBatch": WhatsAppInboundBatch,
+    "WhatsAppInboundBatchEvent": WhatsAppInboundBatchEvent,
+    "WhatsAppInboundBatchItem": WhatsAppInboundBatchItem,
     "WhatsAppInboundExportItem": WhatsAppInboundExportItem,
     "WhatsAppInboundExportRun": WhatsAppInboundExportRun,
     "WhatsAppInboundHistoryRequest": WhatsAppInboundHistoryRequest,
     "WhatsAppInboundMessage": WhatsAppInboundMessage,
+    "WhatsAppInboundProcessingEvent": WhatsAppInboundProcessingEvent,
+    "WhatsAppInboundProcessingItem": WhatsAppInboundProcessingItem,
+    "WhatsAppInboundProcessingRun": WhatsAppInboundProcessingRun,
+    "WhatsAppInboundStoredObject": WhatsAppInboundStoredObject,
     "WhatsAppRecipientScope": WhatsAppRecipientScope,
     "WhatsAppReportType": WhatsAppReportType,
     "WhatsAppSettings": WhatsAppSettings,
@@ -109,5 +125,7 @@ def test_model_inventory_and_movement_map_are_complete() -> None:
         if key.startswith("whatsapp_gateway.models.")
     }
 
-    assert original_classes == set(EXPECTED_MODELS)
+    # The inventory is the immutable pre-refactor set. New persistence models may
+    # be added afterward, but every original class must remain publicly exported.
+    assert original_classes <= set(EXPECTED_MODELS)
     assert moved_classes == original_classes

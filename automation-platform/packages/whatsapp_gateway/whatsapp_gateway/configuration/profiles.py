@@ -188,7 +188,10 @@ def setup_reporting_route(
                 raise HTTPException(status_code=422, detail="Select a compatible template or create the recommended template")
             template_name = data.template_name.strip() or f"{report_type.name} – {recipient_scope.name}"
             template_body = data.template_body
-            if report_type.key != "tehsil_dormant_summary" and template_body.strip() == "{{report_body}}":
+            if (
+                report_type.key not in {"tehsil_dormant_summary", "consolidated_action_digest"}
+                and template_body.strip() == "{{report_body}}"
+            ):
                 template_body = "{{message}}"
             template = WhatsAppTemplate(
                 application_id=application.id,

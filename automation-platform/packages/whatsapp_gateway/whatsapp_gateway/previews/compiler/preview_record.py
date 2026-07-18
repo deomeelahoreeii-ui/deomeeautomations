@@ -6,9 +6,22 @@ from whatsapp_gateway.antidengue_renderer import (
     HOTSPOT_RENDERER_KEY, HOTSPOT_REPORT_KEY,
     RENDERER_KEY as TEHSIL_DORMANT_RENDERER_KEY, WING_RENDERER_KEY,
 )
+from whatsapp_gateway.rendering.antidengue.models import MARKAZ_RENDERER_KEY
+from whatsapp_gateway.rendering.antidengue.digest_models import (
+    CONSOLIDATED_DIGEST_RENDERER_KEY,
+    CONSOLIDATED_DIGEST_REPORT_KEY,
+)
+from whatsapp_gateway.rendering.antidengue.simple_activity_report import (
+    SIMPLE_ACTIVITY_RENDERER_KEY,
+    SIMPLE_ACTIVITY_REPORT_KEY,
+)
 from whatsapp_gateway.models import WhatsAppDispatchPreview
 from whatsapp_gateway.previews.compiler.context import CompileContext
 from whatsapp_gateway.previews.compiler.keys import preview_key
+from whatsapp_gateway.configuration.dynamic_audiences import (
+    active_audience_sources,
+    dynamic_audience_fingerprint,
+)
 
 
 def configuration_snapshot(ctx: CompileContext) -> dict[str, Any]:
@@ -20,6 +33,7 @@ def configuration_snapshot(ctx: CompileContext) -> dict[str, Any]:
         "profile": {
             "id": str(profile.id), "key": profile.key, "name": profile.name, "version": profile.version,
             "delivery_mode": profile.delivery_mode, "require_approval": profile.require_approval,
+            "delivery_granularity": profile.delivery_granularity,
             "recipient_channel": profile.recipient_channel,
             "recipient_scope_id": str(recipient_scope.id) if recipient_scope else None,
             "recipient_scope_key": recipient_scope.key if recipient_scope else None,
@@ -32,15 +46,23 @@ def configuration_snapshot(ctx: CompileContext) -> dict[str, Any]:
         "template": {"id": str(template.id) if template else None, "key": template.key if template else None,
             "name": template.name if template else None, "body": template.body if template else None},
         "wing": {"id": str(wing.id), "code": wing.code, "name": wing.name},
+        "deadline": ctx.deadline.model_dump() if ctx.deadline else None,
         "renderer": {"key": TEHSIL_DORMANT_RENDERER_KEY if report_type.key == "tehsil_dormant_summary"
+            else MARKAZ_RENDERER_KEY if report_type.key == "markaz_dormant_summary"
             else WING_RENDERER_KEY if report_type.key == "wing_summary"
             else HOTSPOT_RENDERER_KEY if report_type.key == HOTSPOT_REPORT_KEY
+            else SIMPLE_ACTIVITY_RENDERER_KEY if report_type.key == SIMPLE_ACTIVITY_REPORT_KEY
+            else CONSOLIDATED_DIGEST_RENDERER_KEY if report_type.key == CONSOLIDATED_DIGEST_REPORT_KEY
             else "legacy.dispatch_plan_adapter"},
     }
     snapshot["audience"]["target_keys"] = sorted(member.target_key for member in ctx.members)
     snapshot["audience"]["target_routes"] = sorted(
         f"{member.target_key}:{member.route_scope_key}:{member.route_scope_value}" for member in ctx.members
     )
+    if active_audience_sources(ctx.session, audience.id):
+        snapshot["audience"]["dynamic_fingerprint"] = dynamic_audience_fingerprint(
+            ctx.session, audience.id, granularity=profile.delivery_granularity,
+        )
     return snapshot
 
 
