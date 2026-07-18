@@ -340,7 +340,6 @@ def service_specs(project_root: Path) -> tuple[ServiceSpec, ...]:
     base_dir = project_root.parent
     nats_dir = base_dir / "nats-server"
     whatsapp_dir = base_dir / "whatsappbot"
-    pocketbase_dir = base_dir / "antidengue-pocketbase"
     control_api_dir = base_dir / "automation-control-api"
     control_api_python = base_dir / "antidengue" / ".venv" / "bin" / "python"
     if not control_api_python.exists():
@@ -354,14 +353,6 @@ def service_specs(project_root: Path) -> tuple[ServiceSpec, ...]:
             summary="JetStream queue used by dispatch jobs and the WhatsApp worker.",
             command=("./nats-server", "-js"),
             cwd=nats_dir,
-        ),
-        ServiceSpec(
-            id="antidengue_pocketbase",
-            title="PocketBase: AntiDengue",
-            summary="Local PocketBase database and admin dashboard for AntiDengue schools, officers, reports, and delivery audits.",
-            command=("./pocketbase", "serve", "--http", "127.0.0.1:8090"),
-            cwd=pocketbase_dir,
-            kind="database",
         ),
         ServiceSpec(
             id="automation_control_api",

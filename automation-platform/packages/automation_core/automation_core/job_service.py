@@ -205,9 +205,11 @@ def record_artifact(
     *,
     kind: str = "file",
     name: str | None = None,
+    module_key: str = "legacy",
 ) -> Artifact:
     artifact = Artifact(
         job_id=uuid.UUID(str(job_id)),
+        module_key=module_key,
         kind=kind,
         name=name or path.name,
         path=str(path),

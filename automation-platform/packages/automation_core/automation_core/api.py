@@ -15,6 +15,7 @@ from automation_core.job_service import (
     list_logs,
 )
 from automation_core.models import Artifact, ArtifactPublic, JobLogPublic, JobPublic
+from automation_core.storage_catalog import ensure_artifact_local
 
 router = APIRouter(prefix="/api/v1", tags=["jobs"])
 
@@ -68,7 +69,9 @@ def download_artifact(
     artifact = session.get(Artifact, artifact_id)
     if artifact is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
-    path = Path(artifact.path)
-    if not path.exists() or not path.is_file():
-        raise HTTPException(status_code=404, detail="Artifact file is missing")
+    try:
+        path = ensure_artifact_local(session, artifact)
+        session.commit()
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"Artifact file is unavailable: {exc}") from exc
     return FileResponse(path, filename=path.name)

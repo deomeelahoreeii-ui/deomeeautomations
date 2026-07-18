@@ -7,8 +7,21 @@ import shutil
 from pathlib import Path
 
 from dotenv import load_dotenv
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
+
+from hotspot_analysis import analyze_hotspot_distance_report
+from simple_activity_analysis import analyze_simple_activity_report
+from portal_reports import (
+    DORMANT_USERS,
+    HOTSPOT_DISTANCE,
+    SIMPLE_ACTIVITY_LIST,
+    PortalReportBundle,
+    PortalReportCapture,
+    PortalReportWindow,
+    selected_report_definitions,
+)
 
 # ==========================================
 # 1. CONFIGURATION & PATHS
@@ -45,6 +58,10 @@ PLAYWRIGHT_HEADLESS = os.getenv("PLAYWRIGHT_HEADLESS", "false").strip().lower() 
 PLAYWRIGHT_SLOW_MO_MS = int(os.getenv("PLAYWRIGHT_SLOW_MO_MS", "300"))
 DOWNLOAD_RETRIES = int(os.getenv("DOWNLOAD_RETRIES", "5"))
 DOWNLOAD_RETRY_DELAY_MS = int(os.getenv("DOWNLOAD_RETRY_DELAY_MS", "10000"))
+PORTAL_NAVIGATION_RETRIES = max(0, int(os.getenv("PORTAL_NAVIGATION_RETRIES", "3")))
+PORTAL_NAVIGATION_RETRY_DELAY_MS = max(
+    0, int(os.getenv("PORTAL_NAVIGATION_RETRY_DELAY_MS", "2000"))
+)
 PORTAL_LOGIN_MODE = (
     os.getenv("PORTAL_LOGIN_MODE", "manual").strip().lower().replace("-", "_")
 )
@@ -66,6 +83,43 @@ PORTAL_LOGIN_APPROVAL_FILE = Path(
 # ==========================================
 # 2. CAPTCHA SOLVER & HELPERS
 # ==========================================
+_TRANSIENT_NAVIGATION_ERRORS = (
+    "ERR_NAME_NOT_RESOLVED",
+    "ERR_CONNECTION_CLOSED",
+    "ERR_CONNECTION_REFUSED",
+    "ERR_CONNECTION_RESET",
+    "ERR_CONNECTION_TIMED_OUT",
+    "ERR_INTERNET_DISCONNECTED",
+    "ERR_NETWORK_CHANGED",
+    "ERR_ADDRESS_UNREACHABLE",
+    "ERR_EMPTY_RESPONSE",
+    "ERR_HTTP2_PROTOCOL_ERROR",
+    "ERR_QUIC_PROTOCOL_ERROR",
+)
+
+
+def _navigate_with_retry(page, url: str, *, wait_until: str, logger):
+    """Retry only transient portal navigation failures, preserving fatal errors."""
+    total_attempts = PORTAL_NAVIGATION_RETRIES + 1
+    for attempt in range(1, total_attempts + 1):
+        try:
+            return page.goto(url, wait_until=wait_until)
+        except (PlaywrightError, PlaywrightTimeoutError) as exc:
+            message = str(exc)
+            transient = isinstance(exc, PlaywrightTimeoutError) or any(
+                marker in message for marker in _TRANSIENT_NAVIGATION_ERRORS
+            )
+            if not transient or attempt >= total_attempts:
+                raise
+            logger.warning(
+                "Portal navigation attempt "
+                f"{attempt}/{total_attempts} failed with a transient network error: "
+                f"{message}. Retrying in "
+                f"{PORTAL_NAVIGATION_RETRY_DELAY_MS / 1000:g} seconds."
+            )
+            page.wait_for_timeout(PORTAL_NAVIGATION_RETRY_DELAY_MS)
+
+
 def record_scrape_time():
     """Maintains a persistent record of the last successful scrape."""
     timestamp = datetime.datetime.now().isoformat()
@@ -415,7 +469,12 @@ def _auto_login(page, context, logger) -> None:
         _save_debug_snapshot(page, f"login-auto-failed-attempt-{attempt}", logger)
         if attempt < max_attempts:
             logger.warning("Auto login did not reach dashboard. Retrying with a fresh CAPTCHA...")
-            page.goto(BASE_URL, wait_until="domcontentloaded")
+            _navigate_with_retry(
+                page,
+                BASE_URL,
+                wait_until="domcontentloaded",
+                logger=logger,
+            )
             page.wait_for_timeout(1000)
             if not _login_form_visible(page):
                 _save_login_success(context, logger)
@@ -478,7 +537,51 @@ def _perform_login(page, context, logger) -> None:
 # ==========================================
 # 3. PORTAL SCRAPER ENTRY POINT
 # ==========================================
-def scrape_portal_data(logger=None) -> Path:
+def _download_authenticated_export(context, definition, window, logger) -> PortalReportCapture:
+    district_id = os.getenv("PORTAL_DISTRICT_ID", "18").strip() or "18"
+    requested_url = definition.export_url(
+        BASE_URL,
+        window,
+        district_id=district_id,
+    )
+    logger.info(
+        f"Downloading optional portal report {definition.key} for "
+        f"{window.portal_value(window.start)} to {window.portal_value(window.end)}..."
+    )
+    response = context.request.get(requested_url, timeout=60000)
+    body = response.body()
+    content_type = response.headers.get("content-type", "")
+    looks_like_html = "text/html" in content_type.lower() or body.lstrip()[:20].lower().startswith(
+        (b"<!doctype html", b"<html")
+    )
+    if not response.ok:
+        raise RuntimeError(f"Portal export returned HTTP {response.status}")
+    if not body:
+        raise RuntimeError("Portal export returned an empty response")
+    if looks_like_html:
+        raise RuntimeError("Portal export returned HTML instead of an XLS file; the session may have expired")
+
+    destination = WATCH_DIR / definition.filename(window)
+    destination.write_bytes(body)
+    analyzers = {
+        HOTSPOT_DISTANCE.key: analyze_hotspot_distance_report,
+        SIMPLE_ACTIVITY_LIST.key: analyze_simple_activity_report,
+    }
+    analysis = analyzers[definition.key](destination) if definition.key in analyzers else {}
+    logger.info(
+        f"Downloaded {definition.name} to {destination} ({destination.stat().st_size} bytes); "
+        f"validated {analysis.get('row_count', 0)} row(s)."
+    )
+    return PortalReportCapture.completed(
+        definition,
+        requested_url=requested_url,
+        path=destination,
+        content_type=content_type,
+        analysis=analysis,
+    )
+
+
+def scrape_portal_reports(logger=None) -> PortalReportBundle:
     logger = logger or logging.getLogger("antidengue.scraper")
     WATCH_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -529,7 +632,12 @@ def scrape_portal_data(logger=None) -> Path:
 
         # 1. Navigate to the Base URL to check authentication status
         logger.info(f"Navigating to Base URL: {BASE_URL}")
-        page.goto(BASE_URL, wait_until="domcontentloaded")
+        _navigate_with_retry(
+            page,
+            BASE_URL,
+            wait_until="domcontentloaded",
+            logger=logger,
+        )
 
         # 2. Check if we are on the login page
         if page.locator("#user_username").is_visible():
@@ -560,7 +668,12 @@ def scrape_portal_data(logger=None) -> Path:
         page.wait_for_timeout(2000)
 
         logger.info(f"Navigating to Target URL: {target_url}")
-        page.goto(target_url, wait_until="networkidle")
+        _navigate_with_retry(
+            page,
+            target_url,
+            wait_until="networkidle",
+            logger=logger,
+        )
 
         # 4. Wait another 2 seconds before downloading
         logger.info("Waiting 2 seconds before clicking download...")
@@ -646,9 +759,81 @@ def scrape_portal_data(logger=None) -> Path:
                 f"left at: {downloaded_file_path}"
             )
 
+        window = PortalReportWindow.from_environment()
+        bundle = PortalReportBundle(window=window)
+        bundle.captures.append(
+            PortalReportCapture.completed(
+                DORMANT_USERS,
+                requested_url=target_url,
+                path=downloaded_file_path,
+            )
+        )
+        selected = selected_report_definitions()
+        if HOTSPOT_DISTANCE in selected:
+            try:
+                bundle.captures.append(
+                    _download_authenticated_export(
+                        context,
+                        HOTSPOT_DISTANCE,
+                        window,
+                        logger,
+                    )
+                )
+            except Exception as exc:
+                requested_url = HOTSPOT_DISTANCE.export_url(
+                    BASE_URL,
+                    window,
+                    district_id=os.getenv("PORTAL_DISTRICT_ID", "18").strip() or "18",
+                )
+                logger.warning(
+                    "Optional hotspot-distance report download failed; the dormant pipeline "
+                    f"will continue. Error: {exc}"
+                )
+                bundle.captures.append(
+                    PortalReportCapture(
+                        definition=HOTSPOT_DISTANCE,
+                        status="failed",
+                        requested_url=requested_url,
+                        error=str(exc),
+                    )
+                )
+
+        if SIMPLE_ACTIVITY_LIST in selected:
+            try:
+                bundle.captures.append(
+                    _download_authenticated_export(
+                        context,
+                        SIMPLE_ACTIVITY_LIST,
+                        window,
+                        logger,
+                    )
+                )
+            except Exception as exc:
+                requested_url = SIMPLE_ACTIVITY_LIST.export_url(
+                    BASE_URL,
+                    window,
+                    district_id=os.getenv("PORTAL_DISTRICT_ID", "18").strip() or "18",
+                )
+                logger.warning(
+                    "Optional Simple Activity List download failed; the other report pipelines "
+                    f"will continue. Error: {exc}"
+                )
+                bundle.captures.append(
+                    PortalReportCapture(
+                        definition=SIMPLE_ACTIVITY_LIST,
+                        status="failed",
+                        requested_url=requested_url,
+                        error=str(exc),
+                    )
+                )
         # Record the successful execution timestamp
         record_scrape_time()
 
         browser.close()
 
-        return downloaded_file_path
+        return bundle
+
+
+def scrape_portal_data(logger=None) -> Path:
+    """Backward-compatible single-report entrypoint for standalone callers."""
+    return scrape_portal_reports(logger=logger).primary_path

@@ -111,7 +111,7 @@ def _ensure_image_attachment(
     image.save(temporary, format="PNG", optimize=True)
     temporary.replace(path)
     if artifact is None:
-        artifact = Artifact(job_id=source_job.id, kind="delivery", name=filename, path=str(path), size_bytes=path.stat().st_size)
+        artifact = Artifact(job_id=source_job.id, module_key="antidengue", kind="delivery", name=filename, path=str(path), size_bytes=path.stat().st_size)
     else:
         artifact.name = filename
         artifact.size_bytes = path.stat().st_size

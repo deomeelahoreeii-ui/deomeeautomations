@@ -1,0 +1,318 @@
+{
+  "dry_run": true,
+  "filter": {
+    "applied": true,
+    "available_activity_columns": [
+      "Simple Activities",
+      "Patient Activities",
+      "Vector Surveillance Activities",
+      "Larvae Case Response",
+      "Total Activities"
+    ],
+    "dormant_raw_rows": 9,
+    "missing_activity_columns": [
+      "TPV Activities"
+    ],
+    "raw_rows": 1021,
+    "strategy": "Total Activities"
+  },
+  "input": {
+    "name": "user_wise_dormancy_report.xls",
+    "path": "/home/ahmad/code/deomeeautomations/antidengue/drop-raw-files/user_wise_dormancy_report.xls",
+    "portal_duplicate_raw_check": {
+      "current_sha256": "c254b6431201594574c3a461937aec2eec28c48b2f66f6247812475eff532a4f",
+      "duplicate": false,
+      "policy": "block_send"
+    },
+    "sha256": "c254b6431201594574c3a461937aec2eec28c48b2f66f6247812475eff532a4f",
+    "size_bytes": 101066,
+    "source": "portal"
+  },
+  "lifecycle": [
+    {
+      "created_at": "2026-07-18T14:53:43",
+      "message": "Run started.",
+      "payload": {
+        "dry_run": true,
+        "file": "/home/ahmad/code/deomeeautomations/antidengue/drop-raw-files/user_wise_dormancy_report.xls",
+        "input_source": "portal"
+      },
+      "stage": "started",
+      "status": "started"
+    },
+    {
+      "created_at": "2026-07-18T14:53:43",
+      "message": "Raw report loaded with 1021 row(s).",
+      "payload": {
+        "raw_file_sha256": "c254b6431201594574c3a461937aec2eec28c48b2f66f6247812475eff532a4f",
+        "raw_file_size_bytes": 101066,
+        "raw_rows": 1021
+      },
+      "stage": "downloaded",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-18T14:53:43",
+      "message": "Dormant filter produced 9 row(s).",
+      "payload": {
+        "dormant_rows": 9,
+        "filter_applied": true,
+        "filter_strategy": "Total Activities"
+      },
+      "stage": "processed",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-18T14:53:43",
+      "message": "Generated Excel report, officer mapping audit, and activity evidence.",
+      "payload": {
+        "activity_evidence": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-18_14-53-43/Activity Evidence - 18-07-2026 - 02-53 PM.xlsx",
+        "excel_report": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-18_14-53-43/Anti-Dengue App Dormant Users - 18-07-2026 - 02-53 PM.xlsx",
+        "invalid_contacts": 0,
+        "officer_mapping_audit": "/home/ahmad/code/deomeeautomations/antidengue/unmapped-officer-reports/2026-07-18_14-53-43/Officer Mapping Audit - 18-07-2026 - 02-53 PM.xlsx",
+        "unmapped_schools": 9
+      },
+      "stage": "processed",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-18T14:53:43",
+      "message": "Data quality gate passed.",
+      "payload": {
+        "dormant_rows": 9,
+        "duplicate_portal_export": false,
+        "warnings": []
+      },
+      "stage": "validated",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-18T14:53:43",
+      "message": "WhatsApp dispatch started.",
+      "payload": {
+        "dormant_rows": 9,
+        "dry_run": true
+      },
+      "stage": "dispatch_started",
+      "status": "started"
+    },
+    {
+      "created_at": "2026-07-18T14:53:43",
+      "message": "WhatsApp dispatch finished without queueing messages.",
+      "payload": {
+        "dynamic_payloads": 0,
+        "fixed_payloads": 1,
+        "queued": false,
+        "queued_dynamic_payloads": 0,
+        "total_payloads": 1
+      },
+      "stage": "dispatch_finished",
+      "status": "warning"
+    },
+    {
+      "created_at": "2026-07-18T14:53:43",
+      "message": "Run summary prepared at /home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-18_14-53-43/run_summary.json.",
+      "payload": {},
+      "stage": "summary_saved",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-18T14:53:43",
+      "message": "Run finished with status: completed.",
+      "payload": {
+        "status": "completed"
+      },
+      "stage": "completed",
+      "status": "ok"
+    }
+  ],
+  "outputs": {
+    "activity_evidence": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-18_14-53-43/Activity Evidence - 18-07-2026 - 02-53 PM.xlsx",
+    "audit_dir": "/home/ahmad/code/deomeeautomations/antidengue/unmapped-officer-reports/2026-07-18_14-53-43",
+    "excel_report": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-18_14-53-43/Anti-Dengue App Dormant Users - 18-07-2026 - 02-53 PM.xlsx",
+    "officer_delivery_audit": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-18_14-53-43/Officer Delivery Audit - 18-07-2026 - 02-53 PM.xlsx",
+    "officer_mapping_audit": "/home/ahmad/code/deomeeautomations/antidengue/unmapped-officer-reports/2026-07-18_14-53-43/Officer Mapping Audit - 18-07-2026 - 02-53 PM.xlsx",
+    "output_dir": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-18_14-53-43"
+  },
+  "portal_acquisition": {
+    "reports": [
+      {
+        "acquisition": "page_export_button",
+        "analysis": null,
+        "content_type": null,
+        "error": null,
+        "name": "user_wise_dormancy_report.xls",
+        "path": "/home/ahmad/code/deomeeautomations/antidengue/drop-raw-files/user_wise_dormancy_report.xls",
+        "report_key": "dormant_users",
+        "report_name": "Dormant users",
+        "requested_url": "https://dashboard-tracking.punjab.gov.pk/user_wise_larva_report?district_id=18&date_range=0",
+        "required": true,
+        "sha256": "c254b6431201594574c3a461937aec2eec28c48b2f66f6247812475eff532a4f",
+        "size_bytes": 101066,
+        "status": "completed"
+      },
+      {
+        "acquisition": "authenticated_export",
+        "analysis": {
+          "classification": "threshold_not_configured",
+          "column_count": 14,
+          "columns": [
+            "Sr #",
+            "ID",
+            "District",
+            "Town",
+            "UC",
+            "Sub Department",
+            "Tag",
+            "Hotspot Name",
+            "Hotspot Address",
+            "Hotspot(Lat,Long)",
+            "Activity(Lat,Long)",
+            "Distance Difference (In meters)",
+            "Submitted by",
+            "Activity Date/Time"
+          ],
+          "distance_meters": {
+            "maximum": 24347.8,
+            "median": 29.22,
+            "minimum": 0.86,
+            "p90": 1022.4510000000016
+          },
+          "missing_distance_count": 0,
+          "review_candidate_count": null,
+          "review_candidate_sample": [],
+          "review_threshold_meters": null,
+          "row_count": 1064,
+          "rule_results": [],
+          "schema_version": "hotspot_distance.v1",
+          "source_format": "html_table_xls",
+          "unique_submitter_count": 245,
+          "valid": true,
+          "valid_distance_count": 1064
+        },
+        "content_type": "application/vnd.ms-excel; charset=utf-8",
+        "error": null,
+        "name": "hotspot_distance_report_20260718_1453.xls",
+        "path": "/home/ahmad/code/deomeeautomations/antidengue/drop-raw-files/hotspot_distance_report_20260718_1453.xls",
+        "report_key": "hotspot_distance",
+        "report_name": "Hotspot-distance activities",
+        "requested_url": "https://dashboard-tracking.punjab.gov.pk/reports/activities/hotspot_distance_report?act_tag=&action=hotspot_distance_report&controller=reports%2Factivities&format=xls&hotspot_distance=&is_filter_selected=true&pagination=No&parent_department=&sub_department=&tehsil_id=&uc=&district_id=18&datefrom=2026-07-18T00%3A00&dateto=2026-07-18T14%3A53",
+        "required": false,
+        "sha256": "26d83490d3f9e60d453def25922b186ab15766d26aebe55f9c9fde7912b0a440",
+        "size_bytes": 540627,
+        "status": "completed"
+      }
+    ],
+    "window": {
+      "datefrom": "2026-07-18T00:00",
+      "dateto": "2026-07-18T14:53",
+      "end": "2026-07-18T14:53:00+05:00",
+      "start": "2026-07-18T00:00:00+05:00",
+      "timezone": "Asia/Karachi"
+    }
+  },
+  "quality_gate": {
+    "activity_schema_mode": "total_activities",
+    "dormancy_rate_check_applicable": true,
+    "dormancy_ratio": 0.008832188420019628,
+    "dormancy_warning_after_hour": 8,
+    "dormant_activity_conflict_rows": 0,
+    "dormant_reconciled_school_count": 9,
+    "errors": [],
+    "export_coverage_ratio": 0.9912451361867705,
+    "exported_school_count": 1021,
+    "final_school_count": 9,
+    "invalid_contact_count": 0,
+    "invalid_contact_ratio": 0.0,
+    "invalid_total_activity_rows": 0,
+    "issues": [],
+    "master_count": 1028,
+    "master_coverage_ratio": 0.008754863813229572,
+    "master_missing_from_export_count": 9,
+    "master_missing_from_export_emis_sample": [
+      "35210957",
+      "35211012",
+      "35211013",
+      "35211014",
+      "35211015",
+      "35211016",
+      "35220592",
+      "35299991",
+      "35299992"
+    ],
+    "max_dormancy_ratio": 0.98,
+    "max_master_coverage": 0.98,
+    "max_unmapped_ratio": 0.1,
+    "min_export_coverage": 0.98,
+    "officer_delivery_quality_enforced": false,
+    "officer_mapping_check_applicable": false,
+    "optional_missing_activity_columns": [
+      "TPV Activities"
+    ],
+    "passed": true,
+    "reconciled_export_school_count": 1019,
+    "unknown_export_emis_sample": [
+      "35210283",
+      "35210443"
+    ],
+    "unknown_export_school_count": 2,
+    "unmapped_ratio": 1.0,
+    "unmapped_school_count": 9,
+    "warnings": []
+  },
+  "report_source": "unfiltered",
+  "run_started_at": "2026-07-18T14:53:43.454549",
+  "whatsapp": {
+    "dispatch_plan": [
+      {
+        "cause": "Dry run; not queued.",
+        "channel": "group",
+        "created_at": "2026-07-18T14:53:43",
+        "excel_path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-18_14-53-43/group-route-excels/01 - HEADS M-EE LAHORE OFFICIAL - wing - Wing.xlsx",
+        "job_id": "ee64d091-dc55-4cc5-9d60-84d11e00f6ff",
+        "message_mode": "full_report",
+        "payload": {
+          "attachment_text_mode": "separate",
+          "delay_ms": 1500,
+          "dispatch_route": {
+            "markaz": "",
+            "message_mode": "full_report",
+            "route_kind": "wing",
+            "row_count": 9,
+            "tehsil": ""
+          },
+          "excel_filename": "01 - HEADS M-EE LAHORE OFFICIAL - wing - Wing.xlsx",
+          "excel_path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-18_14-53-43/group-route-excels/01 - HEADS M-EE LAHORE OFFICIAL - wing - Wing.xlsx",
+          "image_path": null,
+          "job_id": "ee64d091-dc55-4cc5-9d60-84d11e00f6ff",
+          "recipient_name": "HEADS (M-EE) LAHORE OFFICIAL",
+          "status_subject": null,
+          "target": "120363231124535672@g.us",
+          "text": "*Anti-Dengue Dormant Users - 18-Jul-2026 - 02:53 PM*\n*Group:* HEADS (M-EE) LAHORE OFFICIAL\n*Scope:* Wing\n*Total dormant:* 9 schools\n\n*TEHSIL SUMMARY*\n1. CANTT: 4 schools\n2. CITY: 3 schools\n3. MODEL TOWN: 1 school\n4. SHALIMAR: 1 school\n\n*DETAILS BY TEHSIL / MARKAZ*\n\n*CANTT - 4 schools*\n\n*Unmapped - 4 schools*\n1. 35210095 - GGHS CHARAR DHA\n2. 35210173 - GGHS KEER KHURD BAIDIAN ROAD\n3. 35210094 - GGHSS SHAMIM UL ISLAM BASTI SAIDAN SHAH UPPER MALL\n4. 35210126 - GHS BARKI\n\n*CITY - 3 schools*\n\n*Unmapped - 3 schools*\n1. 35220542 - GGHS JUNIOR MODEL AWAN TOWN 2nd SHIFT (Newly Upgraded)\n2. 35220562 - GGHS PAISA AKHBAR NEW ANARKALI (EX-MCL)\n3. 35220021 - GHS CITY MUSLIM LEAGUE SAID MITHA BAZAR\n\n*MODEL TOWN - 1 school*\n\n*NISHTER-FEMALE - 1 school*\n1. 35210703 - GGPS MODEL THEH BHATTA (KACHWANA)\n\n*SHALIMAR - 1 school*\n\n*Unmapped - 1 school*\n1. 35210598 - GGHS MOMAN PURA(Newly upgraded)\n\nPlease ensure activities are submitted/updated on the portal today.",
+          "type": "group"
+        },
+        "recipient_name": "HEADS (M-EE) LAHORE OFFICIAL",
+        "route_kind": "wing",
+        "row_count": 9,
+        "status": "planned",
+        "target": "120363231124535672@g.us",
+        "updated_at": "2026-07-18T14:53:43"
+      }
+    ],
+    "dispatch_settings": {
+      "allow_groups": true,
+      "allow_individual": true,
+      "attach_excel": true,
+      "manual_only": false,
+      "require_preview": false,
+      "send_failed_only": false
+    },
+    "dry_run": true,
+    "dynamic_payloads": 0,
+    "fixed_payloads": 1,
+    "officer_delivery_audit": [],
+    "queued": false,
+    "queued_dynamic_payloads": 0,
+    "total_payloads": 1
+  }
+}

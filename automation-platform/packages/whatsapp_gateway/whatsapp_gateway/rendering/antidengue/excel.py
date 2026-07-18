@@ -90,6 +90,7 @@ def _ensure_excel_attachment(
     if artifact is None:
         artifact = Artifact(
             job_id=source_job.id,
+            module_key="antidengue",
             kind="delivery",
             name=filename,
             path=str(path),

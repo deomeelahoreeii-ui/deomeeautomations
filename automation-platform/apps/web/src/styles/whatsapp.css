@@ -439,3 +439,6 @@
 .inbound-complaint-groups article { display:flex; flex-direction:column; gap:.25rem; padding:.9rem; border:1px solid var(--wa-border); border-radius:.75rem; background:var(--wa-surface-muted); }
 .inbound-complaint-groups strong { font-size:1.05rem; }
 .inbound-complaint-groups small { color:var(--wa-text-muted); }
+.target-enabled-toggle { display: inline-flex; align-items: center; gap: .45rem; white-space: nowrap; color: var(--muted-color, #74829a); font-size: .72rem; font-weight: 700; cursor: pointer; }
+.target-enabled-toggle:has(input:not(:checked)) { color: #9a5b21; }
+.target-enabled-toggle:has(input:disabled) { opacity: .65; cursor: wait; }

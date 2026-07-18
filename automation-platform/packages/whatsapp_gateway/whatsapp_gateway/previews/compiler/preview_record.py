@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from whatsapp_gateway.antidengue_renderer import (
+    HOTSPOT_RENDERER_KEY, HOTSPOT_REPORT_KEY,
     RENDERER_KEY as TEHSIL_DORMANT_RENDERER_KEY, WING_RENDERER_KEY,
 )
 from whatsapp_gateway.models import WhatsAppDispatchPreview
@@ -32,7 +33,9 @@ def configuration_snapshot(ctx: CompileContext) -> dict[str, Any]:
             "name": template.name if template else None, "body": template.body if template else None},
         "wing": {"id": str(wing.id), "code": wing.code, "name": wing.name},
         "renderer": {"key": TEHSIL_DORMANT_RENDERER_KEY if report_type.key == "tehsil_dormant_summary"
-            else WING_RENDERER_KEY if report_type.key == "wing_summary" else "legacy.dispatch_plan_adapter"},
+            else WING_RENDERER_KEY if report_type.key == "wing_summary"
+            else HOTSPOT_RENDERER_KEY if report_type.key == HOTSPOT_REPORT_KEY
+            else "legacy.dispatch_plan_adapter"},
     }
     snapshot["audience"]["target_keys"] = sorted(member.target_key for member in ctx.members)
     snapshot["audience"]["target_routes"] = sorted(

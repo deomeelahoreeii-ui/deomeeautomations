@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sqlite3
 from pathlib import Path
 
@@ -979,10 +980,10 @@ def test_group_route_payloads_generate_scoped_excel_for_route(tmp_path, monkeypa
     )
 
     monkeypatch.setattr(main, "_read_officers_dataframe", lambda: officers_df)
-    monkeypatch.setattr(main, "_pocketbase_has_group_routes_table", lambda: True)
+    monkeypatch.setattr(main, "_runtime_has_group_routes", lambda: True)
     monkeypatch.setattr(
         main,
-        "_read_group_routes_dataframe_from_pocketbase",
+        "_read_group_routes_dataframe",
         lambda purpose="normal": routes_df,
     )
 
@@ -1010,35 +1011,28 @@ def test_group_route_payloads_generate_scoped_excel_for_route(tmp_path, monkeypa
     assert scoped_report["School Name"].tolist() == ["GPS CANTT ONE"]
 
 
-def test_duplicate_portal_export_detection_uses_pocketbase_history(
+def test_duplicate_portal_export_detection_uses_postgres_runtime_history(
     tmp_path, monkeypatch
 ):
-    db_path = tmp_path / "pb.db"
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            create table report_runs (
-              id text primary key,
-              started_at text,
-              source text,
-              status text,
-              raw_file_name text,
-              raw_file_sha256 text,
-              summary text
-            )
-            """
-        )
-        conn.execute(
-            """
-            insert into report_runs
-            (id, started_at, source, status, raw_file_name, raw_file_sha256, summary)
-            values ('r1', '2026-07-06T09:19:05', 'portal', 'completed',
-                    'user_wise_dormancy_report.xls', 'same-hash', '{}')
-            """
-        )
-
-    monkeypatch.setattr(main, "POCKETBASE_DB_PATH", db_path)
-    monkeypatch.setattr(main, "POCKETBASE_ENABLED", True)
+    snapshot_path = tmp_path / "runtime.json"
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "source": "automation-platform-postgresql",
+                "previous_portal_runs": [
+                    {
+                        "started_at": "2026-07-06T09:19:05",
+                        "status": "completed",
+                        "raw_file_name": "user_wise_dormancy_report.xls",
+                        "raw_file_sha256": "same-hash",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(main, "RUNTIME_SNAPSHOT_PATH", snapshot_path)
 
     result = main._detect_duplicate_portal_export(
         extraction_diagnostics={"source_file_sha256": "same-hash"},
@@ -1051,6 +1045,55 @@ def test_duplicate_portal_export_detection_uses_pocketbase_history(
     assert result["duplicate"] is True
     assert result["previous_run_started_at"] == "2026-07-06T09:19:05"
     assert result["previous_status"] == "completed"
+
+
+def test_runtime_snapshot_supplies_master_officers_and_routes(tmp_path, monkeypatch):
+    snapshot_path = tmp_path / "runtime.json"
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "source": "automation-platform-postgresql",
+                "master_schools": [
+                    {
+                        "Sr. No.": 1,
+                        "District": "LAHORE",
+                        "Tehsil": "CANTT",
+                        "Markaz": "BARKI - MALE",
+                        "School Name": "GPS TEST",
+                        "School EMIS": "35210001",
+                        "School Type": "Male",
+                        "DEOs Wise": "M-EE",
+                        "School Level": "Primary",
+                    }
+                ],
+                "officer_mappings": [
+                    {
+                        "emis": "35210001",
+                        "school_name": "GPS TEST",
+                        "tehsil": "CANTT",
+                        "markaz": "BARKI - MALE",
+                        "ddeo_name": "DDEO TEST",
+                        "ddeo_cell_number": "923001111111",
+                        "aeo_name": "AEO TEST",
+                        "aeo_cell_number": "923002222222",
+                    }
+                ],
+                "group_routes": [],
+                "dispatch_settings": {},
+                "previous_portal_runs": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(main, "RUNTIME_SNAPSHOT_PATH", snapshot_path)
+
+    master = main._read_master_dataframe()
+    officers = main._read_officers_dataframe()
+
+    assert master.loc[0, "School EMIS"] == "35210001"
+    assert officers.loc[0, "emis_normalized"] == "35210001"
+    assert main._runtime_has_group_routes() is True
 
 
 def test_duplicate_portal_export_detection_does_not_block_manual_input(

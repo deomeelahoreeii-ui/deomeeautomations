@@ -386,7 +386,7 @@ class S3ObjectStorage:
             "version_id": response.headers.get("x-amz-version-id"),
         }
 
-    def health(self) -> dict[str, Any]:
+    def health(self, buckets: list[str] | None = None) -> dict[str, Any]:
         if not self.enabled:
             return {
                 "enabled": False,
@@ -394,7 +394,7 @@ class S3ObjectStorage:
                 "provider": self.settings.object_storage_provider,
                 "message": "Object storage is disabled; inbound files remain in the local compatibility archive.",
             }
-        buckets = [
+        buckets = buckets or [
             self.settings.object_storage_raw_bucket,
             self.settings.object_storage_manifest_bucket,
             self.settings.object_storage_derived_bucket,

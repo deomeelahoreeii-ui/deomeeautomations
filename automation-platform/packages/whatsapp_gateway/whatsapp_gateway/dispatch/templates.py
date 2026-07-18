@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from whatsapp_gateway.api_common import *
+from whatsapp_gateway.previews.compiler.messages import PLACEHOLDER_RE
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp"])
 
@@ -64,6 +65,18 @@ def save_template(
         report_type is None or report_type.application_id != data.application_id
     ):
         raise HTTPException(status_code=422, detail="Report type does not belong to the template module")
+    if (
+        report_type is not None
+        and report_type.key in {"hotspot_distance_activity", "simple_activity_timing"}
+        and data.category == "report"
+        and not set(PLACEHOLDER_RE.findall(data.body)).intersection(
+            {"report_body", "message", "school_activity_details"}
+        )
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Activity-review templates must include {{school_activity_details}} or {{report_body}} so evidence cannot be omitted.",
+        )
     if data.category == "report" and (
         application is None
         or report_type is None
@@ -72,6 +85,15 @@ def save_template(
         raise HTTPException(
             status_code=422,
             detail="Report templates require a module, report type and Individual or Group channel",
+        )
+    if data.category == "zero_result_acknowledgement" and (
+        application is None
+        or report_type is None
+        or data.recipient_channel != "group"
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Zero-result acknowledgement templates require a module, report type and Group channel",
         )
     if recipient_scope and (
         application is None

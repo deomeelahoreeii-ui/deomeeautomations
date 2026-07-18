@@ -21,6 +21,16 @@ from whatsapp_gateway.rendering.antidengue.source_data import (
 )
 from whatsapp_gateway.rendering.antidengue.tehsil_report import render_tehsil_dormant_report
 from whatsapp_gateway.rendering.antidengue.wing_report import render_wing_dormant_report
+from whatsapp_gateway.rendering.antidengue.hotspot_report import (
+    HOTSPOT_RENDERER_KEY,
+    HOTSPOT_REPORT_KEY,
+    RenderedHotspotReport,
+    render_hotspot_distance_report,
+)
+from whatsapp_gateway.rendering.antidengue.simple_activity_report import (
+    SIMPLE_ACTIVITY_RENDERER_KEY, SIMPLE_ACTIVITY_REPORT_KEY,
+    RenderedSimpleActivityReport, render_simple_activity_report,
+)
 
 __all__ = [
     "PAKISTAN_TIME", "RENDERER_KEY", "REQUIRED_COLUMNS", "WING_RENDERER_KEY",
@@ -31,4 +41,8 @@ __all__ = [
     "_build_message", "_build_wing_message", "_ensure_excel_attachment",
     "_font", "_wrap_text", "_ensure_image_attachment",
     "render_wing_dormant_report", "render_tehsil_dormant_report",
+    "HOTSPOT_RENDERER_KEY", "HOTSPOT_REPORT_KEY", "RenderedHotspotReport",
+    "render_hotspot_distance_report",
+    "SIMPLE_ACTIVITY_RENDERER_KEY", "SIMPLE_ACTIVITY_REPORT_KEY",
+    "RenderedSimpleActivityReport", "render_simple_activity_report",
 ]

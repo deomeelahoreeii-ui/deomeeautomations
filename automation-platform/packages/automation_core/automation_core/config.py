@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     antidengue_submission_deadline: str = "12:30 PM"
     antidengue_scheduler_enabled: bool = True
     antidengue_scheduler_interval_seconds: int = 10
+    antidengue_ntfy_enabled: bool = False
+    antidengue_ntfy_base_url: str = "https://ntfy.sh"
+    antidengue_ntfy_topic: str = ""
+    antidengue_ntfy_token: str = ""
+    antidengue_ntfy_timeout_seconds: float = 5.0
 
     artifact_root: Path = Path("./data/artifacts")
     source_file_max_bytes: int = 50 * 1024 * 1024
@@ -73,6 +78,9 @@ class Settings(BaseSettings):
     object_storage_raw_bucket: str = "whatsapp-inbound-raw"
     object_storage_manifest_bucket: str = "whatsapp-inbound-manifests"
     object_storage_derived_bucket: str = "whatsapp-inbound-derived"
+    platform_storage_raw_bucket: str = "automation-raw"
+    platform_storage_manifest_bucket: str = "automation-manifests"
+    platform_storage_derived_bucket: str = "automation-derived"
     object_storage_connect_timeout_seconds: float = 5.0
     object_storage_read_timeout_seconds: float = 120.0
 
@@ -158,6 +166,14 @@ class Settings(BaseSettings):
     @property
     def whatsapp_inbound_export_root(self) -> Path:
         return (self.artifact_root / "whatsapp-inbound-exports").resolve()
+
+    @property
+    def platform_storage_buckets(self) -> list[str]:
+        return list(dict.fromkeys([
+            self.platform_storage_raw_bucket,
+            self.platform_storage_manifest_bucket,
+            self.platform_storage_derived_bucket,
+        ]))
 
     @property
     def crm_complaint_prefix_list(self) -> list[str]:

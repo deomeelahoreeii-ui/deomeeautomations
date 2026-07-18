@@ -57,7 +57,19 @@ def _canonical_report_artifact(
     ).all()
     # The platform adapter registers the canonical dormant workbook as
     # ``report``. Header inspection is retained as a safe migration fallback.
-    candidates = sorted(artifacts, key=lambda item: item.kind != "report")
+    candidates = sorted(
+        (
+            item
+            for item in artifacts
+            if "hotspot distance review" not in item.name.lower()
+            and "simple activity timing review" not in item.name.lower()
+        ),
+        key=lambda item: (
+            "anti-dengue app dormant users" not in item.name.lower(),
+            item.kind != "report",
+            item.created_at,
+        ),
+    )
     for artifact in candidates:
         path = Path(artifact.path).expanduser().resolve(strict=False)
         try:

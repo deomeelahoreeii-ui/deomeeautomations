@@ -104,25 +104,63 @@ class JobLogPublic(SQLModel):
     created_at: datetime
 
 
+class StoredObject(SQLModel, table=True):
+    """One verified immutable object in the platform storage backend."""
+
+    __tablename__ = "stored_objects"
+    __table_args__ = (
+        UniqueConstraint("backend", "bucket", "object_key", name="uq_stored_objects_location"),
+        CheckConstraint("status IN ('ready', 'error')", name="ck_stored_objects_status"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    backend: str = Field(default="s3", index=True)
+    bucket: str = Field(index=True)
+    object_key: str = Field(sa_column=Column(Text, nullable=False))
+    sha256: str = Field(index=True, max_length=64)
+    size_bytes: int = 0
+    content_type: str | None = None
+    etag: str | None = None
+    version_id: str | None = None
+    status: str = Field(default="ready", index=True)
+    last_error: str | None = Field(default=None, sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    verified_at: datetime | None = Field(default=None, index=True)
+
+
 class Artifact(SQLModel, table=True):
     __tablename__ = "artifacts"
 
     id: int | None = Field(default=None, primary_key=True)
     job_id: uuid.UUID = Field(foreign_key="jobs.id", index=True)
+    module_key: str = Field(default="legacy", index=True)
     kind: str = Field(default="file", index=True)
     name: str
     path: str = Field(sa_column=Column(Text))
     size_bytes: int = 0
+    sha256: str = Field(default="", index=True, max_length=64)
+    content_type: str | None = None
+    stored_object_id: uuid.UUID | None = Field(default=None, foreign_key="stored_objects.id", index=True)
+    storage_status: str = Field(default="local", index=True)
+    storage_error: str | None = Field(default=None, sa_column=Column(Text))
+    archived_at: datetime | None = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
 class ArtifactPublic(SQLModel):
     id: int
     job_id: uuid.UUID
+    module_key: str
     kind: str
     name: str
     path: str
     size_bytes: int
+    sha256: str
+    content_type: str | None
+    stored_object_id: uuid.UUID | None
+    storage_status: str
+    storage_error: str | None
+    archived_at: datetime | None
     created_at: datetime
 
 
@@ -140,6 +178,10 @@ class SourceFile(SQLModel, table=True):
     extension: str = Field(index=True)
     size_bytes: int
     sha256: str = Field(index=True, max_length=64)
+    stored_object_id: uuid.UUID | None = Field(default=None, foreign_key="stored_objects.id", index=True)
+    storage_status: str = Field(default="local", index=True)
+    storage_error: str | None = Field(default=None, sa_column=Column(Text))
+    archived_at: datetime | None = Field(default=None, index=True)
     validation_status: str = Field(default="pending", index=True)
     schema_version: str | None = None
     detected_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))

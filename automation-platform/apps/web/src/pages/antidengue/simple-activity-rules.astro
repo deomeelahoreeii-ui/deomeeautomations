@@ -1,0 +1,64 @@
+---
+import DataTable from "../../components/DataTable.astro";
+import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
+---
+
+<AntiDengueLayout title="Simple Activity timing rules" description="Configure the minimum time required between before and after activity evidence." page="simple-activity-rules">
+  <button class="btn btn-sm btn-primary" id="add-rule" slot="actions">＋ Add timing rule</button>
+
+  <div class="notice"><strong>Timing matches require human review.</strong><br />The default policy selects intervals below five minutes. Exactly five minutes passes. Missing or negative values are reported as data-quality problems and are never automatically classified.</div>
+
+  <section class="notification-settings-grid" style="margin-top:1.25rem">
+    <article class="panel notification-settings-panel"><p class="eyebrow">Simple Activity List</p><h2>Before/after evidence timing</h2><p>Published versions are frozen into every Test Run, Send now, and scheduled preview.</p><span class="badge" id="rule-count">Loading…</span></article>
+    <aside class="panel notification-help-panel"><p class="eyebrow">Boundary contract</p><h2><code>&lt; 300 seconds</code></h2><p>The recommended rule flags 299 seconds and below. A value of exactly 300 seconds is valid.</p></aside>
+  </section>
+
+  <article class="panel" style="margin-top:1.25rem;padding:1.25rem">
+    <div class="panel-heading"><div><p class="eyebrow">Simple Activity routing</p><h2>Reuse authorized dormant-report audiences</h2><p>These routes have their own profiles, templates, attachment policy, and frozen deliveries.</p></div><button class="btn btn-sm btn-primary" id="save-routes">Save delivery routes</button></div>
+    <div id="routing-list" style="display:grid;gap:.65rem;margin-top:1rem"></div><p class="field-help" id="routing-summary">Loading…</p>
+  </article>
+
+  <article class="master-card" style="margin-top:1.25rem"><DataTable id="rules-table" pageSize={10} emptyText="No timing rules are configured." /></article>
+
+  <dialog class="modal" id="rule-dialog"><div class="modal-box master-modal" style="max-width:720px">
+    <div class="modal-title"><h2 id="rule-title">Add timing rule</h2><button type="button" id="close-rule">×</button></div>
+    <form class="master-form" id="rule-form">
+      <input type="hidden" id="rule-id" />
+      <label class="full"><span>Rule name *</span><input class="input input-bordered input-sm" id="rule-name" required maxlength="180" /></label>
+      <label><span>Review when interval is</span><select class="select select-bordered select-sm" id="operator"><option value="lt">Less than (&lt;)</option><option value="lte">Equal to or less than (≤)</option></select></label>
+      <label><span>Minimum interval (minutes)</span><input type="number" min="0.0167" max="1440" step="0.1" class="input input-bordered input-sm" id="minutes" value="5" /></label>
+      <p class="field-help full" id="seconds-help">5 minutes = 300 seconds. Exactly 300 seconds passes with the recommended &lt; operator.</p>
+      <div class="form-actions full"><button class="btn btn-sm" type="button" id="cancel-rule">Cancel</button><button class="btn btn-sm" type="button" id="preview-rule">Test latest report</button><button class="btn btn-sm btn-primary" type="submit">Save draft</button></div>
+    </form>
+    <section id="preview" hidden style="margin-top:1rem"><div class="notification-settings-grid"><article class="panel" style="padding:1rem"><span class="field-help">Matches</span><h2 id="matches">—</h2></article><article class="panel" style="padding:1rem"><span class="field-help">Total rows</span><h2 id="total">—</h2></article><article class="panel" style="padding:1rem"><span class="field-help">Invalid values</span><h2 id="invalid">—</h2></article></div><p class="field-help" id="source"></p></section>
+  </div><form method="dialog" class="modal-backdrop"><button>close</button></form></dialog>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { actionButtons, badge, stack } from "../../scripts/table-cells";
+    import { confirmAction, showError, showSuccess } from "../../scripts/alerts";
+    await customElements.whenDefined("astro-data-table");
+    const table = document.getElementById("rules-table") as any;
+    const dialog = document.getElementById("rule-dialog") as HTMLDialogElement;
+    const el = <T extends HTMLElement>(id:string) => document.getElementById(id) as T;
+    let rules:any[] = [];
+    const payload = () => ({ name:el<HTMLInputElement>("rule-name").value.trim(), operator:el<HTMLSelectElement>("operator").value as "lt"|"lte", minimum_seconds:Math.round(Number(el<HTMLInputElement>("minutes").value)*60), timezone:"Asia/Karachi" as const, created_by:"web-operator" });
+    async function loadRules(){ const result=await actions.antidengue.simpleActivityRules(); if(result.error) throw result.error; rules=(result.data as any).items||[]; el("rule-count").textContent=`${rules.filter(x=>x.status==="published"&&x.enabled).length} active · ${rules.length} versions`; return rules; }
+    function open(item?:any){ el<HTMLFormElement>("rule-form").reset(); el<HTMLInputElement>("rule-id").value=item?.id||""; el<HTMLInputElement>("rule-name").value=item?.name||"Minimum five-minute before/after interval"; el<HTMLSelectElement>("operator").value=item?.operator||"lt"; el<HTMLInputElement>("minutes").value=String((item?.minimum_seconds??300)/60); el("rule-title").textContent=item?`Edit draft · version ${item.version}`:"Add timing rule"; el("preview").hidden=true; dialog.showModal(); }
+    async function refresh(){ await table.setData(await loadRules()); }
+    await table.configure({data:await loadRules(),columns:[
+      {accessorKey:"name",header:"Rule",cell:({row}:any)=>stack(row.original.name,`Version ${row.original.version}`)},
+      {id:"condition",header:"Review condition",cell:({row}:any)=>`Time Difference(Sec) ${row.original.operator==="lt"?"<":"≤"} ${row.original.minimum_seconds} sec (${row.original.minimum_minutes} min)`},
+      {accessorKey:"status",header:"Version",cell:({row}:any)=>badge(row.original.status,row.original.status==="published"?"":"inactive")},
+      {accessorKey:"enabled",header:"Evaluation",cell:({row}:any)=>badge(row.original.enabled?"Enabled":"Disabled",row.original.enabled?"":"inactive")},
+      {id:"actions",header:"",cell:({row}:any)=>{const item=row.original;const buttons:any[]=[];if(item.status==="draft")buttons.push({label:"Edit",onClick:()=>open(item)},{label:"Publish",onClick:async()=>{if(!await confirmAction("Publish timing rule?","Future runs will freeze this exact version.","Publish"))return;const r=await actions.antidengue.publishSimpleActivityRule({id:item.id});if(r.error)await showError(r.error);else await refresh();}});if(item.status==="published")buttons.push({label:"New version",onClick:async()=>{const r=await actions.antidengue.createSimpleActivityRuleVersion({id:item.id});if(r.error)await showError(r.error);else{await refresh();open(r.data);}}},{label:item.enabled?"Disable":"Enable",onClick:async()=>{const r=await actions.antidengue.setSimpleActivityRuleEnabled({id:item.id,enabled:!item.enabled});if(r.error)await showError(r.error);else await refresh();}});buttons.push({label:"Archive",tone:"danger",onClick:async()=>{if(!await confirmAction("Archive this version?","It will stop evaluating future reports.","Archive"))return;const r=await actions.antidengue.archiveSimpleActivityRule({id:item.id});if(r.error)await showError(r.error);else await refresh();}});return actionButtons(buttons);}}
+    ]});
+    async function loadRouting(){const r=await actions.antidengue.simpleActivityRouting();if(r.error)throw r.error;const data=r.data as any;const box=el("routing-list");box.replaceChildren();for(const item of data.items||[]){const label=document.createElement("label");label.style.cssText="display:flex;align-items:center;gap:.7rem;padding:.7rem .8rem;border:1px solid var(--border-color);border-radius:.55rem;cursor:pointer";const input=document.createElement("input");input.type="checkbox";input.className="checkbox checkbox-sm simple-route";input.value=item.source_profile_id;input.checked=item.enabled;label.append(input,document.createTextNode(item.source_profile_name));box.append(label);}el("routing-summary").textContent=`${data.enabled_count} of ${data.eligible_count} routes enabled.`;}
+    await loadRouting();
+    el("save-routes").addEventListener("click",async()=>{const source_profile_ids=Array.from(document.querySelectorAll<HTMLInputElement>(".simple-route:checked")).map(x=>x.value);const r=await actions.antidengue.configureSimpleActivityRoutes({source_profile_ids});if(r.error)await showError(r.error);else{await showSuccess("Routes saved",`${(r.data as any).enabled_count} Simple Activity route(s) enabled.`);await loadRouting();}});
+    el("minutes").addEventListener("input",()=>{const seconds=Math.round(Number(el<HTMLInputElement>("minutes").value)*60);el("seconds-help").textContent=`${el<HTMLInputElement>("minutes").value} minutes = ${seconds} seconds.`;});
+    el("add-rule").addEventListener("click",()=>open());el("close-rule").addEventListener("click",()=>dialog.close());el("cancel-rule").addEventListener("click",()=>dialog.close());
+    el("preview-rule").addEventListener("click",async()=>{const r=await actions.antidengue.previewSimpleActivityRule({...payload(),sample_size:20});if(r.error)await showError(r.error);else{const d=r.data as any;el("preview").hidden=false;el("matches").textContent=String(d.matching_activities);el("total").textContent=String(d.total_activities);el("invalid").textContent=String(d.invalid_time_difference_count);el("source").textContent=`Source: ${d.source.name} · no findings saved`;}});
+    el("rule-form").addEventListener("submit",async(e)=>{e.preventDefault();const id=el<HTMLInputElement>("rule-id").value;const r=id?await actions.antidengue.updateSimpleActivityRule({id,...payload()}):await actions.antidengue.createSimpleActivityRule(payload());if(r.error)await showError(r.error);else{dialog.close();await refresh();await showSuccess("Draft saved","Test and publish it when ready.");}});
+  </script>
+</AntiDengueLayout>

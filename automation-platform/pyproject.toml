@@ -10,6 +10,7 @@ dependencies = [
     "fastapi[standard]",
     "flower",
     "nats-py>=2.15.0",
+    "lxml",
     "openpyxl",
     "pillow",
     "pandas",

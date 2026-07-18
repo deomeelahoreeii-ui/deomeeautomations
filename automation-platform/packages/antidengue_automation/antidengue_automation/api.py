@@ -43,6 +43,9 @@ from antidengue_automation.scheduling import (
     validate_recurrence,
 )
 from antidengue_automation.tasks import run_antidengue_job
+from antidengue_automation.notifications import NOTIFICATION_EVENT_TYPES
+from antidengue_automation.hotspot_routing import expand_hotspot_profile_ids
+from antidengue_automation.simple_activity_routing import expand_simple_activity_profile_ids
 from automation_core.database import get_session, session_scope
 from automation_core.job_service import (
     add_job,
@@ -64,6 +67,7 @@ from automation_core.models import (
     SourceFile,
     SourceFileRun,
 )
+from automation_core.storage_catalog import archive_source_file, ensure_source_file_local
 from automation_core.config import get_settings
 from automation_core.task_outbox import publish_pending_tasks, stage_task
 from automation_core.time import utcnow
@@ -98,6 +102,10 @@ def _source_file_dict(session: Session, item: SourceFile, *, include_runs: bool 
         "extension": item.extension,
         "size_bytes": item.size_bytes,
         "sha256": item.sha256,
+        "storage_status": item.storage_status,
+        "storage_error": item.storage_error,
+        "stored_object_id": str(item.stored_object_id) if item.stored_object_id else None,
+        "archived_at": item.archived_at,
         "validation_status": item.validation_status,
         "schema_version": item.schema_version,
         "detected_metadata": item.detected_metadata,
@@ -292,6 +300,9 @@ async def upload_manual_report(
     session.add(item)
     session.commit()
     session.refresh(item)
+    archive_source_file(session, item)
+    session.commit()
+    session.refresh(item)
     return _source_file_dict(session, item, include_runs=True)
 
 
@@ -314,7 +325,11 @@ def download_manual_report(
     item = session.get(SourceFile, source_file_id)
     if item is None or item.module_key != "antidengue":
         raise HTTPException(status_code=404, detail="Manual report not found")
-    path = Path(item.stored_path).resolve()
+    try:
+        path = ensure_source_file_local(session, item)
+        session.commit()
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"Stored report file is unavailable: {exc}") from exc
     if not path.is_relative_to(get_settings().source_file_root) or not path.is_file():
         raise HTTPException(status_code=404, detail="Stored report file is unavailable")
     return FileResponse(path, filename=item.original_name, media_type=item.content_type)
@@ -745,7 +760,10 @@ def run_antidengue_schedule_now(
     if schedule is None or schedule.archived_at is not None:
         raise HTTPException(status_code=404, detail="AntiDengue schedule not found")
     lock_execution_scope(session, f"schedule-run-now:{schedule.id}")
-    profile_ids = schedule.dispatch_profile_ids or [str(schedule.dispatch_profile_id)]
+    profile_ids = expand_hotspot_profile_ids(
+        session, schedule.dispatch_profile_ids or [str(schedule.dispatch_profile_id)]
+    )
+    profile_ids = expand_simple_activity_profile_ids(session, profile_ids)
     item = find_equivalent_active_execution(
         session,
         dispatch_profile_ids=profile_ids,
@@ -788,6 +806,8 @@ def create_antidengue_execution(
     trigger = "manual_send" if data.dispatch_policy == "auto_send_when_clean" else "manual_preview"
     try:
         profile_ids = normalize_dispatch_profile_ids(data.dispatch_profile_ids, data.dispatch_profile_id)
+        profile_ids = expand_hotspot_profile_ids(session, profile_ids)
+        profile_ids = expand_simple_activity_profile_ids(session, profile_ids)
         validate_dispatch_profiles(session, profile_ids)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1027,3 +1047,74 @@ async def stream_antidengue_execution(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/notification-events")
+async def stream_antidengue_notifications(request: Request) -> StreamingResponse:
+    """Stream new durable AntiDengue milestones without replaying old sounds."""
+
+    async def event_stream():
+        last_event_id = request.headers.get("last-event-id")
+        with session_scope() as session:
+            try:
+                cursor = session.get(AntiDengueScheduleEvent, uuid.UUID(last_event_id)) if last_event_id else None
+            except ValueError:
+                cursor = None
+            cursor_at = cursor.created_at if cursor else utcnow()
+            cursor_id = str(cursor.id) if cursor else ""
+        yield f"event: ready\ndata: {json.dumps({'at': str(cursor_at)})}\n\n"
+        idle = 0
+        while True:
+            if await request.is_disconnected():
+                break
+            with session_scope() as session:
+                statement = (
+                    select(AntiDengueScheduleEvent)
+                    .where(
+                        AntiDengueScheduleEvent.event_type.in_(sorted(NOTIFICATION_EVENT_TYPES)),
+                        AntiDengueScheduleEvent.created_at >= cursor_at,
+                    )
+                    .order_by(col(AntiDengueScheduleEvent.created_at), col(AntiDengueScheduleEvent.id))
+                    .limit(100)
+                )
+                events = [
+                    item for item in session.exec(statement)
+                    if item.created_at > cursor_at or str(item.id) > cursor_id
+                ]
+                for item in events:
+                    execution = session.get(AntiDengueScheduleExecution, item.execution_id)
+                    payload = {
+                        "id": str(item.id),
+                        "type": item.event_type,
+                        "message": item.message,
+                        "created_at": item.created_at,
+                        "execution_id": str(item.execution_id),
+                        "execution_code": execution.execution_code if execution else None,
+                        "trigger_type": execution.trigger_type if execution else None,
+                        "details": item.details,
+                    }
+                    yield f"id: {item.id}\nevent: notification\ndata: {json.dumps(payload, default=str, separators=(',', ':'))}\n\n"
+                    cursor_at = item.created_at
+                    cursor_id = str(item.id)
+                    idle = 0
+            if not events:
+                idle += 1
+                if idle % 15 == 0:
+                    yield f"event: heartbeat\ndata: {json.dumps({'at': str(utcnow())})}\n\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/notification-settings")
+def get_antidengue_notification_settings() -> dict:
+    settings = get_settings()
+    return {
+        "browser_audio": True,
+        "ntfy_enabled": settings.antidengue_ntfy_enabled and bool(settings.antidengue_ntfy_topic.strip()),
+        "ntfy_server": settings.antidengue_ntfy_base_url if settings.antidengue_ntfy_enabled else None,
+    }

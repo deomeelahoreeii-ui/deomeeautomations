@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, JSON, Text, UniqueConstraint, Uuid
+from sqlalchemy import CheckConstraint, Column, DateTime, Float, ForeignKey, JSON, Text, UniqueConstraint, Uuid
 from sqlalchemy.types import TypeDecorator
 from sqlmodel import Field, SQLModel
 
@@ -181,8 +181,83 @@ class AntiDengueScheduleEvent(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow, sa_column=utc_datetime_column(nullable=False))
 
 
+class AntiDengueActivityRule(SQLModel, table=True):
+    """Versioned, auditable classification rule for portal activity evidence."""
+
+    __tablename__ = "antidengue_activity_rules"
+    __table_args__ = (
+        UniqueConstraint("rule_key", "version", name="uq_antidengue_activity_rule_version"),
+        CheckConstraint("status IN ('draft', 'published', 'archived')", name="ck_antidengue_activity_rule_status"),
+        CheckConstraint("classification IN ('review_required')", name="ck_antidengue_activity_rule_classification"),
+        CheckConstraint("match_mode IN ('all', 'any')", name="ck_antidengue_activity_rule_match_mode"),
+        CheckConstraint("distance_operator IN ('gt', 'gte')", name="ck_antidengue_activity_rule_distance_operator"),
+        CheckConstraint("time_operator IN ('between', 'outside')", name="ck_antidengue_activity_rule_time_operator"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    rule_key: uuid.UUID = Field(default_factory=uuid.uuid4, index=True)
+    version: int = Field(default=1, ge=1)
+    name: str = Field(index=True, min_length=1, max_length=180)
+    status: str = Field(default="draft", index=True, max_length=30)
+    enabled: bool = Field(default=False, index=True)
+    classification: str = Field(default="review_required", index=True, max_length=50)
+    match_mode: str = Field(default="all", max_length=10)
+    distance_enabled: bool = True
+    distance_operator: str = Field(default="gte", max_length=10)
+    distance_threshold_meters: float = Field(default=50.0, ge=0, sa_column=Column(Float, nullable=False))
+    time_enabled: bool = False
+    time_operator: str = Field(default="between", max_length=20)
+    time_start: str = Field(default="00:00", max_length=5)
+    time_end: str = Field(default="07:00", max_length=5)
+    timezone: str = Field(default="Asia/Karachi", max_length=80)
+    supersedes_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid,
+            ForeignKey("antidengue_activity_rules.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    created_by: str = Field(default="web-operator", index=True, max_length=120)
+    created_at: datetime = Field(default_factory=utcnow, sa_column=utc_datetime_column(nullable=False))
+    updated_at: datetime = Field(default_factory=utcnow, sa_column=utc_datetime_column(nullable=False))
+    published_at: datetime | None = Field(default=None, sa_column=utc_datetime_column(nullable=True))
+
+
+class AntiDengueSimpleActivityRule(SQLModel, table=True):
+    """Versioned minimum before/after-photo interval policy."""
+
+    __tablename__ = "antidengue_simple_activity_rules"
+    __table_args__ = (
+        UniqueConstraint("rule_key", "version", name="uq_antidengue_simple_activity_rule_version"),
+        CheckConstraint("status IN ('draft', 'published', 'archived')", name="ck_antidengue_simple_activity_rule_status"),
+        CheckConstraint("operator IN ('lt', 'lte')", name="ck_antidengue_simple_activity_rule_operator"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    rule_key: uuid.UUID = Field(default_factory=uuid.uuid4, index=True)
+    version: int = Field(default=1, ge=1)
+    name: str = Field(index=True, min_length=1, max_length=180)
+    status: str = Field(default="draft", index=True, max_length=30)
+    enabled: bool = Field(default=False, index=True)
+    operator: str = Field(default="lt", max_length=10)
+    minimum_seconds: int = Field(default=300, ge=1)
+    timezone: str = Field(default="Asia/Karachi", max_length=80)
+    supersedes_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(Uuid, ForeignKey("antidengue_simple_activity_rules.id", ondelete="SET NULL"), nullable=True, index=True),
+    )
+    created_by: str = Field(default="web-operator", index=True, max_length=120)
+    created_at: datetime = Field(default_factory=utcnow, sa_column=utc_datetime_column(nullable=False))
+    updated_at: datetime = Field(default_factory=utcnow, sa_column=utc_datetime_column(nullable=False))
+    published_at: datetime | None = Field(default=None, sa_column=utc_datetime_column(nullable=True))
+
+
 __all__ = [
     "AntiDengueSchedule",
     "AntiDengueScheduleExecution",
     "AntiDengueScheduleEvent",
+    "AntiDengueActivityRule",
+    "AntiDengueSimpleActivityRule",
 ]

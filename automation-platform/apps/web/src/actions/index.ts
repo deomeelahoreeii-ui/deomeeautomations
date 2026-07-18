@@ -55,8 +55,119 @@ const officerInput = z.object({
   active: z.boolean().default(true),
 });
 
+const activityRuleInput = z.object({
+  name: z.string().min(1).max(180),
+  classification: z.literal("review_required").default("review_required"),
+  match_mode: z.enum(["all", "any"]).default("all"),
+  distance_enabled: z.boolean().default(true),
+  distance_operator: z.enum(["gt", "gte"]).default("gte"),
+  distance_threshold_meters: z.number().min(0).max(100000).default(50),
+  time_enabled: z.boolean().default(false),
+  time_operator: z.enum(["between", "outside"]).default("between"),
+  time_start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default("00:00"),
+  time_end: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default("07:00"),
+  timezone: z.literal("Asia/Karachi").default("Asia/Karachi"),
+  created_by: z.string().max(120).default("web-operator"),
+});
+
+const simpleActivityRuleInput = z.object({
+  name: z.string().min(1).max(180),
+  operator: z.enum(["lt", "lte"]).default("lt"),
+  minimum_seconds: z.number().int().min(1).max(86400).default(300),
+  timezone: z.literal("Asia/Karachi").default("Asia/Karachi"),
+  created_by: z.string().max(120).default("web-operator"),
+});
+
 export const server = {
+  storage: {
+    overview: defineAction({ handler: () => api("/api/v1/storage/overview") }),
+    artifacts: defineAction({
+      input: z.object({
+        moduleKey: z.string().default(""),
+        status: z.string().default(""),
+        search: z.string().default(""),
+        page: z.number().int().positive().default(1),
+        pageSize: z.number().int().min(1).max(100).default(25),
+      }),
+      handler: (input) => {
+        const params = new URLSearchParams({
+          module_key: input.moduleKey,
+          storage_status: input.status,
+          search: input.search,
+          page: String(input.page),
+          page_size: String(input.pageSize),
+        });
+        return api(`/api/v1/storage/artifacts?${params}`);
+      },
+    }),
+    retryArtifact: defineAction({
+      input: z.object({ id: z.number().int().positive() }),
+      handler: ({ id }) => api(`/api/v1/storage/artifacts/${id}/retry`, { method: "POST" }),
+    }),
+    backfill: defineAction({
+      input: z.object({ apply: z.boolean().default(false), moduleKey: z.string().optional(), limit: z.number().int().min(1).max(2000).default(200) }),
+      handler: ({ apply, moduleKey, limit }) => api("/api/v1/storage/backfill", {
+        method: "POST",
+        body: JSON.stringify({ apply, module_key: moduleKey || null, limit }),
+      }),
+    }),
+  },
   antidengue: {
+    simpleActivityRules: defineAction({ handler: () => api("/api/v1/antidengue/simple-activity-rules") }),
+    simpleActivityRouting: defineAction({ handler: () => api("/api/v1/antidengue/simple-activity-rules/routing") }),
+    configureSimpleActivityRoutes: defineAction({
+      input: z.object({ source_profile_ids: z.array(z.string().uuid()).default([]) }),
+      handler: ({ source_profile_ids }) => api("/api/v1/antidengue/simple-activity-rules/routing", { method: "PUT", body: JSON.stringify(source_profile_ids) }),
+    }),
+    createSimpleActivityRule: defineAction({ input: simpleActivityRuleInput, handler: (input) => api("/api/v1/antidengue/simple-activity-rules", { method: "POST", body: JSON.stringify(input) }) }),
+    updateSimpleActivityRule: defineAction({ input: simpleActivityRuleInput.extend({ id: z.string().uuid() }), handler: ({ id, ...input }) => api(`/api/v1/antidengue/simple-activity-rules/${id}`, { method: "PATCH", body: JSON.stringify(input) }) }),
+    createSimpleActivityRuleVersion: defineAction({ input: z.object({ id: z.string().uuid() }), handler: ({ id }) => api(`/api/v1/antidengue/simple-activity-rules/${id}/versions`, { method: "POST" }) }),
+    publishSimpleActivityRule: defineAction({ input: z.object({ id: z.string().uuid() }), handler: ({ id }) => api(`/api/v1/antidengue/simple-activity-rules/${id}/publish`, { method: "POST" }) }),
+    setSimpleActivityRuleEnabled: defineAction({ input: z.object({ id: z.string().uuid(), enabled: z.boolean() }), handler: ({ id, enabled }) => api(`/api/v1/antidengue/simple-activity-rules/${id}/enabled?enabled=${enabled}`, { method: "POST" }) }),
+    archiveSimpleActivityRule: defineAction({ input: z.object({ id: z.string().uuid() }), handler: ({ id }) => api(`/api/v1/antidengue/simple-activity-rules/${id}`, { method: "DELETE" }) }),
+    previewSimpleActivityRule: defineAction({ input: simpleActivityRuleInput.extend({ sample_size: z.number().int().min(1).max(100).default(20) }), handler: (input) => api("/api/v1/antidengue/simple-activity-rules/previews/evaluate", { method: "POST", body: JSON.stringify(input) }) }),
+    activityRules: defineAction({ handler: () => api("/api/v1/antidengue/activity-rules") }),
+    hotspotRouting: defineAction({ handler: () => api("/api/v1/antidengue/activity-rules/routing") }),
+    linkHotspotRoutes: defineAction({
+      input: z.object({ source_profile_ids: z.array(z.string().uuid()).default([]) }),
+      handler: ({ source_profile_ids }) => api("/api/v1/antidengue/activity-rules/routing/link", {
+        method: "POST", body: JSON.stringify(source_profile_ids),
+      }),
+    }),
+    configureHotspotRoutes: defineAction({
+      input: z.object({ source_profile_ids: z.array(z.string().uuid()).default([]) }),
+      handler: ({ source_profile_ids }) => api("/api/v1/antidengue/activity-rules/routing", {
+        method: "PUT", body: JSON.stringify(source_profile_ids),
+      }),
+    }),
+    createActivityRule: defineAction({
+      input: activityRuleInput,
+      handler: (input) => api("/api/v1/antidengue/activity-rules", { method: "POST", body: JSON.stringify(input) }),
+    }),
+    updateActivityRule: defineAction({
+      input: activityRuleInput.extend({ id: z.string().uuid() }),
+      handler: ({ id, ...input }) => api(`/api/v1/antidengue/activity-rules/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+    }),
+    createActivityRuleVersion: defineAction({
+      input: z.object({ id: z.string().uuid() }),
+      handler: ({ id }) => api(`/api/v1/antidengue/activity-rules/${id}/versions`, { method: "POST" }),
+    }),
+    publishActivityRule: defineAction({
+      input: z.object({ id: z.string().uuid() }),
+      handler: ({ id }) => api(`/api/v1/antidengue/activity-rules/${id}/publish`, { method: "POST" }),
+    }),
+    setActivityRuleEnabled: defineAction({
+      input: z.object({ id: z.string().uuid(), enabled: z.boolean() }),
+      handler: ({ id, enabled }) => api(`/api/v1/antidengue/activity-rules/${id}/enabled?enabled=${enabled}`, { method: "POST" }),
+    }),
+    archiveActivityRule: defineAction({
+      input: z.object({ id: z.string().uuid() }),
+      handler: ({ id }) => api(`/api/v1/antidengue/activity-rules/${id}`, { method: "DELETE" }),
+    }),
+    previewActivityRule: defineAction({
+      input: activityRuleInput.extend({ sample_size: z.number().int().min(1).max(100).default(20) }),
+      handler: (input) => api("/api/v1/antidengue/activity-rules/previews/evaluate", { method: "POST", body: JSON.stringify(input) }),
+    }),
     manualReports: defineAction({
       input: z.object({
         search: z.string().default(""),
@@ -258,6 +369,10 @@ export const server = {
         route_scope_key: z.string().default(""), route_scope_value: z.string().default(""), route_scope_label: z.string().default(""),
       }),
       handler: ({ audienceId, memberId, ...input }) => api(`/api/v1/whatsapp/audiences/${audienceId}/members/${memberId}`, { method: "PUT", body: JSON.stringify(input) }),
+    }),
+    setAudienceMemberEnabled: defineAction({
+      input: z.object({ audienceId: z.string().uuid(), memberId: z.string().uuid(), enabled: z.boolean() }),
+      handler: ({ audienceId, memberId, enabled }) => api(`/api/v1/whatsapp/audiences/${audienceId}/members/${memberId}/enabled`, { method: "PATCH", body: JSON.stringify({ enabled }) }),
     }),
     removeAudienceMember: defineAction({
       input: z.object({ audienceId: z.string().uuid(), memberId: z.string().uuid() }),
@@ -832,7 +947,7 @@ export const server = {
         recipient_channel: z.enum(["individual", "group", "any"]),
         key: z.string().min(1),
         name: z.string().min(1),
-        category: z.string().default("report"),
+        category: z.enum(["report", "system", "escalation", "zero_result_acknowledgement"]).default("report"),
         body: z.string().min(1),
         enabled: z.boolean().default(true),
       }),

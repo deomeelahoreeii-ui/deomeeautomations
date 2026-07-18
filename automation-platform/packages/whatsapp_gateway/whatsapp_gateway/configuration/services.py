@@ -202,6 +202,12 @@ def audience_dict(
             WhatsAppAudienceMember.enabled.is_(True),
         )
     ) or 0
+    disabled_member_count = session.scalar(
+        select(func.count()).select_from(WhatsAppAudienceMember).where(
+            WhatsAppAudienceMember.audience_id == item.id,
+            WhatsAppAudienceMember.enabled.is_(False),
+        )
+    ) or 0
     profile_count = session.scalar(
         select(func.count()).select_from(WhatsAppDispatchProfile).where(
             WhatsAppDispatchProfile.audience_id == item.id,
@@ -220,6 +226,8 @@ def audience_dict(
         "group_count": group_count,
         "contact_count": contact_count,
         "member_count": group_count + contact_count,
+        "disabled_member_count": disabled_member_count,
+        "configured_member_count": group_count + contact_count + disabled_member_count,
         "profile_count": profile_count,
         "updated_at": item.updated_at,
     }

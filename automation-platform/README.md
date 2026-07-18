@@ -161,6 +161,27 @@ GET  /api/v1/crm/pdf-batches/{source_file_id}/download
 DELETE /api/v1/crm/pdf-batches/{source_file_id}/hard
 ```
 
+## Platform object storage
+
+Open <http://localhost:4321/storage/> for the shared storage control plane. RustFS
+is the current S3-compatible provider; storage ownership and integrity metadata
+remain in PostgreSQL. AntiDengue raw downloads, generated reports, manifests,
+audits, and frozen WhatsApp delivery attachments are written under content-addressed
+module prefixes in `automation-raw`, `automation-manifests`, and
+`automation-derived`. Existing WhatsApp/CRM inbound buckets remain compatible.
+
+Uploads are verified by size and SHA-256 before an artifact is marked archived.
+Local files are retained as working copies, and missing managed copies can be
+rehydrated from RustFS before download or dispatch. The Storage page exposes a
+no-delete dry-run/apply backfill and retry controls for failed transfers.
+
+```text
+GET  /api/v1/storage/overview
+GET  /api/v1/storage/artifacts
+POST /api/v1/storage/artifacts/{artifact_id}/retry
+POST /api/v1/storage/backfill
+```
+
 ## WhatsApp Gateway
 
 Open <http://localhost:4321/whatsapp/> for the PostgreSQL-backed WhatsApp control
@@ -228,8 +249,9 @@ jurisdiction, quality, import/export, and audit views. All UI tables use the
 framework-agnostic TanStack Table core with a 10-row default page size. Browser
 queries and CRUD operations are routed through typed Astro Actions; FastAPI
 remains the source API for web and Android clients. PostgreSQL is the source of
-truth for web Master Data; the desktop app continues using PocketBase during
-the staged migration.
+truth for Master Data and every AntiDengue test, scheduled, and send-now run.
+The worker freezes a versioned JSON snapshot per job, and the standalone report
+generator reads only that snapshot.
 
 The Lahore WEE and Secondary workbook import is repeatable and previews by
 default:
@@ -242,11 +264,11 @@ default:
 The commit command creates a SQLite backup first. Secondary schools are imported
 with an empty markaz reference until authoritative markaz mappings are supplied.
 
-## PocketBase to PostgreSQL
+## Archived PocketBase migration utility
 
-The PostgreSQL migration is separate from the still-running desktop database.
-The importer reads PocketBase in read-only mode, previews by default, and uses
-stable IDs so committed imports are repeatable:
+PocketBase is no longer a runtime service. The one-time importer is retained for
+historical recovery only; it reads an archived database in read-only mode,
+previews by default, and uses stable IDs so committed imports are repeatable:
 
 ```bash
 /home/ahmad/.local/bin/uv run python scripts/migrate_pocketbase_to_postgres.py

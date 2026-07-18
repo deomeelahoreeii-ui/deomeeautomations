@@ -32,6 +32,20 @@
   --border: 1px;
 }
 
+.notification-settings-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(18rem, .75fr); gap: 1.25rem; margin-top: 1.25rem; }
+.notification-settings-panel, .notification-help-panel { padding: 1.4rem; }
+.notification-master-row, .notification-volume-row, .milestone-setting-row { display: flex; align-items: center; gap: 1rem; border-top: 1px solid var(--border-color, #dbe4ee); padding: 1rem 0; }
+.notification-master-row > span, .notification-volume-row > span, .milestone-setting-row > span { display: grid; gap: .2rem; flex: 1; }
+.notification-master-row small, .milestone-setting-row small { color: var(--muted-color, #74829a); }
+.notification-volume-row input[type="range"] { width: min(22rem, 55%); }
+.milestone-setting-row select { width: 11rem; }
+.notification-save-row { display: flex; justify-content: flex-end; align-items: center; gap: 1rem; padding-top: 1rem; }
+.notification-save-row span { color: var(--muted-color, #74829a); }
+.notification-help-panel ol { display: grid; gap: .75rem; padding-left: 1.3rem; }
+.notification-note { border-radius: .75rem; padding: 1rem; margin: 1.25rem 0; background: color-mix(in srgb, var(--color-info, #0e7490) 10%, transparent); }
+.notification-note p { margin: .35rem 0 0; }
+@media (max-width: 900px) { .notification-settings-grid { grid-template-columns: 1fr; } .milestone-setting-row { align-items: flex-start; flex-wrap: wrap; } .milestone-setting-row > span { flex-basis: 100%; } }
+
 @plugin "daisyui/theme" {
   name: "automation-dark";
   default: false;

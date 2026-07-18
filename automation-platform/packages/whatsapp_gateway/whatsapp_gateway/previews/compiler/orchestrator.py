@@ -17,6 +17,7 @@ from whatsapp_gateway.previews.compiler.artifact_snapshots import ArtifactSnapsh
 from whatsapp_gateway.previews.compiler.context import load_compile_context
 from whatsapp_gateway.previews.compiler.deliveries import persist_deliveries
 from whatsapp_gateway.previews.compiler.finalize import finalize_preview
+from whatsapp_gateway.previews.compiler.issue_reconciliation import reconcile_zero_result_issues
 from whatsapp_gateway.previews.compiler.plans import build_dispatch_plan
 from whatsapp_gateway.previews.compiler.preview_record import configuration_snapshot, create_preview_record
 
@@ -115,8 +116,8 @@ def _merge_profile_previews(
         WhatsAppDispatchPreviewDelivery.preview_id == primary.id
     ).order_by(WhatsAppDispatchPreviewDelivery.sequence)))
 
-    exact_seen: dict[tuple[str, str, tuple[str, ...]], WhatsAppDispatchPreviewDelivery] = {}
-    by_target: dict[tuple[str, str], list[WhatsAppDispatchPreviewDelivery]] = {}
+    exact_seen: dict[tuple[str, str, str, tuple[str, ...]], WhatsAppDispatchPreviewDelivery] = {}
+    by_target_report: dict[tuple[str, str, str], list[WhatsAppDispatchPreviewDelivery]] = {}
     retained: list[WhatsAppDispatchPreviewDelivery] = []
     for delivery in deliveries:
         checksums = tuple(
@@ -124,12 +125,15 @@ def _merge_profile_previews(
             for item in delivery.attachment_ids
             if item in artifacts_by_id
         )
-        exact_key = (delivery.target_jid, delivery.message, checksums)
+        report_type_id = str((delivery.routing_snapshot or {}).get("report_type_id") or "")
+        exact_key = (delivery.target_jid, report_type_id, delivery.message, checksums)
         if exact_key in exact_seen:
             session.delete(delivery)
             continue
         exact_seen[exact_key] = delivery
-        by_target.setdefault((delivery.target_type, delivery.target_jid), []).append(delivery)
+        by_target_report.setdefault(
+            (delivery.target_type, delivery.target_jid, report_type_id), []
+        ).append(delivery)
         retained.append(delivery)
 
     conflict_issue = {
@@ -137,7 +141,7 @@ def _merge_profile_previews(
         "severity": "blocked",
         "message": "Overlapping routing profiles resolve this recipient to different messages or attachments.",
     }
-    for candidates in by_target.values():
+    for candidates in by_target_report.values():
         payloads = {
             (item.message, tuple(artifacts_by_id[value].checksum_sha256 for value in item.attachment_ids if value in artifacts_by_id))
             for item in candidates
@@ -153,6 +157,7 @@ def _merge_profile_previews(
         checksum_key = [artifacts_by_id[value].checksum_sha256 for value in delivery.attachment_ids if value in artifacts_by_id]
         delivery.idempotency_key = hashlib.sha256(json.dumps({
             "preview": str(primary.id), "target": delivery.target_jid,
+            "report_type_id": str((delivery.routing_snapshot or {}).get("report_type_id") or ""),
             "message": delivery.message, "attachments": checksum_key,
         }, sort_keys=True).encode()).hexdigest()
         session.add(delivery)
@@ -176,7 +181,7 @@ def _merge_profile_previews(
             continue
         seen_batch_issues.add(identity)
         deduplicated_batch_issues.append(batch_issue)
-    batch_issues = deduplicated_batch_issues
+    batch_issues = reconcile_zero_result_issues(deduplicated_batch_issues, retained)
     primary.issues = batch_issues
     primary.delivery_count = len(retained)
     primary.ready_count = sum(item.status == "ready" for item in retained)

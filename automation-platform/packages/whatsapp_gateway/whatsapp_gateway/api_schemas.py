@@ -26,7 +26,9 @@ class TemplateInput(BaseModel):
     recipient_channel: Literal["individual", "group", "any"] = "any"
     key: str = PydanticField(min_length=1, max_length=100)
     name: str = PydanticField(min_length=1, max_length=200)
-    category: str = PydanticField(default="report", max_length=80)
+    category: Literal[
+        "report", "system", "escalation", "zero_result_acknowledgement"
+    ] = "report"
     body: str = PydanticField(min_length=1, max_length=5000)
     enabled: bool = True
 

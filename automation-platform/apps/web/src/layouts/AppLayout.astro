@@ -53,6 +53,9 @@ const { title, eyebrow, description, active = "master-data" } = Astro.props;
           <a class:list={["nav-item", { active: active === "master-data" }]} href="/master-data/">
             <span class="nav-icon">▦</span> Master Data
           </a>
+          <a class:list={["nav-item", { active: active === "storage" }]} href="/storage/">
+            <span class="nav-icon">▤</span> Storage
+          </a>
           <span class="nav-item muted"><span class="nav-icon">≡</span> All jobs</span>
           <span class="nav-item muted"><span class="nav-icon">⌁</span> System health</span>
         </nav>

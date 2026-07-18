@@ -24,7 +24,9 @@ from openpyxl.styles import Alignment, Border, Font, Side
 from openpyxl.utils import get_column_letter
 
 # Import your custom scraper task
-from scraper import scrape_portal_data
+from scraper import scrape_portal_reports
+from hotspot_analysis import write_hotspot_review_report
+from simple_activity_analysis import write_simple_activity_review_report
 
 # ==========================================
 # 1. CONFIGURATION & FOLDER PATHS
@@ -72,6 +74,12 @@ OFFICERS_LIST_FILE = _resolve_project_path(
 POCKETBASE_DB_PATH = _resolve_project_path(
     os.getenv("POCKETBASE_DB_PATH", "../antidengue-pocketbase/pb_data/data.db")
 )
+RUNTIME_SNAPSHOT_PATH = (
+    _resolve_project_path(os.environ["ANTIDENGUE_RUNTIME_SNAPSHOT"])
+    if os.getenv("ANTIDENGUE_RUNTIME_SNAPSHOT")
+    else None
+)
+RUNTIME_SNAPSHOT_SCHEMA_VERSION = 1
 REPORT_SOURCE = os.getenv("REPORT_SOURCE", "unfiltered").strip().lower()
 NATS_URL = os.getenv("NATS_URL", "nats://localhost:4222")
 NATS_SUBJECT = os.getenv("NATS_SUBJECT", "whatsapp.pending")
@@ -169,6 +177,35 @@ WHATSAPP_DELIVERY_TIMEOUT_SECONDS = float(
     os.getenv("WA_DELIVERY_TIMEOUT_SECONDS", "900")
 )
 POCKETBASE_ENABLED = _parse_bool(os.getenv("POCKETBASE_ENABLED"), True)
+
+
+def _read_runtime_snapshot() -> dict | None:
+    if RUNTIME_SNAPSHOT_PATH is None:
+        return None
+    try:
+        snapshot = json.loads(RUNTIME_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"Cannot read AntiDengue runtime snapshot: {RUNTIME_SNAPSHOT_PATH}"
+        ) from exc
+    if snapshot.get("schema_version") != RUNTIME_SNAPSHOT_SCHEMA_VERSION:
+        raise RuntimeError(
+            "Unsupported AntiDengue runtime snapshot schema: "
+            f"{snapshot.get('schema_version')!r}"
+        )
+    if snapshot.get("source") != "automation-platform-postgresql":
+        raise RuntimeError("AntiDengue runtime snapshot has an untrusted data source.")
+    return snapshot
+
+
+def _runtime_snapshot_dataframe(key: str, columns: list[str] | None = None) -> pd.DataFrame | None:
+    snapshot = _read_runtime_snapshot()
+    if snapshot is None:
+        return None
+    rows = snapshot.get(key)
+    if not isinstance(rows, list):
+        raise RuntimeError(f"Runtime snapshot field {key!r} must be a list.")
+    return pd.DataFrame(rows, columns=columns)
 
 
 def _parse_delay_ms(value) -> int | None:
@@ -714,20 +751,19 @@ def _read_master_dataframe_from_file() -> pd.DataFrame:
 
 def _read_master_dataframe() -> pd.DataFrame:
     logger = _get_logger()
-    if POCKETBASE_ENABLED:
-        try:
-            master_df = _read_master_dataframe_from_pocketbase()
-            logger.info(
-                "Loaded master school list from PocketBase: "
-                f"{len(master_df)} schools."
+    snapshot_df = _runtime_snapshot_dataframe("master_schools")
+    if snapshot_df is not None:
+        missing = set(MASTER_REPORT_COLUMNS).difference(snapshot_df.columns)
+        if missing:
+            raise RuntimeError(
+                "Runtime snapshot master data is missing columns: "
+                + ", ".join(sorted(missing))
             )
-            return master_df
-        except Exception as exc:
-            logger.warning(
-                "Could not load master school list from PocketBase; falling back to "
-                f"{MASTER_FILE.name}. Error: {exc}"
-            )
-
+        logger.info(
+            "Loaded master school list from platform PostgreSQL snapshot: "
+            f"{len(snapshot_df)} schools."
+        )
+        return snapshot_df[MASTER_REPORT_COLUMNS].copy()
     return _read_master_dataframe_from_file()
 
 
@@ -771,7 +807,8 @@ def _read_officers_dataframe_from_csv() -> pd.DataFrame:
 
 
 def _validate_runtime_config() -> None:
-    fallback_files_required = not (POCKETBASE_ENABLED and POCKETBASE_DB_PATH.exists())
+    snapshot = _read_runtime_snapshot()
+    fallback_files_required = snapshot is None
     missing_files = []
     if fallback_files_required:
         missing_files = [
@@ -844,6 +881,19 @@ def _read_dispatch_settings_from_pocketbase() -> dict[str, bool]:
             "Could not read dispatch settings from PocketBase; using safe defaults. "
             f"Error: {exc}"
         )
+    return settings
+
+
+def _read_dispatch_settings() -> dict[str, bool]:
+    settings = _default_dispatch_settings()
+    snapshot = _read_runtime_snapshot()
+    if snapshot is None:
+        return settings
+    configured = snapshot.get("dispatch_settings") or {}
+    if not isinstance(configured, dict):
+        raise RuntimeError("Runtime snapshot dispatch_settings must be an object.")
+    for key, default in settings.items():
+        settings[key] = _parse_bool(configured.get(key), default)
     return settings
 
 
@@ -941,6 +991,24 @@ def _pocketbase_has_group_routes_table() -> bool:
         return False
 
 
+def _runtime_has_group_routes() -> bool:
+    snapshot = _read_runtime_snapshot()
+    return snapshot is not None and isinstance(snapshot.get("group_routes"), list)
+
+
+def _read_group_routes_dataframe(purpose: str) -> pd.DataFrame:
+    routes = _runtime_snapshot_dataframe("group_routes")
+    if routes is None:
+        return pd.DataFrame()
+    if routes.empty:
+        return routes
+    fallback = (
+        routes.get("route_kind", pd.Series("", index=routes.index)).eq("fallback")
+        | routes.get("message_mode", pd.Series("", index=routes.index)).eq("failed_fallback")
+    )
+    return routes[fallback if purpose.strip().lower() == "fallback" else ~fallback].copy()
+
+
 def _read_recipients_dataframe_from_pocketbase(purpose: str = "normal") -> pd.DataFrame:
     columns = [
         "enabled",
@@ -992,19 +1060,13 @@ def _read_recipients_dataframe_from_pocketbase(purpose: str = "normal") -> pd.Da
 
 def _read_recipients_dataframe(purpose: str = "normal") -> pd.DataFrame:
     logger = _get_logger()
-    if POCKETBASE_ENABLED:
-        try:
-            recipients_df = _read_recipients_dataframe_from_pocketbase(purpose)
-            logger.info(
-                "Loaded fixed WhatsApp recipients from PocketBase: "
-                f"{len(recipients_df)} recipient(s) for {purpose} dispatch."
-            )
-        except Exception as exc:
-            logger.warning(
-                "Could not load fixed WhatsApp recipients from PocketBase; "
-                f"falling back to {WHATSAPP_RECIPIENTS_FILE.name}. Error: {exc}"
-            )
-            recipients_df = _read_table_dataframe(WHATSAPP_RECIPIENTS_FILE)
+    routes_df = _runtime_snapshot_dataframe("group_routes")
+    if routes_df is not None:
+        recipients_df = routes_df
+        logger.info(
+            "Loaded WhatsApp routes from platform PostgreSQL snapshot: "
+            f"{len(recipients_df)} target(s)."
+        )
     else:
         recipients_df = _read_table_dataframe(WHATSAPP_RECIPIENTS_FILE)
 
@@ -1187,20 +1249,15 @@ def build_fixed_whatsapp_payloads(
 
 def _read_officers_dataframe() -> pd.DataFrame:
     logger = _get_logger()
-    if POCKETBASE_ENABLED:
-        try:
-            officers_df = _read_officers_dataframe_from_pocketbase()
-            logger.info(
-                "Loaded officer mapping from PocketBase: "
-                f"{len(officers_df)} schools."
-            )
-            return officers_df
-        except Exception as exc:
-            logger.warning(
-                "Could not load officer mapping from PocketBase; falling back to "
-                f"{OFFICERS_LIST_FILE.name}. Error: {exc}"
-            )
-
+    officers_df = _runtime_snapshot_dataframe("officer_mappings")
+    if officers_df is not None:
+        officers_df["emis_normalized"] = officers_df["emis"].map(_normalize_emis)
+        officers_df["school_name_normalized"] = officers_df["school_name"].astype(str).str.strip()
+        logger.info(
+            "Loaded officer mapping from platform PostgreSQL snapshot: "
+            f"{len(officers_df)} schools."
+        )
+        return officers_df
     return _read_officers_dataframe_from_csv()
 
 
@@ -1667,7 +1724,7 @@ def build_group_route_payloads(
     *,
     purpose: str = "normal",
 ) -> list[dict]:
-    if not _pocketbase_has_group_routes_table():
+    if not _runtime_has_group_routes():
         return build_fixed_whatsapp_payloads(
             excel_path,
             image_path,
@@ -1675,7 +1732,7 @@ def build_group_route_payloads(
             purpose=purpose,
         )
 
-    routes_df = _read_group_routes_dataframe_from_pocketbase(purpose)
+    routes_df = _read_group_routes_dataframe(purpose)
     if routes_df.empty:
         return []
 
@@ -2963,7 +3020,7 @@ def send_whatsapp_alert(
     dry_run: bool = False,
 ):
     logger = _get_logger()
-    dispatch_settings = _read_dispatch_settings_from_pocketbase()
+    dispatch_settings = _read_dispatch_settings()
     automation_blocked = bool(
         dispatch_settings.get("manual_only")
         or dispatch_settings.get("require_preview")
@@ -3639,6 +3696,7 @@ def _build_run_summary(
                 "portal_duplicate_raw_check"
             ),
         },
+        "portal_acquisition": extraction_diagnostics.get("portal_acquisition"),
         "filter": {
             "strategy": extraction_diagnostics.get("filter_strategy"),
             "applied": extraction_diagnostics.get("filter_applied"),
@@ -4258,7 +4316,32 @@ def _save_run_summary(
     logger=None,
 ) -> None:
     _write_json_file(summary_path, summary)
-    _persist_run_summary_to_pocketbase(summary, dormant_df, logger)
+
+
+def _previous_portal_run_from_runtime_snapshot(
+    raw_sha256: str,
+    current_started_at: str,
+) -> dict | None:
+    if not raw_sha256:
+        return None
+    snapshot = _read_runtime_snapshot()
+    if snapshot is None:
+        return None
+    runs = snapshot.get("previous_portal_runs") or []
+    if not isinstance(runs, list):
+        raise RuntimeError("Runtime snapshot previous_portal_runs must be a list.")
+    matches = [
+        row
+        for row in runs
+        if isinstance(row, dict)
+        and str(row.get("raw_file_sha256") or "") == raw_sha256
+        and str(row.get("started_at") or "") < current_started_at
+    ]
+    return sorted(
+        matches,
+        key=lambda row: str(row.get("started_at") or ""),
+        reverse=True,
+    )[0] if matches else None
 
 
 def _previous_portal_run_from_pocketbase(
@@ -4357,7 +4440,7 @@ def _detect_duplicate_portal_export(
     if input_source != "portal" or not raw_sha256:
         return result
 
-    previous = _previous_portal_run_from_pocketbase(raw_sha256, current_started_at)
+    previous = _previous_portal_run_from_runtime_snapshot(raw_sha256, current_started_at)
     previous = previous or _previous_portal_run_from_local_summaries(
         raw_sha256,
         current_started_at,
@@ -4394,6 +4477,7 @@ def _process_raw_report_file(
     dry_run: bool = False,
     *,
     input_source: str = "portal",
+    portal_acquisition: dict | None = None,
 ) -> dict:
     # Step 1: Extract & Transform
     raw_df, filtered_user_df, extraction_diagnostics = (
@@ -4404,7 +4488,35 @@ def _process_raw_report_file(
     # Step 2: Setup dynamic Output Folders & Filenames
     current_time_obj = datetime.datetime.now()
     extraction_diagnostics["input_source"] = input_source
+    extraction_diagnostics["portal_acquisition"] = portal_acquisition
     run_output_dir, run_unmapped_report_dir = _create_run_directories(current_time_obj)
+    if portal_acquisition:
+        for capture in portal_acquisition.get("reports") or []:
+            if capture.get("status") != "completed":
+                continue
+            source_path = Path(str(capture.get("path") or ""))
+            if not source_path.is_file():
+                continue
+            report_key = str(capture.get("report_key") or "")
+            if report_key == "hotspot_distance":
+                label = "Hotspot Distance Review"
+                writer = write_hotspot_review_report
+            elif report_key == "simple_activity_list":
+                label = "Simple Activity Timing Review"
+                writer = write_simple_activity_review_report
+            else:
+                continue
+            review_path = run_output_dir / f"{label} - {current_time_obj.strftime('%d-%m-%Y - %I-%M %p')}.xlsx"
+            review = writer(source_path, review_path)
+            capture["review_report"] = review
+            analysis = capture.setdefault("analysis", {})
+            analysis["review_candidate_count"] = review["candidate_count"]
+            analysis["review_report_path"] = review["path"]
+            analysis["review_selection_mode"] = review["selection_mode"]
+            logger.info(
+                f"Generated {label} report with "
+                f"{review['candidate_count']} classified activity row(s)."
+            )
     lifecycle_events: list[dict] = []
     _append_lifecycle_event(
         lifecycle_events,
@@ -4467,12 +4579,16 @@ def _process_raw_report_file(
     # Step 3: Check if zero schools left (Graceful exit)
     if len(clean_df) == 0:
         logger.info("TARGET REACHED: ZERO INACTIVE SCHOOLS LEFT! Stopping this file.")
+        # Preserve an explicit, schema-valid empty canonical workbook. Native
+        # preview renderers must never infer dormant schools from another
+        # report category merely because it also contains School EMIS fields.
+        load_excel_report(clean_df, excel_path, title_text)
         _append_lifecycle_event(
             lifecycle_events,
             "validated",
             "ok",
             "No dormant schools found after filtering.",
-            {"dormant_rows": 0},
+            {"dormant_rows": 0, "excel_report": str(excel_path)},
         )
         _append_lifecycle_event(
             lifecycle_events,
@@ -4509,7 +4625,7 @@ def _process_raw_report_file(
             file_path=file_path,
             run_output_dir=run_output_dir,
             run_unmapped_report_dir=run_unmapped_report_dir,
-            excel_path=None,
+            excel_path=excel_path,
             mapping_audit_path=None,
             officer_delivery_audit_path=None,
             activity_evidence_path=None,
@@ -4556,7 +4672,7 @@ def _process_raw_report_file(
             logger.error(f"Screenshot failed, but pipeline will continue. Error: {e}")
 
     # Step 5: Validate before sending
-    dispatch_settings = _read_dispatch_settings_from_pocketbase()
+    dispatch_settings = _read_dispatch_settings()
     enforce_officer_delivery_quality = _should_enforce_officer_delivery_quality(
         dry_run=dry_run,
         dispatch_settings=dispatch_settings,
@@ -4905,8 +5021,13 @@ def process_file_flow(dry_run: bool = False):
     logger.info(f"Starting Hourly Pipeline... dry_run={dry_run}")
 
     # Step 1: Scrape the data
-    file_path = scrape_portal_data(logger=logger)
-    summary = _process_raw_report_file(file_path, logger, dry_run=dry_run)
+    portal_bundle = scrape_portal_reports(logger=logger)
+    summary = _process_raw_report_file(
+        portal_bundle.primary_path,
+        logger,
+        dry_run=dry_run,
+        portal_acquisition=portal_bundle.as_dict(),
+    )
     _raise_if_summary_not_completed(summary, logger)
     logger.info("Pipeline completed successfully.")
 

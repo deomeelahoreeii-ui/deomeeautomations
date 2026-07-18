@@ -65,6 +65,16 @@ DEFAULT_REPORT_TYPES = {
         ("school_activity", "School activity report", "School-level activity evidence."),
         ("officer_summary", "Officer summary", "Officer coverage and follow-up summary."),
         ("wing_summary", "Wing summary", "Consolidated report for a wing audience."),
+        (
+            "hotspot_distance_activity",
+            "Hotspot distance review",
+            "Activities selected by published distance and submission-time review rules.",
+        ),
+        (
+            "simple_activity_timing",
+            "Simple activity timing review",
+            "Before/after activity pairs below the published minimum time interval.",
+        ),
     ],
     "crm": [
         ("filtered_workbook", "Filtered workbook", "CRM workbook filtered for an audience."),
@@ -136,6 +146,17 @@ def ensure_defaults(session: Session) -> tuple[WhatsAppAccount, WhatsAppSettings
             session.add(application)
             session.flush()
         applications[key] = application
+    # Configuration endpoints are commonly loaded in parallel by the UI. Lock
+    # the stable application rows before seeding child report types/scopes so
+    # two requests cannot both observe a missing default and race the unique
+    # (application_id, key) constraint.
+    session.flush()
+    for application in sorted(applications.values(), key=lambda item: str(item.id)):
+        session.execute(
+            select(WhatsAppApplication.id)
+            .where(WhatsAppApplication.id == application.id)
+            .with_for_update()
+        )
     for application_key, definitions in DEFAULT_REPORT_TYPES.items():
         application = applications[application_key]
         for key, name, description in definitions:

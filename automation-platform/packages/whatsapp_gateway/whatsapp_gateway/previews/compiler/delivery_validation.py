@@ -17,7 +17,9 @@ from whatsapp_gateway.previews.compiler.messages import PLACEHOLDER_RE, _render_
 
 def validate_source_status(state: DeliveryState) -> None:
     if state.source_skipped:
-        state.problems.append(issue("source_route_skipped", "warning",
+        state.problems.append(issue(
+            str(state.plan.get("skip_issue_code") or "source_route_skipped"),
+            str(state.plan.get("skip_issue_severity") or "warning"),
             str(state.plan.get("cause") or "The source dry run intentionally skipped this route.")))
     elif state.source_status not in {"planned", "queued", "ready"}:
         state.problems.append(issue("source_route_not_planned", "blocked",
@@ -116,6 +118,8 @@ def validate_attachments(ctx: CompileContext, state: DeliveryState, store: Artif
     if state.plan.get("native_renderer"):
         policy = normalize_presentation_policy(ctx.profile.presentation_policy, report_key=ctx.report_type.key)
         attachment_required = policy["attachment_mode"] != "none"
+    if state.plan.get("message_only"):
+        attachment_required = False
     if not state.source_skipped and not state.attachment_paths and attachment_required:
         state.problems.append(issue("missing_report_attachment", "blocked",
             f"{ctx.report_type.name} requires a delivery attachment, but the source route has none."))
@@ -128,13 +132,14 @@ def render_delivery_message(ctx: CompileContext, state: DeliveryState) -> None:
         "row_count": str(state.dispatch_route.get("row_count") or state.plan.get("row_count") or ""),
         **{str(key): str(value) for key, value in state.native_context.items()},
     }
-    template_for_render = ctx.template
+    template_for_render = None if state.plan.get("message_template_final") else ctx.template
     if state.plan.get("native_renderer"):
         variables = set(PLACEHOLDER_RE.findall(ctx.template.body)) if ctx.template else set()
-        if ctx.template and not variables.intersection({"message", "report_body"}):
+        supported_native_variables = {"message", "report_body", *state.native_context.keys()}
+        if ctx.template and not variables.intersection(supported_native_variables):
             template_for_render = None
             state.problems.append(issue("static_template_ignored", "warning",
-                "The selected static template cannot include the native report body; add {{report_body}} to customize this message."))
+                "The selected template does not include any native report variable; add {{report_body}} or a supported report block."))
     state.message, template_issues = _render_message(template_for_render, state.legacy_message, context)
     if not state.source_skipped:
         state.problems.extend(template_issues)

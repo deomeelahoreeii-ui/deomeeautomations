@@ -25,6 +25,9 @@ def artifact_kind(path: Path, *, output_dir: Path) -> str:
     normalized_path = relative_path.as_posix().lower()
     filename = path.name.lower()
 
+    if output_dir.name == "drop-raw-files":
+        return "raw"
+
     if "group-route-excels/" in normalized_path:
         return "dispatch_draft"
     if filename == "run_summary.json":
@@ -48,6 +51,7 @@ def discover_artifacts(
     output_dir: Path,
     *,
     modified_after: float,
+    module_key: str = "legacy",
 ) -> int:
     if not output_dir.exists():
         return 0
@@ -64,6 +68,7 @@ def discover_artifacts(
                 path.resolve(),
                 kind=artifact_kind(path, output_dir=output_dir),
                 name=str(path.relative_to(output_dir)),
+                module_key=module_key,
             )
             count += 1
     return count
@@ -77,6 +82,7 @@ def run_streamed_command(
     output_dir: Path,
     additional_output_dirs: tuple[Path, ...] = (),
     env: dict[str, str] | None = None,
+    module_key: str = "legacy",
 ) -> CommandRunResult:
     started_mtime = time.time()
     merged_env = os.environ.copy()
@@ -103,11 +109,13 @@ def run_streamed_command(
         job_id,
         output_dir,
         modified_after=started_mtime,
+        module_key=module_key,
     )
     for extra_output_dir in additional_output_dirs:
         artifact_count += discover_artifacts(
             job_id,
             extra_output_dir,
             modified_after=started_mtime,
+            module_key=module_key,
         )
     return CommandRunResult(return_code=return_code, artifact_count=artifact_count)

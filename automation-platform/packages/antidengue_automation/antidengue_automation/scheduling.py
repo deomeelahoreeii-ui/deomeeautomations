@@ -19,6 +19,8 @@ from antidengue_automation.models import (
     AntiDengueScheduleEvent,
     AntiDengueScheduleExecution,
 )
+from antidengue_automation.hotspot_routing import expand_hotspot_profile_ids
+from antidengue_automation.simple_activity_routing import expand_simple_activity_profile_ids
 from automation_core.job_service import (
     add_job,
     add_job_log,
@@ -26,6 +28,7 @@ from automation_core.job_service import (
     get_active_job,
     get_job,
 )
+from automation_core.config import get_settings
 from automation_core.models import Job, JobLog, JobStatus, JobType
 from automation_core.task_outbox import cancel_outbox_for_job, requeue_job_task, stage_task
 from automation_core.time import utcnow
@@ -246,6 +249,49 @@ def append_execution_event(
     return item
 
 
+def has_execution_event(
+    session: Session,
+    execution: AntiDengueScheduleExecution | uuid.UUID,
+    event_type: str,
+) -> bool:
+    """Return whether a durable execution milestone has already been emitted."""
+    execution_id = execution.id if isinstance(execution, AntiDengueScheduleExecution) else execution
+    return session.exec(
+        select(AntiDengueScheduleEvent.id).where(
+            AntiDengueScheduleEvent.execution_id == execution_id,
+            AntiDengueScheduleEvent.event_type == event_type,
+        ).limit(1)
+    ).first() is not None
+
+
+def append_milestone_once(
+    session: Session,
+    execution: AntiDengueScheduleExecution,
+    event_type: str,
+    message: str,
+    *,
+    details: dict | None = None,
+) -> AntiDengueScheduleEvent | None:
+    """Persist a user-facing notification milestone at most once per execution."""
+    if has_execution_event(session, execution, event_type):
+        return None
+    settings = get_settings()
+    ntfy_pending = settings.antidengue_ntfy_enabled and bool(settings.antidengue_ntfy_topic.strip())
+    return append_execution_event(
+        session,
+        execution,
+        event_type,
+        message,
+        details={
+            "notification": True,
+            "execution_code": execution.execution_code,
+            "trigger_type": execution.trigger_type,
+            **({"ntfy_delivery": {"status": "pending", "attempts": 0}} if ntfy_pending else {}),
+            **(details or {}),
+        },
+    )
+
+
 def create_execution(
     session: Session,
     *,
@@ -260,6 +306,8 @@ def create_execution(
     idempotency_key: str | None = None,
 ) -> AntiDengueScheduleExecution:
     profile_ids = normalize_dispatch_profile_ids(dispatch_profile_ids, dispatch_profile_id)
+    profile_ids = expand_hotspot_profile_ids(session, profile_ids)
+    profile_ids = expand_simple_activity_profile_ids(session, profile_ids)
     validate_dispatch_profiles(session, profile_ids)
     dispatch_profile_id = profile_ids[0]
     if dispatch_policy not in {"preview_only", "auto_send_when_clean"}:
@@ -444,6 +492,8 @@ def _queue_source_job(session: Session, execution: AntiDengueScheduleExecution) 
             "orchestration_execution_id": str(execution.id),
             "trigger_type": execution.trigger_type,
             "dispatch_policy": execution.dispatch_policy,
+            "report_cutoff": execution.scheduled_for.isoformat(),
+            "portal_reports": "dormant_users,hotspot_distance,simple_activity_list",
         },
     )
     execution.source_job_id = job.id
@@ -535,6 +585,17 @@ def _auto_approve(session: Session, execution: AntiDengueScheduleExecution, prev
             error=f"The exact send plan contains {preview.warning_count} warning(s).",
             message="Automatic sending requires a warning-free preview. Review it manually instead.",
             level="warning",
+        )
+        return
+    if preview.ready_count <= 0 and preview.skipped_count > 0:
+        mark_execution_terminal(
+            session,
+            execution,
+            "completed",
+            message=(
+                "Nothing new to send: "
+                f"{preview.skipped_count} once-daily acknowledgement(s) were already sent today."
+            ),
         )
         return
     if preview.delivery_count <= 0 or preview.ready_count <= 0:
@@ -660,6 +721,18 @@ def advance_execution(session: Session, execution: AntiDengueScheduleExecution) 
     execution.source_summary = dict(source_job.result or {})
 
     if execution.preview_job_id is None:
+        summary = execution.source_summary.get("summary") or {}
+        append_milestone_once(
+            session,
+            execution,
+            "antidengue.report.downloaded",
+            "AntiDengue portal report downloaded and validated.",
+            details={
+                "input_source": execution.source_summary.get("input_source", "portal"),
+                "artifact_count": execution.source_summary.get("artifact_count", 0),
+                "run_id": summary.get("run_id"),
+            },
+        )
         return _queue_preview_job(session, execution)
     preview_job = get_job(session, execution.preview_job_id)
     if preview_job is None:
@@ -802,6 +875,14 @@ def advance_execution(session: Session, execution: AntiDengueScheduleExecution) 
         ),
         level="warning" if failed_count else "info",
     )
+    if not failed_count:
+        append_milestone_once(
+            session,
+            execution,
+            "antidengue.messages.sent",
+            f"WhatsApp dispatch completed: {delivered_count} message(s) sent.",
+            details={"delivered_count": delivered_count},
+        )
     return True
 
 def advance_pending_executions(session: Session, limit: int = 25) -> int:

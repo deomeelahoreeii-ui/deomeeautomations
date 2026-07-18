@@ -16,6 +16,12 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
     Routing profiles are reusable configuration, not send commands. Every run freezes the selected versions and validates every target before delivery.
   </div>
 
+  <nav class="routing-category-tabs" aria-label="Routing profile category" style="display:flex;gap:.6rem;margin:1rem 0">
+    <button class="btn btn-sm routing-category-tab" data-category="dormant" type="button">Dormant users <span class="badge" id="dormant-tab-count">—</span></button>
+    <button class="btn btn-sm routing-category-tab" data-category="hotspot" type="button">Hotspot distance <span class="badge" id="hotspot-tab-count">—</span></button>
+    <button class="btn btn-sm routing-category-tab" data-category="simple" type="button">Simple activity timing <span class="badge" id="simple-tab-count">—</span></button>
+  </nav>
+
   <section class="routing-metrics" aria-label="AntiDengue routing summary">
     <article><span>Enabled profiles</span><strong id="enabled-count">—</strong><small id="profile-count">Loading configuration…</small></article>
     <article><span>Routed recipients</span><strong id="target-count">—</strong><small>Across enabled profiles</small></article>
@@ -24,7 +30,7 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
 
   <section class="panel routing-workspace-panel">
     <div class="panel-heading routing-workspace-heading">
-      <div><p class="eyebrow">Module-owned configuration</p><h2>Reporting routes</h2></div>
+      <div><p class="eyebrow" id="routing-view-eyebrow">Dormant user reporting</p><h2 id="routing-view-title">Dormant user profiles</h2><p id="routing-view-description">Profiles that route dormant-user summaries and acknowledgements.</p></div>
       <div class="routing-toolbar">
         <input class="input input-bordered input-sm" id="route-search" type="search" placeholder="Search report, wing or audience…" />
         <select class="select select-bordered select-sm" id="route-status"><option value="enabled">Enabled</option><option value="all">All profiles</option><option value="archived">Archived</option></select>
@@ -79,6 +85,8 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
     let profiles: any[] = [];
     let previewProfiles: any[] = [];
     let application: any = null;
+    const requestedCategory = new URLSearchParams(window.location.search).get("view");
+    let activeCategory = requestedCategory === "hotspot" || requestedCategory === "simple" ? requestedCategory : "dormant";
 
     async function api(path: string, init?: RequestInit) {
       const response = await fetch(`${API}${path}`, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers || {}) } });
@@ -99,14 +107,50 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       return Number(previewProfiles.find((item) => item.id === profile.id)?.target_count || 0);
     }
 
+    function profileCategory(profile: any) {
+      const reportType = moduleItems("report_types").find((item: any) => item.id === profile.report_type_id);
+      if (reportType?.key === "hotspot_distance_activity") return "hotspot";
+      if (reportType?.key === "simple_activity_timing") return "simple";
+      return "dormant";
+    }
+
+    function categoryProfiles() {
+      return profiles.filter((profile) => profileCategory(profile) === activeCategory);
+    }
+
+    function updateCategoryNavigation() {
+      const dormant = profiles.filter((profile) => profileCategory(profile) === "dormant");
+      const hotspot = profiles.filter((profile) => profileCategory(profile) === "hotspot");
+      const simple = profiles.filter((profile) => profileCategory(profile) === "simple");
+      el("dormant-tab-count").textContent = String(dormant.length);
+      el("hotspot-tab-count").textContent = String(hotspot.length);
+      el("simple-tab-count").textContent = String(simple.length);
+      document.querySelectorAll<HTMLButtonElement>(".routing-category-tab").forEach((button) => {
+        const selected = button.dataset.category === activeCategory;
+        button.classList.toggle("btn-primary", selected);
+        button.classList.toggle("btn-ghost", !selected);
+        button.setAttribute("aria-current", selected ? "page" : "false");
+      });
+      const isHotspot = activeCategory === "hotspot";
+      const isSimple = activeCategory === "simple";
+      el("routing-view-eyebrow").textContent = isSimple ? "Before/after timing routing" : isHotspot ? "Activity review routing" : "Dormant user reporting";
+      el("routing-view-title").textContent = isSimple ? "Simple Activity timing profiles" : isHotspot ? "Hotspot distance routing profiles" : "Dormant user routing profiles";
+      el("routing-view-description").textContent = isSimple ? "Profiles that route activities below the published minimum before/after interval." : isHotspot ? "Profiles that route classified hotspot-distance activity evidence to authorized groups." : "Profiles that route dormant-user summaries and zero-result acknowledgements.";
+      el<HTMLInputElement>("route-search").placeholder = isSimple ? "Search timing profile, wing or audience…" : isHotspot ? "Search hotspot profile, wing or audience…" : "Search dormant profile, wing or audience…";
+      const scoped = categoryProfiles();
+      const enabled = scoped.filter((item) => item.enabled);
+      el("enabled-count").textContent = String(enabled.length);
+      el("profile-count").textContent = `${scoped.length} ${activeCategory === "simple" ? "timing" : activeCategory} profile${scoped.length === 1 ? "" : "s"}`;
+      el("target-count").textContent = String(enabled.reduce((total, item) => total + targetCount(item), 0));
+    }
+
     function populateFormOptions() {
       el<HTMLSelectElement>("route-report").innerHTML = optionHtml(moduleItems("report_types"), (item) => item.name);
       el<HTMLSelectElement>("route-audience").innerHTML = optionHtml(moduleItems("audiences"), (item) => item.name);
       el<HTMLSelectElement>("route-wing").innerHTML = optionHtml(options.wings || [], (item) => item.name);
       el<HTMLSelectElement>("route-account").innerHTML = optionHtml(options.accounts || [], (item) => `${item.name} · ${item.connected ? "connected" : item.status}`);
-      const templates = (options.templates || []).filter((item: any) => !item.application_id || item.application_id === application?.id);
-      el<HTMLSelectElement>("route-template").innerHTML = `<option value="">No template</option>${optionHtml(templates, (item) => item.name)}`;
       populateScopes();
+      populateTemplates();
     }
 
     function populateScopes(selected = "") {
@@ -114,6 +158,31 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       const scopes = moduleItems("recipient_scopes").filter((item: any) => item.channel === channel);
       el<HTMLSelectElement>("route-scope").innerHTML = optionHtml(scopes, (item) => item.name);
       setValue("route-scope", selected || scopes[0]?.id || "");
+      populateTemplates();
+    }
+
+    function populateTemplates(selected = "") {
+      const reportTypeId = value("route-report");
+      const channel = value("route-channel");
+      const scopeId = value("route-scope");
+      const templates = (options.templates || []).filter((item: any) =>
+        (!item.application_id || item.application_id === application?.id) &&
+        item.report_type_id === reportTypeId &&
+        (item.recipient_channel === "any" || item.recipient_channel === channel) &&
+        (!item.recipient_scope_id || item.recipient_scope_id === scopeId)
+      );
+      el<HTMLSelectElement>("route-template").innerHTML = `<option value="">No template</option>${optionHtml(templates, (item) => item.name)}`;
+      setValue("route-template", selected && templates.some((item: any) => item.id === selected) ? selected : "");
+    }
+
+    function defaultReportId() {
+      const reportTypes = moduleItems("report_types");
+      if (activeCategory === "hotspot") {
+        return reportTypes.find((item: any) => item.key === "hotspot_distance_activity")?.id || "";
+      }
+      if (activeCategory === "simple") return reportTypes.find((item: any) => item.key === "simple_activity_timing")?.id || "";
+      return reportTypes.find((item: any) => item.key === "tehsil_dormant_summary")?.id
+        || reportTypes.find((item: any) => !["hotspot_distance_activity", "simple_activity_timing"].includes(item.key))?.id || "";
     }
 
     function openEditor(profile?: any) {
@@ -122,13 +191,13 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       setValue("route-id", profile?.id || "");
       setValue("route-name", profile?.name || "");
       setValue("route-key", profile?.key || "");
-      setValue("route-report", profile?.report_type_id || moduleItems("report_types")[0]?.id || "");
+      setValue("route-report", profile?.report_type_id || defaultReportId());
       setValue("route-audience", profile?.audience_id || moduleItems("audiences")[0]?.id || "");
       setValue("route-wing", profile?.wing_id || options.wings?.[0]?.id || "");
       setValue("route-channel", profile?.recipient_channel || "group");
       populateScopes(profile?.recipient_scope_id || "");
       setValue("route-account", profile?.account_id || options.accounts?.[0]?.id || "");
-      setValue("route-template", profile?.template_id || "");
+      populateTemplates(profile?.template_id || "");
       setValue("route-message-style", profile?.presentation_policy?.message_style || "summary");
       setValue("route-attachments", profile?.presentation_policy?.attachment_mode || "image_excel");
       setValue("route-image-content", profile?.presentation_policy?.image_content || "details");
@@ -164,7 +233,7 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
     function renderProfiles() {
       const search = value("route-search").toLowerCase();
       const status = value("route-status");
-      const visible = profiles.filter((profile) => {
+      const visible = categoryProfiles().filter((profile) => {
         if (status === "enabled" && !profile.enabled) return false;
         if (status === "archived" && profile.enabled) return false;
         return `${profile.name} ${profile.report_type_name} ${profile.audience_name} ${profile.wing_name || ""}`.toLowerCase().includes(search);
@@ -211,10 +280,7 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
         options = configuration; application = options.applications.find((item: any) => item.key === "antidengue");
         profiles = profileData.items.filter((item: any) => item.application_key === "antidengue");
         previewProfiles = previewData.profiles.filter((item: any) => item.application_key === "antidengue");
-        populateFormOptions(); renderProfiles();
-        const enabled = profiles.filter((item) => item.enabled);
-        el("enabled-count").textContent = String(enabled.length); el("profile-count").textContent = `${profiles.length} total profile${profiles.length === 1 ? "" : "s"}`;
-        el("target-count").textContent = String(enabled.reduce((total, item) => total + targetCount(item), 0));
+        populateFormOptions(); updateCategoryNavigation(); renderProfiles();
         const account = options.accounts?.[0]; el("connection-state").textContent = account?.connected ? "Ready" : "Attention"; el("connection-name").textContent = account?.name || "No enabled connection";
       } catch (error) { el("routing-message").textContent = error instanceof Error ? error.message : "Could not load routing configuration"; }
     }
@@ -237,9 +303,16 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
     el("route-name").addEventListener("input", () => { if (!value("route-id") && !el<HTMLInputElement>("route-key").dataset.edited) setValue("route-key", slug(value("route-name"))); });
     el("route-key").addEventListener("input", () => { el<HTMLInputElement>("route-key").dataset.edited = "true"; });
     el("route-channel").addEventListener("change", () => populateScopes());
+    el("route-report").addEventListener("change", () => populateTemplates());
+    el("route-scope").addEventListener("change", () => populateTemplates());
     el("add-route").addEventListener("click", () => { delete el<HTMLInputElement>("route-key").dataset.edited; openEditor(); });
     el("close-route").addEventListener("click", () => dialog.close()); el("cancel-route").addEventListener("click", () => dialog.close());
     el("route-search").addEventListener("input", renderProfiles); el("route-status").addEventListener("change", renderProfiles); el("refresh-routing").addEventListener("click", () => void loadRouting());
+    document.querySelectorAll<HTMLButtonElement>(".routing-category-tab").forEach((button) => button.addEventListener("click", () => {
+      activeCategory = button.dataset.category === "hotspot" || button.dataset.category === "simple" ? button.dataset.category : "dormant";
+      const url = new URL(window.location.href); url.searchParams.set("view", activeCategory); window.history.replaceState({}, "", url);
+      updateCategoryNavigation(); renderProfiles();
+    }));
     void loadRouting();
   </script>
 </AntiDengueLayout>

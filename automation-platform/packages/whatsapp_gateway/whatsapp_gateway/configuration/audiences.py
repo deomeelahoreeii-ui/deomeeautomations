@@ -3,9 +3,18 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from whatsapp_gateway.api_common import *
+from whatsapp_gateway.configuration.audience_routing import (
+    _authorize_directory_group,
+    _validate_group_route,
+)
+from whatsapp_gateway.configuration.deletion import _delete_audience_records
 from whatsapp_gateway.directory.master_contacts import resolved_contact_name
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp"])
+
+
+class AudienceMemberEnabledInput(BaseModel):
+    enabled: bool
 
 @router.get("/audiences")
 def audiences(
@@ -129,10 +138,7 @@ def audience_members(
     audience_item = session.get(WhatsAppAudience, audience_id)
     if audience_item is None:
         raise HTTPException(status_code=404, detail="Audience not found")
-    filters = [
-        WhatsAppAudienceMember.audience_id == audience_id,
-        WhatsAppAudienceMember.enabled.is_(True),
-    ]
+    filters = [WhatsAppAudienceMember.audience_id == audience_id]
     total = session.scalar(
         select(func.count()).select_from(WhatsAppAudienceMember).where(*filters)
     ) or 0
@@ -160,6 +166,7 @@ def audience_members(
             target_wing = session.get(Wing, configured.wing_id) if configured else None
             items.append({
                 "id": str(member.id),
+                "enabled": member.enabled,
                 "target_type": "group",
                 "target_id": str(member.directory_group_id),
                 "name": target.name if target else "Deleted group",
@@ -176,6 +183,7 @@ def audience_members(
             target = session.get(WhatsAppDirectoryContact, member.directory_contact_id)
             items.append({
                 "id": str(member.id),
+                "enabled": member.enabled,
                 "target_type": "contact",
                 "target_id": str(member.directory_contact_id),
                 "name": resolved_contact_name(session, target) or "Unnamed contact" if target else "Deleted contact",
@@ -262,7 +270,7 @@ def update_audience_member(
 ) -> dict[str, Any]:
     account, _ = ensure_defaults(session)
     item = session.get(WhatsAppAudienceMember, member_id)
-    if item is None or item.audience_id != audience_id or not item.enabled:
+    if item is None or item.audience_id != audience_id:
         raise HTTPException(status_code=404, detail="Audience target not found")
     if data.target_id != (item.directory_group_id or item.directory_contact_id):
         raise HTTPException(status_code=409, detail="Remove and re-add a target to change its identity")
@@ -294,6 +302,34 @@ def update_audience_member(
         "route_scope_label": item.route_scope_label,
         "wing_id": str(wing.id) if wing else None,
     }
+
+
+@router.patch("/audiences/{audience_id}/members/{member_id}/enabled")
+def set_audience_member_enabled(
+    audience_id: uuid.UUID,
+    member_id: uuid.UUID,
+    data: AudienceMemberEnabledInput,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    account, _ = ensure_defaults(session)
+    audience_item = session.get(WhatsAppAudience, audience_id)
+    item = session.get(WhatsAppAudienceMember, member_id)
+    if audience_item is None or item is None or item.audience_id != audience_id:
+        raise HTTPException(status_code=404, detail="Audience target not found")
+    if data.enabled and not audience_item.enabled:
+        raise HTTPException(status_code=409, detail="Enable the audience before enabling its targets")
+    changed = item.enabled != data.enabled
+    item.enabled = data.enabled
+    session.add(item)
+    if changed:
+        activity(
+            session,
+            account,
+            "audience_member_enabled" if data.enabled else "audience_member_disabled",
+            f"{'Enabled' if data.enabled else 'Disabled'} {item.target_type} target in {audience_item.name}",
+        )
+    session.commit()
+    return {"id": str(item.id), "enabled": item.enabled, "changed": changed}
 
 @router.delete("/audiences/{audience_id}/members/{member_id}")
 def remove_audience_member(

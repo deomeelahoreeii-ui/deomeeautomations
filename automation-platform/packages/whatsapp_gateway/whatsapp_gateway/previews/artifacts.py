@@ -32,6 +32,7 @@ from whatsapp_gateway.previews.schemas import (
     ContactLinkInput, PreviewApprovalInput,
 )
 from whatsapp_gateway.previews.serialization import _artifact_dict, _delivery_dict, _digits, _with_approval
+from automation_core.storage_catalog import ensure_stored_path
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp-previews"])
 
@@ -128,7 +129,19 @@ def download_preview_artifact(
     artifact = session.get(WhatsAppDispatchPreviewArtifact, artifact_id)
     if artifact is None or artifact.preview_id != preview_id:
         raise HTTPException(status_code=404, detail="Preview artifact not found")
-    path = Path(artifact.path_snapshot)
+    try:
+        path = ensure_stored_path(
+            session,
+            stored_object_id=artifact.stored_object_id,
+            local_path=Path(artifact.path_snapshot),
+            name=artifact.name,
+            expected_sha256=artifact.checksum_sha256,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"Preview artifact is unavailable: {exc}") from exc
+    artifact.path_snapshot = str(path)
+    session.add(artifact)
+    session.commit()
     preview = session.get(WhatsAppDispatchPreview, preview_id)
     from automation_core.models import Artifact
 

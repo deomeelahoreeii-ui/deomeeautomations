@@ -1,0 +1,80 @@
+---
+import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
+---
+
+<AntiDengueLayout
+  title="AntiDengue settings"
+  description="Choose how this device announces durable AntiDengue execution milestones."
+  page="settings"
+>
+  <div class="notice antidengue-safety-notice">
+    Sound preferences are saved only in this browser. They never change report generation, scheduling, validation, or WhatsApp delivery.
+  </div>
+
+  <section class="notification-settings-grid">
+    <article class="panel notification-settings-panel">
+      <div class="panel-heading"><div><p class="eyebrow">Device audio</p><h2>Run milestone sounds</h2><p>Keep an AntiDengue page open to hear browser alerts on this computer.</p></div></div>
+      <label class="notification-master-row">
+        <span><strong>Play AntiDengue sounds</strong><small>Enables the selected milestones below on this browser.</small></span>
+        <input class="toggle toggle-primary" id="sound-enabled" type="checkbox" />
+      </label>
+      <label class="notification-volume-row" for="sound-volume"><span><strong>Volume</strong><small id="volume-label">70%</small></span><input id="sound-volume" type="range" min="0" max="100" step="5" /></label>
+      <div id="milestone-settings" class="milestone-settings"></div>
+      <div class="notification-save-row"><span id="save-status" role="status">Saved on this device</span><button class="btn btn-primary" id="save-settings" type="button">Save sound settings</button></div>
+    </article>
+
+    <aside class="panel notification-help-panel">
+      <p class="eyebrow">How it works</p><h2>Durable events, optional sound</h2>
+      <ol><li>The server records each milestone once in PostgreSQL.</li><li>This browser listens for new events across test runs, run-now jobs, and schedules.</li><li>Howler plays your selected local sound after browser audio is enabled.</li></ol>
+      <div class="notification-note"><strong>Away from the laptop?</strong><p id="ntfy-status">Checking the optional ntfy phone/background channel…</p></div>
+      <p class="field-help">Browsers require a click before audio can play. Use any “Test” button once after opening a new browser profile.</p>
+    </aside>
+  </section>
+
+  <script>
+    import { loadSoundSettings, previewSound, saveSoundSettings, SOUND_OPTIONS, type Milestone, type SoundName } from "../../lib/antidengue-notifications";
+    const labels: Record<Milestone, { title: string; help: string }> = {
+      started: { title: "Run started", help: "The report worker has actually begun, not merely queued." },
+      report_downloaded: { title: "Report downloaded", help: "The source report completed successfully and passed into planning." },
+      messages_sent: { title: "Messages sent", help: "Live WhatsApp delivery completed without delivery errors." },
+    };
+    let settings = loadSoundSettings();
+    const enabled = document.getElementById("sound-enabled") as HTMLInputElement;
+    const volume = document.getElementById("sound-volume") as HTMLInputElement;
+    const volumeLabel = document.getElementById("volume-label")!;
+    const container = document.getElementById("milestone-settings")!;
+
+    function render() {
+      enabled.checked = settings.enabled;
+      volume.value = String(Math.round(settings.volume * 100));
+      volumeLabel.textContent = `${volume.value}%`;
+      container.replaceChildren();
+      for (const milestone of Object.keys(labels) as Milestone[]) {
+        const preference = settings.milestones[milestone];
+        const row = document.createElement("div"); row.className = "milestone-setting-row";
+        const copy = document.createElement("span"); copy.innerHTML = `<strong>${labels[milestone].title}</strong><small>${labels[milestone].help}</small>`;
+        const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.className = "toggle toggle-primary"; toggle.checked = preference.enabled;
+        toggle.addEventListener("change", () => preference.enabled = toggle.checked);
+        const select = document.createElement("select"); select.className = "select select-bordered";
+        for (const option of SOUND_OPTIONS) select.add(new Option(option.label, option.value, false, option.value === preference.sound));
+        select.addEventListener("change", () => preference.sound = select.value as SoundName);
+        const test = document.createElement("button"); test.type = "button"; test.className = "btn btn-sm"; test.textContent = "Test";
+        test.addEventListener("click", () => previewSound(preference.sound, Number(volume.value) / 100));
+        row.append(copy, toggle, select, test); container.append(row);
+      }
+    }
+    enabled.addEventListener("change", () => settings.enabled = enabled.checked);
+    volume.addEventListener("input", () => { settings.volume = Number(volume.value) / 100; volumeLabel.textContent = `${volume.value}%`; });
+    document.getElementById("save-settings")!.addEventListener("click", () => {
+      saveSoundSettings(settings); const status = document.getElementById("save-status")!; status.textContent = "Saved just now";
+      setTimeout(() => status.textContent = "Saved on this device", 1800);
+    });
+    render();
+    const api = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+    fetch(`${api}/api/v1/antidengue/notification-settings`).then((response) => response.json()).then((data) => {
+      document.getElementById("ntfy-status")!.textContent = data.ntfy_enabled
+        ? `ntfy off-device alerts are active through ${data.ntfy_server}.`
+        : "Browser sound requires an open page and audible computer. Configure ntfy server variables for phone or background push alerts.";
+    }).catch(() => { document.getElementById("ntfy-status")!.textContent = "Could not read the optional off-device channel status."; });
+  </script>
+</AntiDengueLayout>

@@ -35,6 +35,7 @@ from whatsapp_gateway.models import (
     WhatsAppReportType,
 )
 from whatsapp_gateway.previews.maintenance import delete_preview_records
+from whatsapp_gateway.dispatch.task_entrypoints import send_approved_preview_job
 
 
 def seed_profile(session: Session) -> WhatsAppDispatchProfile:
@@ -216,6 +217,84 @@ def test_duplicate_broker_delivery_claims_job_once() -> None:
     with Session(engine) as second:
         assert claim_job_running(second, job_id) is None
         assert second.get(Job, job_id).status == JobStatus.running.value
+
+
+def test_send_worker_snapshots_initial_dispatch_parameters_before_session_closes(monkeypatch) -> None:
+    engine = memory_engine()
+    approval_id = uuid.uuid4()
+    with Session(engine) as session:
+        job = add_job(
+            session,
+            job_type=JobType.whatsapp_dispatch_send.value,
+            title="Initial frozen dispatch",
+            parameters={"approval_id": str(approval_id)},
+        )
+        session.commit()
+        job_id = job.id
+
+    observed: dict[str, object] = {}
+
+    async def fake_publish(passed_approval_id, passed_job_id):
+        observed.update(approval_id=passed_approval_id, job_id=passed_job_id)
+        return {"delivered": 1, "failed": 0}
+
+    monkeypatch.setattr("whatsapp_gateway.dispatch.task_entrypoints.engine", engine)
+    monkeypatch.setattr(
+        "whatsapp_gateway.dispatch.task_entrypoints._publish_approved_deliveries",
+        fake_publish,
+    )
+    result = send_approved_preview_job.run(str(job_id))
+
+    assert result == {"delivered": 1, "failed": 0}
+    assert observed == {"approval_id": approval_id, "job_id": str(job_id)}
+    with Session(engine) as session:
+        persisted = session.get(Job, job_id)
+        assert persisted is not None and persisted.status == JobStatus.succeeded.value
+
+
+def test_send_worker_snapshots_retry_delivery_ids_before_session_closes(monkeypatch) -> None:
+    engine = memory_engine()
+    approval_id = uuid.uuid4()
+    delivery_id = uuid.uuid4()
+    with Session(engine) as session:
+        job = add_job(
+            session,
+            job_type=JobType.whatsapp_dispatch_send.value,
+            title="Retry failed frozen delivery",
+            parameters={
+                "approval_id": str(approval_id),
+                "retry_delivery_ids": [str(delivery_id)],
+            },
+        )
+        session.commit()
+        job_id = job.id
+
+    observed: dict[str, object] = {}
+
+    async def fake_publish_selected(passed_approval_id, passed_job_id, passed_delivery_ids):
+        observed.update(
+            approval_id=passed_approval_id,
+            job_id=passed_job_id,
+            delivery_ids=passed_delivery_ids,
+        )
+        return {"delivered": 1, "failed": 0}
+
+    monkeypatch.setattr("whatsapp_gateway.dispatch.task_entrypoints.engine", engine)
+    monkeypatch.setattr(
+        "whatsapp_gateway.dispatch.task_entrypoints._publish_selected_approved_deliveries",
+        fake_publish_selected,
+    )
+    result = send_approved_preview_job.run(str(job_id))
+
+    assert result == {"delivered": 1, "failed": 0}
+    assert observed == {
+        "approval_id": approval_id,
+        "job_id": str(job_id),
+        "delivery_ids": [delivery_id],
+    }
+    with Session(engine) as session:
+        persisted = session.get(Job, job_id)
+        assert persisted is not None and persisted.status == JobStatus.succeeded.value
 
 
 def test_manual_api_reuses_equivalent_active_execution(monkeypatch) -> None:

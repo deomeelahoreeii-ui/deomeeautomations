@@ -4,9 +4,12 @@ This pipeline now publishes WhatsApp jobs through the same NATS queue format use
 
 ## Highlights
 
+- One authenticated portal session can acquire multiple registered report types
+- Scheduled portal windows are frozen in `Asia/Karachi` (for example `00:00–08:30`)
+- Raw dormant and hotspot-distance exports are retained as independent immutable artifacts
 - No hardcoded WhatsApp group IDs in Python code
-- Master schools, officer jurisdictions, and fixed WhatsApp recipients are read from PocketBase first
-- `officers_list.csv` and `whatsapp_recipients.csv` are sync/fallback inputs, not the runtime source of truth
+- Platform runs consume an immutable PostgreSQL snapshot containing master schools, officer jurisdictions, routes, settings, and recent run fingerprints
+- `officers_list.csv` and `whatsapp_recipients.csv` are standalone CLI fallbacks, not the platform runtime source of truth
 - Portal credentials and app settings come from environment variables
 - Screenshot sending is optional and only included when the file actually exists
 - Every run writes `run_summary.json` beside the generated Excel report
@@ -22,11 +25,11 @@ This pipeline now publishes WhatsApp jobs through the same NATS queue format use
 Each run sends in this order:
 
 1. Dynamic personal messages to the matched `AEO` and `DDEO` contacts for the dormant schools in the current report
-2. Fixed recipients from the PocketBase `whatsapp_recipients` collection
+2. Authorized recipients from the selected PostgreSQL dispatch profiles and audiences
 
 ## Fixed Recipients
 
-Runtime reads fixed recipients from PocketBase. The CSV is still useful for bulk sync through the database screen:
+Platform runtime reads recipients from PostgreSQL. The CSV remains available only for direct standalone CLI runs:
 
 ```csv
 enabled,name,type,target,text,image_path,excel_path,excel_filename,attachment_text_mode,delay_ms
@@ -44,7 +47,7 @@ Notes:
 
 ## Officers And Schools
 
-Runtime reads schools, DDEOs, AEOs, and jurisdictions from PocketBase. The `officers_list.csv` file remains the bulk-sync input for schools, heads, DDEOs, AEOs, tehsils, markazes, and jurisdictions.
+Platform runtime reads schools, DDEOs, AEOs, and effective jurisdictions from its immutable PostgreSQL snapshot. The `officers_list.csv` file remains a standalone fallback and import source.
 
 Expected columns include:
 
@@ -71,6 +74,12 @@ Important variables:
 
 - `PORTAL_USER`
 - `PORTAL_PASS`
+- `PORTAL_NAVIGATION_RETRIES`
+- `PORTAL_NAVIGATION_RETRY_DELAY_MS`
+- `PORTAL_DISTRICT_ID` (defaults to Lahore district `18`)
+- `PORTAL_REPORTS` (defaults to `dormant_users,hotspot_distance,simple_activity_list`)
+- `PORTAL_REPORT_CUTOFF` (normally injected by the scheduler)
+- `HOTSPOT_DISTANCE_REVIEW_THRESHOLD_METERS` (blank until policy is confirmed)
 - `REPORT_SOURCE`
 - `FILTERED_TARGET_URL`
 - `UNFILTERED_TARGET_URL`
@@ -80,11 +89,25 @@ Important variables:
 - `NATS_PUBLISH_RETRY_DELAY_SECONDS`
 - `WHATSAPP_RECIPIENTS_FILE`
 - `OFFICERS_LIST_FILE`
-- `POCKETBASE_ENABLED`
-- `POCKETBASE_DB_PATH`
+- `ANTIDENGUE_RUNTIME_SNAPSHOT` (injected by the platform worker; do not set manually for normal service runs)
 - `GENERATE_SCREENSHOT`
 - `WA_ATTACHMENT_TEXT_MODE`
 - `WA_INCLUDE_EXCEL_FOR_DDEO`
+
+## Portal report registry
+
+`portal_reports.py` defines portal data products independently from their analysis and
+WhatsApp routing. The initial registry contains:
+
+- `dormant_users`: required input for the existing dormant-school workflow
+- `hotspot_distance`: optional cumulative activity export from local midnight to the
+  frozen schedule cutoff
+
+The hotspot export is validated against `hotspot_distance.v1`. It is described as a
+distance-review data source; no activity is labelled fake automatically. Set
+`HOTSPOT_DISTANCE_REVIEW_THRESHOLD_METERS` only after the department confirms the
+distance policy. Until then the run summary records row counts, submitter counts and
+distance distribution without producing accusations.
 - `WA_INCLUDE_EXCEL_FOR_AEO`
 - `WA_REQUIRE_WORKER_READY`
 - `WA_WAIT_FOR_DELIVERY`

@@ -79,6 +79,7 @@ class WhatsAppDispatchPreviewArtifact(SQLModel, table=True):
         foreign_key="whatsapp_dispatch_previews.id", index=True
     )
     artifact_id: int | None = Field(default=None, foreign_key="artifacts.id", index=True)
+    stored_object_id: uuid.UUID | None = Field(default=None, foreign_key="stored_objects.id", index=True)
     report_type_id: uuid.UUID = Field(
         foreign_key="whatsapp_report_types.id", index=True
     )
@@ -89,6 +90,8 @@ class WhatsAppDispatchPreviewArtifact(SQLModel, table=True):
     mime_type: str = "application/octet-stream"
     size_bytes: int = 0
     checksum_sha256: str = Field(default="", index=True)
+    storage_status: str = Field(default="local", index=True)
+    storage_error: str | None = Field(default=None, sa_column=Column(Text))
     status: str = Field(default="ready", index=True)
     issues: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow, index=True)

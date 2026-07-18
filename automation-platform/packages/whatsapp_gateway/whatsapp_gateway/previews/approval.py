@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import re
 import uuid
+from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from automation_core.database import get_session
@@ -15,13 +17,16 @@ from automation_core.job_service import add_job, add_job_log, get_job
 from automation_core.models import Job, JobPublic, JobStatus, JobType
 from automation_core.task_outbox import publish_pending_tasks, stage_task
 from automation_core.time import utcnow
+from automation_core.storage_catalog import ensure_stored_path
 from master_data.models import Officer, School, SchoolHead, Wing
 from whatsapp_gateway.models import (
     WhatsAppAccount, WhatsAppApplication, WhatsAppAudience, WhatsAppAudienceMember,
     WhatsAppContactLink, WhatsAppDirectoryContact, WhatsAppDispatchPreview,
     WhatsAppDispatchPreviewArtifact, WhatsAppDispatchPreviewDelivery,
     WhatsAppDispatchApproval, WhatsAppDispatchProfile, WhatsAppDelivery,
+    WhatsAppDailyMessageClaim,
     WhatsAppRecipientScope, WhatsAppReportType, WhatsAppSettings,
+    WhatsAppTemplate,
 )
 from whatsapp_gateway.preview_service import (
     cleanup_unreferenced_preview_files, delete_preview_records, entity_link_details,
@@ -35,6 +40,105 @@ from whatsapp_gateway.previews.schemas import (
 from whatsapp_gateway.previews.serialization import _artifact_dict, _delivery_dict, _digits, _with_approval
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp-previews"])
+
+
+def _complete_noop_approval(
+    session: Session,
+    preview: WhatsAppDispatchPreview,
+    data: PreviewApprovalInput,
+    *,
+    skipped_count: int,
+) -> Job:
+    now = utcnow()
+    job = add_job(
+        session,
+        job_type=JobType.whatsapp_dispatch_send.value,
+        title=f"No new deliveries for preview {preview.preview_key}",
+        parameters={"preview_id": str(preview.id), "no_op": True},
+    )
+    job.status = JobStatus.succeeded.value
+    job.started_at = now
+    job.finished_at = now
+    job.result = {
+        "delivered": 0,
+        "failed": 0,
+        "skipped": skipped_count,
+        "no_op": True,
+        "message": "Nothing new to send; eligible acknowledgements were already sent today.",
+    }
+    approval = WhatsAppDispatchApproval(
+        preview_id=preview.id,
+        job_id=job.id,
+        approved_by=data.approved_by.strip() or "web-operator",
+        warnings_acknowledged=data.acknowledge_warnings,
+        preview_content_sha256=preview.content_sha256,
+        delivery_count=0,
+        status="completed",
+        completed_at=now,
+    )
+    session.add(approval)
+    session.add(job)
+    add_job_log(
+        session,
+        job.id,
+        f"No new deliveries: {skipped_count} once-daily acknowledgement(s) were already claimed.",
+    )
+    session.commit()
+    session.refresh(job)
+    return job
+
+
+def _claim_daily_message(
+    session: Session,
+    *,
+    preview: WhatsAppDispatchPreview,
+    frozen: WhatsAppDispatchPreviewDelivery,
+    approval: WhatsAppDispatchApproval,
+    account: WhatsAppAccount,
+) -> bool:
+    snapshot = frozen.routing_snapshot or {}
+    raw = snapshot.get("daily_claim")
+    if not isinstance(raw, dict):
+        return True
+    required = {
+        "semantic_key",
+        "business_date",
+        "purpose",
+        "scope_key",
+        "scope_value",
+        "scope_label",
+        "template_key",
+    }
+    if not required.issubset(raw):
+        raise HTTPException(status_code=409, detail="A frozen daily acknowledgement claim is incomplete")
+    template_id = raw.get("template_id")
+    parsed_template_id = uuid.UUID(str(template_id)) if template_id else None
+    if parsed_template_id and session.get(WhatsAppTemplate, parsed_template_id) is None:
+        parsed_template_id = None
+    claim = WhatsAppDailyMessageClaim(
+        semantic_key=str(raw["semantic_key"]),
+        business_date=date.fromisoformat(str(raw["business_date"])),
+        purpose=str(raw["purpose"]),
+        account_id=account.id,
+        application_id=preview.application_id,
+        report_type_id=uuid.UUID(str(snapshot.get("report_type_id"))),
+        template_id=parsed_template_id,
+        preview_id=preview.id,
+        preview_delivery_id=frozen.id,
+        approval_id=approval.id,
+        target_jid=frozen.target_jid,
+        scope_key=str(raw["scope_key"]),
+        scope_value=str(raw["scope_value"]),
+        scope_label=str(raw["scope_label"]),
+        template_key=str(raw["template_key"]),
+    )
+    try:
+        with session.begin_nested():
+            session.add(claim)
+            session.flush()
+        return True
+    except IntegrityError:
+        return False
 
 @router.post(
     "/previews/{preview_id}/approve",
@@ -66,6 +170,22 @@ async def approve_preview(
             detail=f"This preview was already approved ({existing.status})",
         )
 
+    frozen_deliveries = session.scalars(
+        select(WhatsAppDispatchPreviewDelivery)
+        .where(
+            WhatsAppDispatchPreviewDelivery.preview_id == preview.id,
+            WhatsAppDispatchPreviewDelivery.status.in_(["ready", "warning"]),
+        )
+        .order_by(WhatsAppDispatchPreviewDelivery.sequence)
+    ).all()
+    if not frozen_deliveries:
+        return _complete_noop_approval(
+            session,
+            preview,
+            data,
+            skipped_count=preview.skipped_count,
+        )
+
     profile = session.get(WhatsAppDispatchProfile, preview.dispatch_profile_id)
     if profile is None:
         raise HTTPException(status_code=409, detail="The frozen dispatch profile no longer exists")
@@ -87,17 +207,6 @@ async def approve_preview(
     if not health.get("ready"):
         raise HTTPException(status_code=503, detail="WhatsApp gateway is not ready")
 
-    frozen_deliveries = session.scalars(
-        select(WhatsAppDispatchPreviewDelivery)
-        .where(
-            WhatsAppDispatchPreviewDelivery.preview_id == preview.id,
-            WhatsAppDispatchPreviewDelivery.status.in_(["ready", "warning"]),
-        )
-        .order_by(WhatsAppDispatchPreviewDelivery.sequence)
-    ).all()
-    if not frozen_deliveries:
-        raise HTTPException(status_code=409, detail="This preview has no sendable deliveries")
-
     artifacts = session.scalars(
         select(WhatsAppDispatchPreviewArtifact).where(
             WhatsAppDispatchPreviewArtifact.preview_id == preview.id
@@ -111,12 +220,21 @@ async def approve_preview(
             artifact = artifacts_by_id.get(artifact_id)
             if artifact is None or artifact.status == "blocked":
                 raise HTTPException(status_code=409, detail="A frozen delivery attachment is invalid")
-            path = Path(artifact.path_snapshot)
-            if not path.is_file() or sha256_file(path) != artifact.checksum_sha256:
-                raise HTTPException(status_code=409, detail=f"Frozen attachment changed: {artifact.name}")
+            try:
+                path = ensure_stored_path(
+                    session,
+                    stored_object_id=artifact.stored_object_id,
+                    local_path=Path(artifact.path_snapshot),
+                    name=artifact.name,
+                    expected_sha256=artifact.checksum_sha256,
+                )
+            except Exception as exc:
+                raise HTTPException(status_code=409, detail=f"Frozen attachment is unavailable: {artifact.name}: {exc}") from exc
+            artifact.path_snapshot = str(path)
+            session.add(artifact)
             attachments.append({
                 "preview_artifact_id": str(artifact.id),
-                "path": artifact.path_snapshot,
+                "path": str(path),
                 "name": artifact.name,
                 "mime_type": artifact.mime_type,
                 "checksum_sha256": artifact.checksum_sha256,
@@ -139,7 +257,22 @@ async def approve_preview(
     )
     session.add(approval)
     session.flush()
+    claimed_deliveries: list[WhatsAppDispatchPreviewDelivery] = []
     for frozen in frozen_deliveries:
+        if not _claim_daily_message(
+            session,
+            preview=preview,
+            frozen=frozen,
+            approval=approval,
+            account=account,
+        ):
+            add_job_log(
+                session,
+                job.id,
+                f"Suppressed duplicate once-daily acknowledgement for {frozen.target_name}.",
+            )
+            continue
+        claimed_deliveries.append(frozen)
         session.add(
             WhatsAppDelivery(
                 approval_id=approval.id,
@@ -154,11 +287,31 @@ async def approve_preview(
                 status_subject=f"whatsapp.status.platform.{uuid.uuid4().hex}",
             )
         )
+    approval.delivery_count = len(claimed_deliveries)
+    if not claimed_deliveries:
+        now = utcnow()
+        approval.status = "completed"
+        approval.completed_at = now
+        job.status = JobStatus.succeeded.value
+        job.started_at = now
+        job.finished_at = now
+        job.result = {
+            "delivered": 0,
+            "failed": 0,
+            "skipped": len(frozen_deliveries),
+            "no_op": True,
+            "message": "Nothing new to send; acknowledgements were claimed by another approval.",
+        }
+        session.add(approval)
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        return job
     job.parameters = {**job.parameters, "approval_id": str(approval.id)}
     add_job_log(
         session,
         job.id,
-        f"Approved {len(frozen_deliveries)} exact frozen deliveries and committed the dispatch outbox.",
+        f"Approved {len(claimed_deliveries)} exact frozen deliveries and committed the dispatch outbox.",
     )
     stage_task(
         session,

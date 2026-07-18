@@ -18,6 +18,7 @@ from antidengue_automation.models import (
 )
 from antidengue_automation.scheduling import (
     advance_execution,
+    append_milestone_once,
     combined_execution_logs,
     create_execution,
     ensure_due_executions,
@@ -233,6 +234,78 @@ def test_auto_send_is_blocked_when_preview_has_warnings() -> None:
         session.refresh(execution)
         assert execution.status == "blocked"
         assert "warning" in (execution.error or "").lower()
+
+
+def test_auto_send_completes_when_daily_acknowledgements_were_already_sent() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        profile = seed_profile(session)
+        execution = create_execution(
+            session,
+            schedule=None,
+            scheduled_for=datetime.now(UTC),
+            trigger_type="manual_send",
+            dispatch_policy="auto_send_when_clean",
+            login_mode="auto",
+            dispatch_profile_id=profile.id,
+            created_by="test",
+        )
+        source = Job(
+            type=JobType.antidengue_report.value,
+            title="Dry run",
+            status="succeeded",
+            parameters={"dry_run": True},
+            result={},
+        )
+        session.add(source)
+        session.flush()
+        preview = WhatsAppDispatchPreview(
+            preview_key=f"preview-{uuid.uuid4()}",
+            application_id=profile.application_id,
+            source_job_id=source.id,
+            dispatch_profile_id=profile.id,
+            status="ready",
+            profile_version=1,
+            application_name="AntiDengue",
+            report_type_name="School activity",
+            audience_name="All routes",
+            profile_name=profile.name,
+            account_name="Primary",
+            ready_count=0,
+            warning_count=0,
+            blocked_count=0,
+            skipped_count=2,
+            delivery_count=2,
+            content_sha256="c" * 64,
+        )
+        session.add(preview)
+        session.flush()
+        preview_job = Job(
+            type=JobType.whatsapp_dispatch_preview.value,
+            title="Preview",
+            status="succeeded",
+            parameters={},
+            result={"preview_id": str(preview.id)},
+        )
+        session.add(preview_job)
+        session.flush()
+        execution.source_job_id = source.id
+        execution.preview_job_id = preview_job.id
+        execution.status = "preview_queued"
+        session.add(execution)
+        session.commit()
+
+        advance_execution(session, execution)
+        session.refresh(execution)
+
+        assert execution.status == "completed"
+        assert execution.send_job_id is None
+        assert execution.error is None
         assert execution.send_job_id is None
 
 
@@ -365,6 +438,83 @@ def test_clean_auto_send_queues_and_completes_exact_frozen_dispatch(monkeypatch)
         session.refresh(execution)
         assert execution.status == "completed"
         assert execution.dispatch_summary == {"delivered": 2, "failed": 0}
+        sent_events = session.exec(
+            select(AntiDengueScheduleEvent).where(
+                AntiDengueScheduleEvent.execution_id == execution.id,
+                AntiDengueScheduleEvent.event_type == "antidengue.messages.sent",
+            )
+        ).all()
+        assert len(sent_events) == 1
+        advance_execution(session, execution)
+        assert len(session.exec(
+            select(AntiDengueScheduleEvent).where(
+                AntiDengueScheduleEvent.execution_id == execution.id,
+                AntiDengueScheduleEvent.event_type == "antidengue.messages.sent",
+            )
+        ).all()) == 1
+
+
+def test_execution_milestones_are_durable_and_emitted_once() -> None:
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        profile = seed_profile(session)
+        execution = create_execution(
+            session,
+            schedule=None,
+            scheduled_for=datetime.now(UTC),
+            trigger_type="manual_preview",
+            dispatch_policy="preview_only",
+            login_mode="auto",
+            dispatch_profile_id=profile.id,
+            created_by="test",
+        )
+        source = Job(
+            type=JobType.antidengue_report.value,
+            title="Dry run",
+            status=JobStatus.running.value,
+            parameters={"dry_run": True},
+        )
+        session.add(source)
+        session.flush()
+        execution.source_job_id = source.id
+        execution.status = "dry_run_queued"
+        session.add(execution)
+        session.commit()
+
+        advance_execution(session, execution)
+        append_milestone_once(
+            session,
+            execution,
+            "antidengue.execution.started",
+            "AntiDengue run started.",
+        )
+        append_milestone_once(
+            session,
+            execution,
+            "antidengue.execution.started",
+            "AntiDengue run started.",
+        )
+        source.status = JobStatus.succeeded.value
+        source.result = {"artifact_count": 4, "summary": {"run_id": "run-1"}}
+        session.add(source)
+        session.commit()
+        advance_execution(session, execution)
+
+        events = session.exec(
+            select(AntiDengueScheduleEvent).where(
+                AntiDengueScheduleEvent.execution_id == execution.id,
+                AntiDengueScheduleEvent.event_type.in_([
+                    "antidengue.execution.started",
+                    "antidengue.report.downloaded",
+                ]),
+            )
+        ).all()
+        assert [event.event_type for event in events].count("antidengue.execution.started") == 1
+        assert [event.event_type for event in events].count("antidengue.report.downloaded") == 1
+        downloaded = next(event for event in events if event.event_type == "antidengue.report.downloaded")
+        assert downloaded.details["artifact_count"] == 4
+        assert downloaded.details["notification"] is True
 
 def test_combined_execution_logs_normalize_mixed_sqlite_timestamps_to_utc() -> None:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)

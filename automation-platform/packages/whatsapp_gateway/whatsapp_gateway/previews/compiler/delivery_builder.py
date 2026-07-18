@@ -40,6 +40,7 @@ def persist_delivery(
         routing_snapshot={
             "dispatch_route": state.dispatch_route, "profile_version": ctx.profile.version,
             "audience_id": str(ctx.audience.id), "account_id": str(ctx.account.id),
+            "report_type_id": str(ctx.report_type.id),
             "template_id": str(ctx.template.id) if ctx.template else None,
             "legacy_plan_job_id": str(state.plan.get("job_id") or state.payload.get("job_id") or ""),
             "source_status": state.source_status, "source_cause": str(state.plan.get("cause") or ""),
@@ -49,6 +50,8 @@ def persist_delivery(
             "source_artifact_id": state.plan.get("source_artifact_id"),
             "source_artifact_sha256": str(state.plan.get("source_artifact_sha256") or ""),
             "scoped_emis": state.plan.get("scoped_emis") or [],
+            "delivery_kind": str(state.dispatch_route.get("delivery_kind") or "report"),
+            "daily_claim": state.plan.get("daily_claim"),
             "contact_entity_type": state.contact_link.entity_type if state.contact_link else None,
             "contact_entity_key": state.contact_link.entity_key if state.contact_link else None,
         },

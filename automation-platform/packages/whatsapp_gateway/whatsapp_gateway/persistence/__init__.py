@@ -14,7 +14,11 @@ from whatsapp_gateway.persistence.configuration import (
     WhatsAppSettings,
     WhatsAppTemplate,
 )
-from whatsapp_gateway.persistence.deliveries import WhatsAppActivity, WhatsAppDelivery
+from whatsapp_gateway.persistence.deliveries import (
+    WhatsAppActivity,
+    WhatsAppDailyMessageClaim,
+    WhatsAppDelivery,
+)
 from whatsapp_gateway.persistence.directory import (
     WhatsAppContactLink,
     WhatsAppDirectoryContact,
@@ -65,6 +69,7 @@ __all__ = [
     "WhatsAppDispatchApproval",
     "WhatsAppDelivery",
     "WhatsAppActivity",
+    "WhatsAppDailyMessageClaim",
     "WhatsAppSettings",
     "WhatsAppInboundMessage",
     "WhatsAppInboundAttachment",

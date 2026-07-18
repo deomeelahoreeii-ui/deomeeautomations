@@ -13,6 +13,7 @@ from antidengue_automation.scheduling import (
     ensure_due_executions,
     recover_orphaned_executions,
 )
+from antidengue_automation.notifications import publish_pending_ntfy
 from automation_core.config import get_settings
 from automation_core.database import engine
 from automation_core.database_identity import database_identity
@@ -58,12 +59,22 @@ def run_tick() -> dict[str, int]:
             # from here is therefore an executable commit-before-publish guard.
             with Session(engine) as session:
                 after = publish_pending_tasks(session)
+            try:
+                with Session(engine) as session:
+                    notifications = publish_pending_ntfy(session)
+            except Exception as exc:
+                # Notification transport is downstream and must never block or
+                # roll back report/preview/dispatch orchestration.
+                print(f"AntiDengue notification delivery failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+                notifications = {"sent": 0, "failed": 1}
             return {
                 "created": len(created),
                 "advanced": advanced,
                 "published": before["published"] + after["published"],
                 "publish_failed": before["failed"] + after["failed"],
                 "recovered": recovery["failed"] + recovery["requeued"],
+                "notifications_sent": notifications["sent"],
+                "notifications_failed": notifications["failed"],
             }
         finally:
             if lock_connection.dialect.name == "postgresql":

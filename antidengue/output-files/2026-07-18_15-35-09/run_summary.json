@@ -1,0 +1,413 @@
+{
+  "dry_run": true,
+  "filter": {
+    "applied": true,
+    "available_activity_columns": [
+      "Simple Activities",
+      "Patient Activities",
+      "Vector Surveillance Activities",
+      "Larvae Case Response",
+      "Total Activities"
+    ],
+    "dormant_raw_rows": 0,
+    "missing_activity_columns": [
+      "TPV Activities"
+    ],
+    "raw_rows": 1021,
+    "strategy": "Total Activities"
+  },
+  "input": {
+    "name": "user_wise_dormancy_report.xls",
+    "path": "/home/ahmad/code/deomeeautomations/antidengue/drop-raw-files/user_wise_dormancy_report.xls",
+    "portal_duplicate_raw_check": null,
+    "sha256": "2468f5f21b29b99f0ee1010a0ea87c5e572ee33230b4015e378e9570281ba427",
+    "size_bytes": 101068,
+    "source": "portal"
+  },
+  "lifecycle": [
+    {
+      "created_at": "2026-07-18T15:35:10",
+      "message": "Run started.",
+      "payload": {
+        "dry_run": true,
+        "file": "/home/ahmad/code/deomeeautomations/antidengue/drop-raw-files/user_wise_dormancy_report.xls",
+        "input_source": "portal"
+      },
+      "stage": "started",
+      "status": "started"
+    },
+    {
+      "created_at": "2026-07-18T15:35:10",
+      "message": "Raw report loaded with 1021 row(s).",
+      "payload": {
+        "raw_file_sha256": "2468f5f21b29b99f0ee1010a0ea87c5e572ee33230b4015e378e9570281ba427",
+        "raw_file_size_bytes": 101068,
+        "raw_rows": 1021
+      },
+      "stage": "downloaded",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-18T15:35:10",
+      "message": "Dormant filter produced 0 row(s).",
+      "payload": {
+        "dormant_rows": 0,
+        "filter_applied": true,
+        "filter_strategy": "Total Activities"
+      },
+      "stage": "processed",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-18T15:35:10",
+      "message": "No dormant schools found after filtering.",
+      "payload": {
+        "dormant_rows": 0
+      },
+      "stage": "validated",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-18T15:35:10",
+      "message": "Dispatch skipped because there are zero inactive schools.",
+      "payload": {},
+      "stage": "dispatch_blocked",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-18T15:35:10",
+      "message": "Run summary prepared at /home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-18_15-35-09/run_summary.json.",
+      "payload": {},
+      "stage": "summary_saved",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-18T15:35:10",
+      "message": "Run completed with zero inactive schools.",
+      "payload": {},
+      "stage": "completed",
+      "status": "ok"
+    }
+  ],
+  "outputs": {
+    "activity_evidence": null,
+    "audit_dir": "/home/ahmad/code/deomeeautomations/antidengue/unmapped-officer-reports/2026-07-18_15-35-09",
+    "excel_report": null,
+    "officer_delivery_audit": null,
+    "officer_mapping_audit": null,
+    "output_dir": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-18_15-35-09"
+  },
+  "portal_acquisition": {
+    "reports": [
+      {
+        "acquisition": "page_export_button",
+        "analysis": null,
+        "content_type": null,
+        "error": null,
+        "name": "user_wise_dormancy_report.xls",
+        "path": "/home/ahmad/code/deomeeautomations/antidengue/drop-raw-files/user_wise_dormancy_report.xls",
+        "report_key": "dormant_users",
+        "report_name": "Dormant users",
+        "requested_url": "https://dashboard-tracking.punjab.gov.pk/user_wise_larva_report?district_id=18&date_range=0",
+        "required": true,
+        "sha256": "2468f5f21b29b99f0ee1010a0ea87c5e572ee33230b4015e378e9570281ba427",
+        "size_bytes": 101068,
+        "status": "completed"
+      },
+      {
+        "acquisition": "authenticated_export",
+        "analysis": {
+          "classification": "review_required",
+          "column_count": 14,
+          "columns": [
+            "Sr #",
+            "ID",
+            "District",
+            "Town",
+            "UC",
+            "Sub Department",
+            "Tag",
+            "Hotspot Name",
+            "Hotspot Address",
+            "Hotspot(Lat,Long)",
+            "Activity(Lat,Long)",
+            "Distance Difference (In meters)",
+            "Submitted by",
+            "Activity Date/Time"
+          ],
+          "distance_meters": {
+            "maximum": 24347.8,
+            "median": 29.23,
+            "minimum": 0.86,
+            "p90": 1036.608
+          },
+          "missing_distance_count": 0,
+          "review_candidate_count": 274,
+          "review_candidate_sample": [
+            {
+              "activity_datetime": "on 07/18/2026 at 09:54AM",
+              "activity_id": "885103883",
+              "distance_meters": 24347.8,
+              "hotspot_name": "Govrment Girls High school banyan wala pul",
+              "submitted_by": "35210830.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 09:54AM",
+              "activity_id": "885103924",
+              "distance_meters": 24347.47,
+              "hotspot_name": "Govrment Girls High school banyan wala pul",
+              "submitted_by": "35210830.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 09:54AM",
+              "activity_id": "885103954",
+              "distance_meters": 24346.68,
+              "hotspot_name": "Govrment Girls High school banyan wala pul",
+              "submitted_by": "35210830.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 09:54AM",
+              "activity_id": "885103937",
+              "distance_meters": 24341.42,
+              "hotspot_name": "Govrment Girls High school banyan wala pul",
+              "submitted_by": "35210830.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 09:54AM",
+              "activity_id": "885103900",
+              "distance_meters": 24330.93,
+              "hotspot_name": "Govrment Girls High school banyan wala pul",
+              "submitted_by": "35210830.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 09:54AM",
+              "activity_id": "885103914",
+              "distance_meters": 24324.92,
+              "hotspot_name": "Govrment Girls High school banyan wala pul",
+              "submitted_by": "35210830.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 08:35AM",
+              "activity_id": "885025683",
+              "distance_meters": 12349.02,
+              "hotspot_name": "Govt girls Primary School Salamat Pura Thoker Niaz Baig",
+              "submitted_by": "35220374.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 08:35AM",
+              "activity_id": "885025698",
+              "distance_meters": 12347.27,
+              "hotspot_name": "Govt girls Primary School Salamat Pura Thoker Niaz Baig",
+              "submitted_by": "35220374.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 09:41AM",
+              "activity_id": "885091773",
+              "distance_meters": 10891.42,
+              "hotspot_name": "(H) govt boyes sachool UC 143 A",
+              "submitted_by": "35210454.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 09:03AM",
+              "activity_id": "885054092",
+              "distance_meters": 10864.41,
+              "hotspot_name": "Govrnment High School",
+              "submitted_by": "35210990.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 09:42AM",
+              "activity_id": "885092615",
+              "distance_meters": 10860.5,
+              "hotspot_name": "Govrnment High School",
+              "submitted_by": "35210990.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 09:45AM",
+              "activity_id": "885095400",
+              "distance_meters": 10859.89,
+              "hotspot_name": "Govrnment High School",
+              "submitted_by": "35210990.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 09:04AM",
+              "activity_id": "885055671",
+              "distance_meters": 10833.47,
+              "hotspot_name": "Govrnment High School",
+              "submitted_by": "35210990.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 09:29AM",
+              "activity_id": "885080209",
+              "distance_meters": 9756.81,
+              "hotspot_name": "Lahore Cantt public school",
+              "submitted_by": "35210538.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 09:31AM",
+              "activity_id": "885081846",
+              "distance_meters": 9750.54,
+              "hotspot_name": "Lahore Cantt public school",
+              "submitted_by": "35210538.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 09:26AM",
+              "activity_id": "885077254",
+              "distance_meters": 9748.13,
+              "hotspot_name": "Lahore Cantt public school",
+              "submitted_by": "35210538.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 03:31PM",
+              "activity_id": "885247553",
+              "distance_meters": 8961.54,
+              "hotspot_name": "GOVT Middle Model School awan town Near D",
+              "submitted_by": "35220542.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 03:01PM",
+              "activity_id": "885243109",
+              "distance_meters": 8923.76,
+              "hotspot_name": "GOVT Middle Model School awan town Near D",
+              "submitted_by": "35220542.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 03:27PM",
+              "activity_id": "885247034",
+              "distance_meters": 8908.71,
+              "hotspot_name": "GOVT Middle Model School awan town Near D",
+              "submitted_by": "35220542.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/18/2026 at 09:18AM",
+              "activity_id": "885069466",
+              "distance_meters": 7680.7,
+              "hotspot_name": "GGPS hassan da kot",
+              "submitted_by": "35220368.lahore.sed"
+            }
+          ],
+          "review_report_path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-18_15-35-09/Hotspot Distance Review - 18-07-2026 - 03-35 PM.xlsx",
+          "review_selection_mode": "published_rules",
+          "review_threshold_meters": null,
+          "row_count": 1067,
+          "rule_results": [
+            {
+              "activity_id_sample": [
+                "885247553",
+                "885247034",
+                "885243109",
+                "885240230",
+                "885240227",
+                "885240226",
+                "885240224",
+                "885240223",
+                "885240221",
+                "885240217",
+                "885201522",
+                "885199563",
+                "885190167",
+                "885176563",
+                "885173896",
+                "885172792",
+                "885167434",
+                "885167380",
+                "885167342",
+                "885162139"
+              ],
+              "classification": "review_required",
+              "matching_activity_count": 274,
+              "rule_id": "972ac5f5-8bc0-47d3-994c-32f46513ac9d",
+              "rule_key": "e54746eb-3046-40c7-adf9-dcdcc30e1a54",
+              "rule_name": "Distance and submission-time review",
+              "rule_version": 1,
+              "unique_submitter_count": 91
+            }
+          ],
+          "schema_version": "hotspot_distance.v1",
+          "source_format": "html_table_xls",
+          "unique_submitter_count": 246,
+          "valid": true,
+          "valid_distance_count": 1067
+        },
+        "content_type": "application/vnd.ms-excel; charset=utf-8",
+        "error": null,
+        "name": "hotspot_distance_report_20260718_1534.xls",
+        "path": "/home/ahmad/code/deomeeautomations/antidengue/drop-raw-files/hotspot_distance_report_20260718_1534.xls",
+        "report_key": "hotspot_distance",
+        "report_name": "Hotspot-distance activities",
+        "requested_url": "https://dashboard-tracking.punjab.gov.pk/reports/activities/hotspot_distance_report?act_tag=&action=hotspot_distance_report&controller=reports%2Factivities&format=xls&hotspot_distance=&is_filter_selected=true&pagination=No&parent_department=&sub_department=&tehsil_id=&uc=&district_id=18&datefrom=2026-07-18T00%3A00&dateto=2026-07-18T15%3A34",
+        "required": false,
+        "review_report": {
+          "candidate_count": 274,
+          "name": "Hotspot Distance Review - 18-07-2026 - 03-35 PM.xlsx",
+          "path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-18_15-35-09/Hotspot Distance Review - 18-07-2026 - 03-35 PM.xlsx",
+          "rule_results": [
+            {
+              "activity_id_sample": [
+                "885247553",
+                "885247034",
+                "885243109",
+                "885240230",
+                "885240227",
+                "885240226",
+                "885240224",
+                "885240223",
+                "885240221",
+                "885240217",
+                "885201522",
+                "885199563",
+                "885190167",
+                "885176563",
+                "885173896",
+                "885172792",
+                "885167434",
+                "885167380",
+                "885167342",
+                "885162139"
+              ],
+              "classification": "review_required",
+              "matching_activity_count": 274,
+              "rule_id": "972ac5f5-8bc0-47d3-994c-32f46513ac9d",
+              "rule_key": "e54746eb-3046-40c7-adf9-dcdcc30e1a54",
+              "rule_name": "Distance and submission-time review",
+              "rule_version": 1,
+              "unique_submitter_count": 91
+            }
+          ],
+          "selection_mode": "published_rules",
+          "unique_school_count": 91,
+          "unmapped_school_count": 0
+        },
+        "sha256": "1d48e64aaf0a64484539f44ddca621d2c82c6db91b5afdbed270851f3d8df140",
+        "size_bytes": 542219,
+        "status": "completed"
+      }
+    ],
+    "window": {
+      "datefrom": "2026-07-18T00:00",
+      "dateto": "2026-07-18T15:34",
+      "end": "2026-07-18T15:34:00+05:00",
+      "start": "2026-07-18T00:00:00+05:00",
+      "timezone": "Asia/Karachi"
+    }
+  },
+  "quality_gate": {
+    "errors": [],
+    "final_school_count": 0,
+    "invalid_contact_count": 0,
+    "invalid_contact_ratio": 0,
+    "master_count": 1028,
+    "master_coverage_ratio": 0,
+    "passed": true,
+    "unmapped_ratio": 0,
+    "unmapped_school_count": 0,
+    "warnings": []
+  },
+  "report_source": "unfiltered",
+  "run_started_at": "2026-07-18T15:35:09.664908",
+  "whatsapp": {
+    "dry_run": true,
+    "queued": false,
+    "skipped_reason": "zero inactive schools",
+    "total_payloads": 0
+  }
+}

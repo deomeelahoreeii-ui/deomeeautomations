@@ -569,6 +569,18 @@ def draw_antidengue_master_data_section(state: GuiState) -> None:
         imgui.text_colored(status_badge_color(color_key), result)
 
 def draw_antidengue_database_section(state: GuiState) -> None:
+    imgui.text_wrapped(
+        "AntiDengue runtime data is owned by the Automation Platform PostgreSQL "
+        "database. PocketBase is retired and is no longer started by this console."
+    )
+    imgui.text_wrapped(
+        "Use the web Master Data, WhatsApp Routing, Preview & Approval, Deliveries, "
+        "and Activity pages to manage and audit the workflow."
+    )
+    if imgui.button("Open Automation Platform", (190, 0)):
+        open_url_from_gui(state, "http://localhost:4321/")
+    return
+
     root = antidengue_pocketbase_root(state)
     service = state.services.services.get("antidengue_pocketbase")
     migrate_command = command_by_id("antidengue_pocketbase_migrate")

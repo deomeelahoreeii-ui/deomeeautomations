@@ -1,0 +1,98 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import DataTable from "../../components/DataTable.astro";
+---
+
+<AppLayout
+  title="Platform Storage"
+  eyebrow="Management / Storage"
+  description="Durable object storage, integrity verification and artifact ownership across every automation module."
+  active="storage"
+>
+  <div slot="actions" class="table-actions"><button class="btn btn-sm" id="backfill">Backfill</button><button class="btn btn-sm btn-primary" id="refresh">↻ Check storage</button></div>
+
+  <div class="notice"><strong>RustFS is the current provider; Storage is the platform capability.</strong><br />PostgreSQL owns searchable metadata, RustFS owns verified bytes, and local disk is retained as a working cache. Backfill uploads and verifies files but never deletes local data.</div>
+
+  <section class="stat-grid" style="margin-top:1.25rem">
+    <article class="stat-card"><span>Connection</span><strong id="connection">Checking…</strong><small id="endpoint">—</small></article>
+    <article class="stat-card"><span>Stored objects</span><strong id="objects">—</strong><small id="stored-bytes">—</small></article>
+    <article class="stat-card"><span>Artifact records</span><strong id="artifacts">—</strong><small id="artifact-statuses">—</small></article>
+    <article class="stat-card"><span>Transfer errors</span><strong id="errors">—</strong><small>Safe to retry; local files are preserved</small></article>
+  </section>
+
+  <section class="notification-settings-grid">
+    <article class="panel notification-settings-panel">
+      <div class="panel-heading"><div><p class="eyebrow">Platform buckets</p><h2>Lifecycle boundaries</h2></div><span class="badge" id="provider">—</span></div>
+      <div class="inbound-storage-health" id="buckets"></div>
+    </article>
+    <aside class="panel notification-help-panel">
+      <p class="eyebrow">Consumers</p><h2>Module ownership</h2><div id="modules"><p>Loading…</p></div>
+    </aside>
+  </section>
+
+  <section class="master-card" style="margin-top:1.25rem">
+    <div class="inbound-card-heading"><div><p class="eyebrow">Artifact catalog</p><h2>Files and transfers</h2></div><div class="table-actions"><select class="select select-bordered select-sm" id="module-filter"><option value="">All modules</option><option value="antidengue">AntiDengue</option><option value="crm">CRM</option><option value="whatsapp">WhatsApp</option><option value="legacy">Legacy</option></select><select class="select select-bordered select-sm" id="status-filter"><option value="">All statuses</option><option value="ready">Archived</option><option value="local">Local</option><option value="error">Error</option></select><input class="input input-bordered input-sm" id="search" placeholder="Search artifacts" /></div></div>
+    <DataTable id="storage-table" pageSize={25} emptyText="No storage artifacts match these filters." />
+  </section>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { actionButtons, badge, stack } from "../../scripts/table-cells";
+    import { confirmAction, showError, showSuccess } from "../../scripts/alerts";
+    const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const table = el<any>("storage-table");
+    const formatBytes = (value: number) => value < 1024 ? `${value} B` : value < 1024 ** 2 ? `${(value / 1024).toFixed(1)} KB` : value < 1024 ** 3 ? `${(value / 1024 ** 2).toFixed(1)} MB` : `${(value / 1024 ** 3).toFixed(1)} GB`;
+
+    async function loadOverview() {
+      const result = await actions.storage.overview();
+      if (result.error) throw result.error;
+      const data = result.data as any;
+      el("connection").textContent = data.reachable ? "Connected" : data.enabled ? "Unavailable" : "Disabled";
+      el("endpoint").textContent = data.endpoint_url || data.message || "—";
+      el("provider").textContent = data.provider || "S3 compatible";
+      el("objects").textContent = String(data.catalog.objects);
+      el("stored-bytes").textContent = formatBytes(Number(data.catalog.bytes));
+      el("artifacts").textContent = String(data.catalog.artifacts);
+      el("artifact-statuses").textContent = Object.entries(data.catalog.statuses).map(([key, value]) => `${key}: ${value}`).join(" · ") || "No records";
+      el("errors").textContent = String(data.catalog.statuses.error || 0);
+      el("buckets").innerHTML = (data.platform_buckets || []).map((bucket: string, index: number) => `<div><span>${["Raw inputs", "Manifests", "Derived artifacts"][index] || "Bucket"}</span><strong>${bucket}</strong></div>`).join("");
+      el("modules").innerHTML = (data.modules || []).length ? data.modules.map((item: any) => `<p><strong>${item.module_key}</strong><br /><small>${item.ready}/${item.artifacts} archived · ${formatBytes(Number(item.bytes))}${item.errors ? ` · ${item.errors} errors` : ""}</small></p>`).join("") : "<p>No artifact ownership has been recorded.</p>";
+    }
+
+    async function loadPage(pageIndex: number, pageSize: number) {
+      const result = await actions.storage.artifacts({ moduleKey: el<HTMLSelectElement>("module-filter").value, status: el<HTMLSelectElement>("status-filter").value, search: el<HTMLInputElement>("search").value, page: pageIndex + 1, pageSize });
+      if (result.error) throw result.error;
+      const data = result.data as any;
+      return { rows: data.items, total: data.total };
+    }
+
+    await customElements.whenDefined("astro-data-table");
+    await table.configure({ manualPagination: true, loadPage, columns: [
+      { accessorKey: "name", header: "Artifact", cell: ({ row }: any) => stack(row.original.name, `${row.original.module_key} · ${row.original.kind}`) },
+      { accessorKey: "size_bytes", header: "Size", cell: ({ row }: any) => formatBytes(Number(row.original.size_bytes)) },
+      { accessorKey: "storage_status", header: "Storage", cell: ({ row }: any) => badge(row.original.storage_status === "ready" ? "Archived" : row.original.storage_status, row.original.storage_status === "error" ? "danger" : row.original.storage_status === "ready" ? "" : "inactive") },
+      { accessorKey: "stored_object", header: "Object", cell: ({ row }: any) => stack(row.original.stored_object?.bucket || "Local only", row.original.stored_object?.object_key || row.original.storage_error || "Pending archival") },
+      { id: "actions", header: "", cell: ({ row }: any) => actionButtons([
+        { label: "Download", onClick: () => window.open(`${apiBase}/api/v1/artifacts/${row.original.id}/download`, "_blank") },
+        ...(row.original.storage_status !== "ready" ? [{ label: "Retry", onClick: async () => { const result = await actions.storage.retryArtifact({ id: row.original.id }); if (result.error) await showError(result.error); else { await showSuccess("Artifact archived", "RustFS returned and verified the expected checksum."); await table.refresh(false); await loadOverview(); } } }] : []),
+      ]) },
+    ] });
+
+    let debounce: number | undefined;
+    for (const id of ["module-filter", "status-filter"]) el(id).addEventListener("change", () => void table.refresh(true));
+    el("search").addEventListener("input", () => { window.clearTimeout(debounce); debounce = window.setTimeout(() => void table.refresh(true), 250); });
+    el("refresh").addEventListener("click", async () => { try { await loadOverview(); await table.refresh(false); } catch (error) { await showError(error); } });
+    el("backfill").addEventListener("click", async () => {
+      const moduleKey = el<HTMLSelectElement>("module-filter").value || undefined;
+      const dry = await actions.storage.backfill({ apply: false, moduleKey, limit: 500 });
+      if (dry.error) return void await showError(dry.error);
+      const result = dry.data as any;
+      if (!result.count) return void await showSuccess("Nothing to backfill", "All matching files are already archived.");
+      if (!await confirmAction("Archive local files to RustFS?", `${result.count} files (${formatBytes(result.bytes)}) will be uploaded and verified. No local files will be deleted.`, "Apply backfill")) return;
+      const applied = await actions.storage.backfill({ apply: true, moduleKey, limit: 500 });
+      if (applied.error) await showError(applied.error); else { const data = applied.data as any; await showSuccess("Backfill finished", `${data.ready} archived · ${data.errors} errors · ${data.missing} missing local files.`); await loadOverview(); await table.refresh(true); }
+    });
+    try { await loadOverview(); } catch (error) { await showError(error); }
+  </script>
+</AppLayout>

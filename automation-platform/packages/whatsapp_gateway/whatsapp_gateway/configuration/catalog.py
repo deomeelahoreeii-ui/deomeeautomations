@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from whatsapp_gateway.api_common import *
+from whatsapp_gateway.configuration.deletion import _delete_profile_records
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp"])
 

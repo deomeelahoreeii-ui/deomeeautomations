@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
@@ -66,7 +66,43 @@ class WhatsAppActivity(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
+class WhatsAppDailyMessageClaim(SQLModel, table=True):
+    """Atomic cross-run claim for a once-per-business-day semantic message."""
+
+    __tablename__ = "whatsapp_daily_message_claims"
+    __table_args__ = (
+        UniqueConstraint("semantic_key", name="uq_whatsapp_daily_message_claim_semantic_key"),
+        CheckConstraint(
+            "purpose IN ('zero_result_acknowledgement')",
+            name="ck_whatsapp_daily_message_claim_purpose",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    semantic_key: str = Field(unique=True, index=True, max_length=64)
+    business_date: date = Field(index=True)
+    purpose: str = Field(index=True, max_length=80)
+    account_id: uuid.UUID = Field(foreign_key="whatsapp_accounts.id", index=True)
+    application_id: uuid.UUID = Field(foreign_key="whatsapp_applications.id", index=True)
+    report_type_id: uuid.UUID = Field(foreign_key="whatsapp_report_types.id", index=True)
+    template_id: uuid.UUID | None = Field(
+        default=None, foreign_key="whatsapp_templates.id", ondelete="SET NULL", index=True
+    )
+    preview_id: uuid.UUID = Field(foreign_key="whatsapp_dispatch_previews.id", index=True)
+    preview_delivery_id: uuid.UUID = Field(
+        foreign_key="whatsapp_dispatch_preview_deliveries.id", index=True
+    )
+    approval_id: uuid.UUID = Field(foreign_key="whatsapp_dispatch_approvals.id", index=True)
+    target_jid: str = Field(index=True, max_length=160)
+    scope_key: str = Field(index=True, max_length=100)
+    scope_value: str = Field(index=True, max_length=100)
+    scope_label: str = Field(default="", max_length=200)
+    template_key: str = Field(default="", max_length=100)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
 __all__ = [
     'WhatsAppDelivery',
     'WhatsAppActivity',
+    'WhatsAppDailyMessageClaim',
 ]

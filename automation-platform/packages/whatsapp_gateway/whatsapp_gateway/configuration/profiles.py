@@ -3,6 +3,14 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from whatsapp_gateway.api_common import *
+from whatsapp_gateway.configuration.audience_routing import (
+    _authorize_directory_group,
+    _validate_group_route,
+)
+from whatsapp_gateway.configuration.deletion import (
+    _delete_guided_setup_records,
+    _delete_profile_records,
+)
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp"])
 

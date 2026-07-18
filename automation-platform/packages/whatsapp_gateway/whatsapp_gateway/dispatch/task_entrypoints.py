@@ -82,10 +82,16 @@ def send_approved_preview_job(job_id: str) -> dict[str, int]:
                     f"worker_database={identity['fingerprint']} ({identity['display']})"
                 )
             return {**dict(existing.result or {}), "deduplicated": True, "job_status": existing.status}
-        approval_id = uuid.UUID(str(job.parameters["approval_id"]))
+        # ORM instances must not cross this committing log call or the Session
+        # boundary below. Snapshot every primitive task input while attached.
+        parameters = dict(job.parameters)
+        approval_id = uuid.UUID(str(parameters["approval_id"]))
+        delivery_ids = [
+            uuid.UUID(str(value))
+            for value in parameters.get("retry_delivery_ids", [])
+        ]
         append_log(session, job_id, "Revalidating and queueing the exact approved frozen payloads.")
     try:
-        delivery_ids = [uuid.UUID(value) for value in job.parameters.get("retry_delivery_ids", [])]
         result = asyncio.run(
             _publish_selected_approved_deliveries(approval_id, job_id, delivery_ids)
             if delivery_ids
