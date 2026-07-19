@@ -723,6 +723,7 @@ export const server = {
       input: z.object({
         preview_ids: z.array(z.string().uuid()).min(1).max(50),
         acknowledge_warnings: z.boolean().default(false),
+        acknowledge_exclusions: z.boolean().default(false),
         approved_by: z.string().min(1).max(100).default("web-operator"),
       }),
       handler: (input) => api("/api/v1/whatsapp/preview-bulk/approve", {
@@ -745,6 +746,7 @@ export const server = {
       input: z.object({
         id: z.string().uuid(),
         acknowledge_warnings: z.boolean().default(false),
+        acknowledge_exclusions: z.boolean().default(false),
         approved_by: z.string().min(1).max(100).default("web-operator"),
       }),
       handler: ({ id, ...input }) => api(`/api/v1/whatsapp/previews/${id}/approve`, {

@@ -32,6 +32,7 @@ from whatsapp_gateway.previews.schemas import (
     ContactLinkInput, PreviewApprovalInput,
 )
 from whatsapp_gateway.previews.serialization import _artifact_dict, _delivery_dict, _digits, _with_approval
+from whatsapp_gateway.previews.issue_taxonomy import filter_validation_issues
 from automation_core.storage_catalog import ensure_stored_path
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp-previews"])
@@ -121,8 +122,7 @@ def preview_issues(
             }
             for item in artifact.issues
         )
-    if severity:
-        issues = [item for item in issues if item.get("severity") == severity]
+    issues = filter_validation_issues(issues, severity)
     start = (page - 1) * page_size
     return {
         "items": issues[start : start + page_size],

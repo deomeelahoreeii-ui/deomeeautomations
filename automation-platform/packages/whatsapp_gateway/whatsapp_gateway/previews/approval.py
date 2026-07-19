@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -13,7 +12,6 @@ from automation_core.job_service import add_job, add_job_log, get_job
 from automation_core.models import Job, JobPublic, JobStatus, JobType
 from automation_core.task_outbox import publish_pending_tasks, stage_task
 from automation_core.time import utcnow
-from automation_core.storage_catalog import ensure_stored_path
 from whatsapp_gateway.models import (
     WhatsAppAccount, WhatsAppDispatchPreview,
     WhatsAppDispatchPreviewArtifact, WhatsAppDispatchPreviewDelivery,
@@ -29,7 +27,11 @@ from whatsapp_gateway.previews.schemas import (
 from whatsapp_gateway.previews.approval_claims import (
     claim_daily_message, complete_noop_approval,
 )
+from whatsapp_gateway.previews.approval_payloads import (
+    approved_subset_sha256, excluded_delivery_snapshot, resolve_delivery_attachments,
+)
 from whatsapp_gateway.previews.approval_bulk import approve_previews_bulk as _approve_previews_bulk
+from whatsapp_gateway.previews.state import summarize_preview_state
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp-previews"])
 # Preserve the established private hooks used by integrations during migration.
@@ -50,11 +52,27 @@ async def approve_preview(
     preview = session.get(WhatsAppDispatchPreview, preview_id)
     if preview is None:
         raise HTTPException(status_code=404, detail="Dispatch preview not found")
-    if preview.status != "ready" or preview.blocked_count:
-        raise HTTPException(status_code=409, detail="Blocked previews cannot be approved")
+    all_deliveries = list(session.scalars(
+        select(WhatsAppDispatchPreviewDelivery)
+        .where(WhatsAppDispatchPreviewDelivery.preview_id == preview.id)
+        .order_by(WhatsAppDispatchPreviewDelivery.sequence)
+    ).all())
+    artifacts = list(session.scalars(
+        select(WhatsAppDispatchPreviewArtifact).where(
+            WhatsAppDispatchPreviewArtifact.preview_id == preview.id
+        )
+    ).all())
+    summary = summarize_preview_state(all_deliveries, preview.issues or [], artifacts)
+    if summary.status != "ready":
+        raise HTTPException(status_code=409, detail="Batch-blocked previews cannot be approved")
+    if summary.blocked_delivery_count and not data.acknowledge_exclusions:
+        raise HTTPException(
+            status_code=422,
+            detail="Acknowledge that blocked deliveries will be excluded from approval",
+        )
     if preview_is_stale(session, preview, check_files=True):
         raise HTTPException(status_code=409, detail="This preview is stale; create a new preview")
-    if preview.warning_count and not data.acknowledge_warnings:
+    if summary.warning_issue_count and not data.acknowledge_warnings:
         raise HTTPException(status_code=422, detail="Acknowledge all preview warnings before approval")
     existing = session.scalar(
         select(WhatsAppDispatchApproval).where(
@@ -67,20 +85,20 @@ async def approve_preview(
             detail=f"This preview was already approved ({existing.status})",
         )
 
-    frozen_deliveries = session.scalars(
-        select(WhatsAppDispatchPreviewDelivery)
-        .where(
-            WhatsAppDispatchPreviewDelivery.preview_id == preview.id,
-            WhatsAppDispatchPreviewDelivery.status.in_(["ready", "warning"]),
-        )
-        .order_by(WhatsAppDispatchPreviewDelivery.sequence)
-    ).all()
+    frozen_deliveries = [
+        item for item in all_deliveries if item.status in {"ready", "warning"}
+    ]
+    excluded_deliveries = [
+        item for item in all_deliveries if item.status in {"blocked", "skipped"}
+    ]
+    excluded_snapshot = excluded_delivery_snapshot(excluded_deliveries)
     if not frozen_deliveries:
         return complete_noop_approval(
             session,
             preview,
             data,
-            skipped_count=preview.skipped_count,
+            skipped_count=summary.skipped_delivery_count,
+            excluded_deliveries=excluded_snapshot,
         )
 
     profile = session.get(WhatsAppDispatchProfile, preview.dispatch_profile_id)
@@ -104,53 +122,35 @@ async def approve_preview(
     if not health.get("ready"):
         raise HTTPException(status_code=503, detail="WhatsApp gateway is not ready")
 
-    artifacts = session.scalars(
-        select(WhatsAppDispatchPreviewArtifact).where(
-            WhatsAppDispatchPreviewArtifact.preview_id == preview.id
-        )
-    ).all()
-    artifacts_by_id = {str(item.id): item for item in artifacts}
-    delivery_attachments: dict[uuid.UUID, list[dict[str, Any]]] = {}
-    for frozen in frozen_deliveries:
-        attachments: list[dict[str, Any]] = []
-        for artifact_id in frozen.attachment_ids:
-            artifact = artifacts_by_id.get(artifact_id)
-            if artifact is None or artifact.status == "blocked":
-                raise HTTPException(status_code=409, detail="A frozen delivery attachment is invalid")
-            try:
-                path = ensure_stored_path(
-                    session,
-                    stored_object_id=artifact.stored_object_id,
-                    local_path=Path(artifact.path_snapshot),
-                    name=artifact.name,
-                    expected_sha256=artifact.checksum_sha256,
-                )
-            except Exception as exc:
-                raise HTTPException(status_code=409, detail=f"Frozen attachment is unavailable: {artifact.name}: {exc}") from exc
-            artifact.path_snapshot = str(path)
-            session.add(artifact)
-            attachments.append({
-                "preview_artifact_id": str(artifact.id),
-                "path": str(path),
-                "name": artifact.name,
-                "mime_type": artifact.mime_type,
-                "checksum_sha256": artifact.checksum_sha256,
-            })
-        delivery_attachments[frozen.id] = attachments
-
+    delivery_attachments = resolve_delivery_attachments(
+        session, frozen_deliveries, artifacts
+    )
+    approved_content_sha256 = approved_subset_sha256(
+        frozen_deliveries, delivery_attachments
+    )
     job = add_job(
         session,
         job_type=JobType.whatsapp_dispatch_send.value,
-        title=f"Send approved preview {preview.preview_key}",
-        parameters={"preview_id": str(preview.id)},
+        title=f"Send approved eligible deliveries from {preview.preview_key}",
+        parameters={
+            "preview_id": str(preview.id),
+            "approved_delivery_ids": [str(item.id) for item in frozen_deliveries],
+            "excluded_delivery_ids": [item["id"] for item in excluded_snapshot],
+        },
     )
     approval = WhatsAppDispatchApproval(
         preview_id=preview.id,
         job_id=job.id,
         approved_by=data.approved_by.strip() or "web-operator",
         warnings_acknowledged=data.acknowledge_warnings,
+        exclusions_acknowledged=data.acknowledge_exclusions,
         preview_content_sha256=preview.content_sha256,
+        approved_content_sha256=approved_content_sha256,
+        approved_delivery_ids=[str(item.id) for item in frozen_deliveries],
+        excluded_deliveries=excluded_snapshot,
         delivery_count=len(frozen_deliveries),
+        excluded_count=len(excluded_snapshot),
+        partial=any(item["status"] == "blocked" for item in excluded_snapshot),
     )
     session.add(approval)
     session.flush()
@@ -208,7 +208,10 @@ async def approve_preview(
     add_job_log(
         session,
         job.id,
-        f"Approved {len(claimed_deliveries)} exact frozen deliveries and committed the dispatch outbox.",
+        (
+            f"Approved {len(claimed_deliveries)} exact frozen deliveries; "
+            f"excluded {len(excluded_snapshot)} blocked/skipped deliveries and committed the dispatch outbox."
+        ),
     )
     stage_task(
         session,

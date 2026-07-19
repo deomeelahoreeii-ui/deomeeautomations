@@ -16,8 +16,8 @@ const { id = "" } = Astro.params;
 
   <section class="preview-metrics">
     <article class="ready"><span>Ready</span><strong id="ready-count">—</strong><small id="ready-detail">Safe planned deliveries</small></article>
-    <article class="warning"><span>Warnings</span><strong id="warning-count">—</strong><small>Review recommended</small></article>
-    <article class="blocked"><span>Blocked</span><strong id="blocked-count">—</strong><small>Cannot be approved</small></article>
+    <article class="warning"><span>Warning deliveries</span><strong id="warning-count">—</strong><small id="warning-detail">Review recommended</small></article>
+    <article class="blocked"><span>Excluded deliveries</span><strong id="blocked-count">—</strong><small id="blocked-detail">Excluded from partial approval</small></article>
     <article><span>Attachments</span><strong id="artifact-count">—</strong><small>Files used by planned deliveries</small></article>
   </section>
 
@@ -44,7 +44,7 @@ const { id = "" } = Astro.params;
         <div><dt>Content SHA-256</dt><dd><code id="content-hash">—</code></dd></div>
         <div><dt>Frozen at</dt><dd id="frozen-at">—</dd></div>
       </dl>
-      <div class="preview-stale-warning" id="stale-warning" hidden><strong>Preview is stale</strong><span>The route configuration or a delivery file changed. Create a new preview before any future approval.</span></div>
+      <div class="preview-stale-warning" id="stale-warning" hidden><strong>Preview is stale</strong><span id="stale-reasons">The route configuration or a delivery file changed.</span></div>
     </article>
   </div>
 
@@ -65,14 +65,24 @@ const { id = "" } = Astro.params;
       const data = result.data;
       el("preview-key").textContent = data.preview_key;
       el("preview-created").textContent = `Created ${formatDate(data.created_at)}`;
-      el("preview-state").textContent = data.status;
-      el("preview-state").className = `preview-state ${data.status}`;
+      const displayStatus = data.display_status || data.status;
+      el("preview-state").textContent = displayStatus.replaceAll("_", " ");
+      el("preview-state").className = `preview-state ${displayStatus.replaceAll("_", "-")}`;
       for (const [key, value] of [["ready-count", data.ready_count], ["warning-count", data.warning_count], ["blocked-count", data.blocked_count], ["artifact-count", data.artifact_count]]) el(key).textContent = String(value);
       el("ready-detail").textContent = data.jurisdiction_count ? `${data.jurisdiction_count} jurisdictions · ${data.unique_recipient_count} recipients${data.additional_charge_route_count ? ` · ${data.additional_charge_route_count} additional-charge routes` : ""}` : `${data.unique_recipient_count} unique recipients`;
+      el("warning-detail").textContent = `${data.warning_issue_count} warning issue(s) across the preview`;
+      el("blocked-detail").textContent = data.batch_blocked_count
+        ? `${data.batch_blocked_count} batch blocker(s) prevent all approval`
+        : data.blocked_count
+          ? "These deliveries remain frozen but are explicitly excluded from approval"
+          : "No delivery exclusions";
       for (const [key, value] of [["application-name", data.application_name], ["report-type", data.report_type_name], ["wing-name", data.wing_name], ["profile-name", `${data.profile_name} · v${data.profile_version}`], ["audience-name", data.audience_name], ["account-name", data.account_name], ["template-name", data.template_name], ["profile-version", `Version ${data.profile_version}`], ["frozen-at", formatDate(data.frozen_at)]]) el(key).textContent = value;
       el("content-hash").textContent = data.content_sha256;
       const source = el("source-job"); source.textContent = data.source_job_id.slice(0, 8); source.href = `/?job_id=${data.source_job_id}`;
       el("stale-warning").hidden = !data.stale;
+      el("stale-reasons").textContent = data.stale_reasons?.length
+        ? data.stale_reasons.map((item) => item.message).join(" ")
+        : "The route configuration or a delivery file changed. Create a new preview.";
       const approve = el("approve-preview");
       const queued = el("view-queued");
       if (data.approval) {
@@ -80,15 +90,23 @@ const { id = "" } = Astro.params;
         queued.textContent = data.approval.status === "completed" ? "View delivery results" : `Dispatch ${data.approval.status}`;
       } else if (data.status === "ready" && !data.stale && data.delivery_count > 0) {
         approve.hidden = false;
-        approve.textContent = `Approve & queue ${data.delivery_count} deliver${data.delivery_count === 1 ? "y" : "ies"}`;
+        approve.textContent = `Approve & queue ${data.eligible_delivery_count} deliver${data.eligible_delivery_count === 1 ? "y" : "ies"}${data.blocked_count ? ` · exclude ${data.blocked_count}` : ""}`;
         approve.addEventListener("click", async () => {
-          const warningText = data.warning_count
-            ? `You are approving ${data.delivery_count} exact frozen deliveries with ${data.warning_count} warning(s). This sends real WhatsApp messages and cannot be undone.`
-            : `You are approving ${data.delivery_count} exact frozen deliveries. This sends real WhatsApp messages and cannot be undone.`;
+          const warningText = [
+            `You are approving ${data.eligible_delivery_count} exact eligible frozen deliveries.`,
+            data.blocked_count ? `${data.blocked_count} blocked delivery or deliveries will remain frozen and will not be queued.` : "",
+            data.warning_count ? `${data.warning_count} approved delivery or deliveries contain warnings.` : "",
+            "This sends real WhatsApp messages and cannot be undone.",
+          ].filter(Boolean).join(" ");
           if (!await confirmAction("Approve live WhatsApp dispatch?", warningText, "Approve & queue")) return;
           approve.disabled = true;
           try {
-            const result = await actions.whatsapp.approvePreview({ id, acknowledge_warnings: data.warning_count > 0, approved_by: "web-operator" });
+            const result = await actions.whatsapp.approvePreview({
+              id,
+              acknowledge_warnings: data.warning_issue_count > 0,
+              acknowledge_exclusions: data.blocked_count > 0,
+              approved_by: "web-operator",
+            });
             if (result.error) throw result.error;
             await showSuccess("Dispatch approved", "The exact reviewed payloads were queued. Delivery results will update on the Deliveries page.");
             window.location.href = "/whatsapp/deliveries";

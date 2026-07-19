@@ -11,9 +11,9 @@ const { id = "" } = Astro.params;
   <span id="preview-context" data-preview-id={id} hidden></span>
   <div class="preview-identity compact"><div><span>Frozen batch</span><strong id="preview-key">Loading…</strong></div><span class="preview-state" id="preview-state">Loading</span></div>
   <DispatchPreviewNav id={id} active="issues" />
-  <div class="notice">Blocked issues prevent future approval. Report-generation mapping warnings remain informational until an affected individual delivery is planned.</div>
+  <div class="notice">Batch-level blockers prevent approval. Delivery-level blockers exclude only the affected frozen deliveries; clean deliveries can still be approved after explicit acknowledgement.</div>
   <div class="toolbar directory-toolbar">
-    <select class="select select-bordered select-sm" id="issue-severity"><option value="">All severities</option><option value="blocked">Blocked</option><option value="warning">Warning</option></select>
+    <select class="select select-bordered select-sm" id="issue-severity"><option value="">All actionable</option><option value="blocked">Blocked</option><option value="warning">Warning</option></select>
     <span class="toolbar-status" id="issue-total">Loading…</span>
   </div>
   <article class="master-card"><DataTable id="preview-issues-table" pageSize={10} emptyText="No validation issues—every check passed." /></article>
@@ -29,7 +29,7 @@ const { id = "" } = Astro.params;
     const tone = (severity: string) => severity === "blocked" ? "warning" : "inactive";
     async function loadPage(pageIndex: number, pageSize: number) { const result = await actions.whatsapp.previewIssues({ id, severity: el<HTMLSelectElement>("issue-severity").value, page: pageIndex + 1, pageSize }); if (result.error) throw result.error; const data = result.data as any; el("issue-total").textContent = `${data.total} unique issue${data.total === 1 ? "" : "s"}${data.affected_total ? ` · ${data.affected_total} affected` : ""}`; return { rows: data.items, total: data.total }; }
     try {
-      const detail = await actions.whatsapp.preview({ id }); if (detail.error) throw detail.error; const preview = detail.data as any; el("preview-key").textContent = preview.preview_key; el("preview-state").textContent = preview.status; el("preview-state").className = `preview-state ${preview.status}`;
+      const detail = await actions.whatsapp.preview({ id }); if (detail.error) throw detail.error; const preview = detail.data as any; el("preview-key").textContent = preview.preview_key; el("preview-state").textContent = (preview.display_status || preview.status).replaceAll("_", " "); el("preview-state").className = `preview-state ${(preview.display_status || preview.status).replaceAll("_", "-")}`;
       await table.configure({ manualPagination: true, loadPage, columns: [
         { accessorKey: "severity", header: "Severity", enableSorting: false, cell: ({row}: any) => badge(row.original.severity, tone(row.original.severity)) },
         { accessorKey: "code", header: "Check", enableSorting: false, cell: ({row}: any) => String(row.original.code).replaceAll("_", " ") },

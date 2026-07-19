@@ -15,10 +15,12 @@ class PreviewIdsInput(BaseModel):
     preview_ids: list[uuid.UUID]
 class BulkPreviewApprovalInput(PreviewIdsInput):
     acknowledge_warnings: bool = False
+    acknowledge_exclusions: bool = False
     approved_by: str = "web-operator"
 class ContactLinkInput(BaseModel):
     entity_type: Literal["officer", "school_head"]
     entity_id: uuid.UUID
 class PreviewApprovalInput(BaseModel):
     acknowledge_warnings: bool = False
+    acknowledge_exclusions: bool = False
     approved_by: str = "web-operator"

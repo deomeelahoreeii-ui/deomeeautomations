@@ -8,9 +8,13 @@ from sqlmodel import Session
 
 from automation_core.database import get_session
 from automation_core.models import JobPublic
-from whatsapp_gateway.models import WhatsAppDispatchApproval, WhatsAppDispatchPreview
+from whatsapp_gateway.models import (
+    WhatsAppDispatchApproval, WhatsAppDispatchPreview,
+    WhatsAppDispatchPreviewArtifact, WhatsAppDispatchPreviewDelivery,
+)
 from whatsapp_gateway.preview_service import preview_is_stale
 from whatsapp_gateway.previews.schemas import BulkPreviewApprovalInput, PreviewApprovalInput
+from whatsapp_gateway.previews.state import summarize_preview_state
 
 async def approve_previews_bulk(
     data: BulkPreviewApprovalInput,
@@ -26,11 +30,29 @@ async def approve_previews_bulk(
     ).all()
     if len(previews) != len(preview_ids):
         raise HTTPException(status_code=404, detail="One or more selected previews no longer exist")
-    if any(item.status != "ready" or item.blocked_count for item in previews):
-        raise HTTPException(status_code=409, detail="Remove blocked previews from the selection")
+    summaries = {}
+    for item in previews:
+        deliveries = session.scalars(
+            select(WhatsAppDispatchPreviewDelivery).where(
+                WhatsAppDispatchPreviewDelivery.preview_id == item.id
+            )
+        ).all()
+        artifacts = session.scalars(
+            select(WhatsAppDispatchPreviewArtifact).where(
+                WhatsAppDispatchPreviewArtifact.preview_id == item.id
+            )
+        ).all()
+        summaries[item.id] = summarize_preview_state(deliveries, item.issues or [], artifacts)
+    if any(summary.status != "ready" for summary in summaries.values()):
+        raise HTTPException(status_code=409, detail="Remove batch-blocked previews from the selection")
+    if any(summary.blocked_delivery_count for summary in summaries.values()) and not data.acknowledge_exclusions:
+        raise HTTPException(
+            status_code=422,
+            detail="Acknowledge that blocked deliveries will be excluded from approval",
+        )
     if any(preview_is_stale(session, item, check_files=True) for item in previews):
         raise HTTPException(status_code=409, detail="Remove stale previews and compile them again")
-    if any(item.warning_count for item in previews) and not data.acknowledge_warnings:
+    if any(summary.warning_issue_count for summary in summaries.values()) and not data.acknowledge_warnings:
         raise HTTPException(status_code=422, detail="Acknowledge warnings for the selected previews")
     approved_ids = set(session.scalars(
         select(WhatsAppDispatchApproval.preview_id).where(
@@ -46,6 +68,7 @@ async def approve_previews_bulk(
             preview_id,
             PreviewApprovalInput(
                 acknowledge_warnings=data.acknowledge_warnings,
+                acknowledge_exclusions=data.acknowledge_exclusions,
                 approved_by=data.approved_by,
             ),
             session,

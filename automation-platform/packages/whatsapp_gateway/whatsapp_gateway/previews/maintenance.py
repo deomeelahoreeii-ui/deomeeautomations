@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -9,104 +8,25 @@ from sqlmodel import Session
 
 from master_data.models import School, SchoolHead, Wing
 from whatsapp_gateway.models import (
-    WhatsAppAccount, WhatsAppContactLink, WhatsAppDispatchPreview, WhatsAppDispatchPreviewArtifact,
-    WhatsAppDispatchPreviewDelivery, WhatsAppDispatchProfile, WhatsAppAudience,
-    WhatsAppAudienceMember, WhatsAppDirectoryContact, WhatsAppDirectoryGroup,
-    WhatsAppTemplate,
+    WhatsAppContactLink, WhatsAppDispatchPreview, WhatsAppDispatchPreviewArtifact,
+    WhatsAppDispatchPreviewDelivery,
 )
-from whatsapp_gateway.configuration.dynamic_audiences import (
-    active_audience_sources,
-    dynamic_audience_fingerprint,
-    resolve_dynamic_audience,
-)
-from whatsapp_gateway.previews.artifact_storage import is_managed_preview_artifact, sha256_file
-
-def preview_is_stale(session: Session, preview: WhatsAppDispatchPreview, *, check_files: bool = False) -> bool:
-    profile = session.get(WhatsAppDispatchProfile, preview.dispatch_profile_id)
-    if profile is None or profile.version != preview.profile_version or not profile.enabled:
-        return True
-    snapshot = preview.configuration_snapshot or {}
-    for profile_snapshot in snapshot.get("profiles") or []:
-        profile_id = profile_snapshot.get("id")
-        selected = session.get(WhatsAppDispatchProfile, uuid.UUID(profile_id)) if profile_id else None
-        if (
-            selected is None
-            or not selected.enabled
-            or selected.version != profile_snapshot.get("version")
-        ):
-            return True
-    audience_snapshot = snapshot.get("audience") or {}
-    audience = session.get(WhatsAppAudience, profile.audience_id)
-    if audience is None or not audience.enabled:
-        return True
-    manual_members = list(session.scalars(
-        select(WhatsAppAudienceMember).where(
-            WhatsAppAudienceMember.audience_id == audience.id,
-            WhatsAppAudienceMember.enabled.is_(True),
-        )
-    ).all())
-    dynamic_members = resolve_dynamic_audience(
-        session, audience_id=audience.id,
-        granularity=profile.delivery_granularity,
-    )
-    current_targets = sorted(
-        session.scalars(
-            select(WhatsAppAudienceMember.target_key).where(
-                WhatsAppAudienceMember.audience_id == audience.id,
-                WhatsAppAudienceMember.enabled.is_(True),
-            )
-        ).all()
-    )
-    current_targets.extend(member.target_key for member in dynamic_members)
-    current_targets.sort()
-    if current_targets != sorted(audience_snapshot.get("target_keys") or []):
-        return True
-    current_routes = sorted(
-        f"{member.target_key}:{member.route_scope_key}:{member.route_scope_value}"
-        for member in [*manual_members, *dynamic_members]
-    )
-    if current_routes != sorted(audience_snapshot.get("target_routes") or []):
-        return True
-    frozen_dynamic_fingerprint = audience_snapshot.get("dynamic_fingerprint")
-    if active_audience_sources(session, audience.id) or frozen_dynamic_fingerprint is not None:
-        if dynamic_audience_fingerprint(
-            session, audience.id, granularity=profile.delivery_granularity,
-        ) != frozen_dynamic_fingerprint:
-            return True
-    account_snapshot = snapshot.get("account") or {}
-    account = session.get(WhatsAppAccount, profile.account_id)
-    if account is None or not account.enabled or account.worker_key != account_snapshot.get("worker_key"):
-        return True
-    template_snapshot = snapshot.get("template") or {}
-    template_id = template_snapshot.get("id")
-    if template_id:
-        template = session.get(WhatsAppTemplate, uuid.UUID(template_id))
-        if template is None or not template.enabled or template.body != template_snapshot.get("body"):
-            return True
-    elif profile.template_id is not None:
-        return True
-    if not check_files:
-        return False
-    artifacts = session.scalars(
-        select(WhatsAppDispatchPreviewArtifact).where(
-            WhatsAppDispatchPreviewArtifact.preview_id == preview.id,
-            WhatsAppDispatchPreviewArtifact.role == "delivery",
-        )
-    ).all()
-    for artifact in artifacts:
-        path = Path(artifact.path_snapshot)
-        if not path.is_file() or path.stat().st_size != artifact.size_bytes:
-            return True
-        if artifact.checksum_sha256 and sha256_file(path) != artifact.checksum_sha256:
-            return True
-    return False
+from whatsapp_gateway.previews.artifact_storage import is_managed_preview_artifact
+from whatsapp_gateway.previews.staleness import preview_is_stale, preview_stale_reasons
+from whatsapp_gateway.previews.state import summarize_preview_state
 
 def preview_dict(session: Session, preview: WhatsAppDispatchPreview, *, check_files: bool = False) -> dict[str, Any]:
-    stale = preview_is_stale(session, preview, check_files=check_files)
-    deliveries = list(session.scalars(select(WhatsAppDispatchPreviewDelivery).where(
+    stale_reasons = preview_stale_reasons(session, preview, check_files=check_files)
+    stale = bool(stale_reasons)
+    all_deliveries = list(session.scalars(select(WhatsAppDispatchPreviewDelivery).where(
         WhatsAppDispatchPreviewDelivery.preview_id == preview.id,
-        WhatsAppDispatchPreviewDelivery.status != "skipped",
     )).all())
+    deliveries = [item for item in all_deliveries if item.status != "skipped"]
+    artifacts = list(session.scalars(select(WhatsAppDispatchPreviewArtifact).where(
+        WhatsAppDispatchPreviewArtifact.preview_id == preview.id,
+    )).all())
+    summary = summarize_preview_state(all_deliveries, preview.issues or [], artifacts)
+    effective_status = summary.status
     unique_recipient_count = len({item.target_jid for item in deliveries if item.target_jid})
     jurisdiction_ids = {
         scope_id
@@ -122,9 +42,15 @@ def preview_dict(session: Session, preview: WhatsAppDispatchPreview, *, check_fi
         "application_id": str(preview.application_id),
         "source_job_id": str(preview.source_job_id),
         "dispatch_profile_id": str(preview.dispatch_profile_id),
-        "status": "stale" if stale else preview.status,
+        "status": "stale" if stale else effective_status,
+        "display_status": (
+            "stale" if stale else
+            "ready_with_exclusions" if summary.partial_approval_available else
+            effective_status
+        ),
         "stored_status": preview.status,
         "stale": stale,
+        "stale_reasons": stale_reasons,
         "profile_version": preview.profile_version,
         "application_name": preview.application_name,
         "report_type_name": preview.report_type_name,
@@ -133,11 +59,18 @@ def preview_dict(session: Session, preview: WhatsAppDispatchPreview, *, check_fi
         "account_name": preview.account_name,
         "template_name": preview.template_name,
         "wing_name": preview.wing_name,
-        "ready_count": preview.ready_count,
-        "warning_count": preview.warning_count,
-        "blocked_count": preview.blocked_count,
-        "skipped_count": preview.skipped_count,
-        "delivery_count": preview.delivery_count,
+        "ready_count": summary.ready_delivery_count,
+        "warning_count": summary.warning_delivery_count,
+        "blocked_count": summary.blocked_delivery_count,
+        "skipped_count": summary.skipped_delivery_count,
+        "delivery_count": summary.delivery_count,
+        "eligible_delivery_count": summary.eligible_delivery_count,
+        "excluded_delivery_count": summary.excluded_delivery_count,
+        "partial_approval_available": summary.partial_approval_available,
+        "warning_issue_count": summary.warning_issue_count,
+        "blocked_issue_count": summary.blocked_issue_count,
+        "batch_warning_count": summary.batch_warning_count,
+        "batch_blocked_count": summary.batch_blocked_count,
         "unique_recipient_count": unique_recipient_count,
         "jurisdiction_count": len(jurisdiction_ids),
         "additional_charge_route_count": max(0, len(deliveries) - unique_recipient_count),

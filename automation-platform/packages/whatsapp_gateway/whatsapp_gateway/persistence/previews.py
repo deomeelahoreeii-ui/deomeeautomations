@@ -166,8 +166,14 @@ class WhatsAppDispatchApproval(SQLModel, table=True):
     job_id: uuid.UUID = Field(foreign_key="jobs.id", unique=True, index=True)
     approved_by: str = Field(default="web-operator", index=True)
     warnings_acknowledged: bool = False
+    exclusions_acknowledged: bool = False
     preview_content_sha256: str = Field(index=True)
+    approved_content_sha256: str = Field(default="", index=True)
+    approved_delivery_ids: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    excluded_deliveries: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
     delivery_count: int = 0
+    excluded_count: int = 0
+    partial: bool = False
     status: str = Field(default="queued", index=True)
     error: str | None = Field(default=None, sa_column=Column(Text))
     approved_at: datetime = Field(default_factory=utcnow, index=True)

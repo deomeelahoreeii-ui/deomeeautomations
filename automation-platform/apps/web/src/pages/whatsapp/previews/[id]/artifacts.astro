@@ -30,7 +30,7 @@ const { id = "" } = Astro.params;
     const formatBytes = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
     async function loadPage(pageIndex: number, pageSize: number) { const result = await actions.whatsapp.previewArtifacts({ id, role: el<HTMLSelectElement>("artifact-role").value, page: pageIndex + 1, pageSize }); if (result.error) throw result.error; const data = result.data as any; el("artifact-total").textContent = `${data.total} file${data.total === 1 ? "" : "s"}`; return { rows: data.items, total: data.total }; }
     try {
-      const detail = await actions.whatsapp.preview({ id }); if (detail.error) throw detail.error; const preview = detail.data as any; el("preview-key").textContent = preview.preview_key; el("preview-state").textContent = preview.status; el("preview-state").className = `preview-state ${preview.status}`;
+      const detail = await actions.whatsapp.preview({ id }); if (detail.error) throw detail.error; const preview = detail.data as any; el("preview-key").textContent = preview.preview_key; el("preview-state").textContent = (preview.display_status || preview.status).replaceAll("_", " "); el("preview-state").className = `preview-state ${(preview.display_status || preview.status).replaceAll("_", "-")}`;
       await table.configure({ manualPagination: true, loadPage, columns: [
         { accessorKey: "name", header: "Attachment", enableSorting: false, cell: ({row}: any) => stack(row.original.name, row.original.mime_type) },
         { accessorKey: "role", header: "Role", enableSorting: false, cell: ({row}: any) => badge(row.original.role, row.original.role === "delivery" ? "" : "inactive") },

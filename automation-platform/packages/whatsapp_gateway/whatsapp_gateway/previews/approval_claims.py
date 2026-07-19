@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import date
 
@@ -19,7 +20,7 @@ from whatsapp_gateway.previews.schemas import PreviewApprovalInput
 
 def complete_noop_approval(
     session: Session, preview: WhatsAppDispatchPreview, data: PreviewApprovalInput,
-    *, skipped_count: int,
+    *, skipped_count: int, excluded_deliveries: list[dict] | None = None,
 ) -> Job:
     now = utcnow()
     job = add_job(
@@ -38,8 +39,15 @@ def complete_noop_approval(
         preview_id=preview.id, job_id=job.id,
         approved_by=data.approved_by.strip() or "web-operator",
         warnings_acknowledged=data.acknowledge_warnings,
+        exclusions_acknowledged=data.acknowledge_exclusions,
         preview_content_sha256=preview.content_sha256,
-        delivery_count=0, status="completed", completed_at=now,
+        approved_content_sha256=hashlib.sha256(b"[]").hexdigest(),
+        approved_delivery_ids=[],
+        excluded_deliveries=list(excluded_deliveries or []),
+        delivery_count=0,
+        excluded_count=len(excluded_deliveries or []),
+        partial=any(item.get("status") == "blocked" for item in (excluded_deliveries or [])),
+        status="completed", completed_at=now,
     )
     session.add(approval)
     session.add(job)

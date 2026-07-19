@@ -63,16 +63,17 @@ const { id = "" } = Astro.params;
     }
     async function loadPage(pageIndex, pageSize) { const result = await actions.whatsapp.previewDeliveries({ id, search: el("delivery-search").value, status: el("delivery-status").value, page: pageIndex + 1, pageSize }); if (result.error) throw result.error; const data = result.data; el("delivery-total").textContent = `${data.total} planned`; return { rows: data.items, total: data.total }; }
     try {
-      const detail = await actions.whatsapp.preview({ id }); if (detail.error) throw detail.error; const preview = detail.data; el("preview-key").textContent = preview.preview_key; el("preview-state").textContent = preview.status; el("preview-state").className = `preview-state ${preview.status}`;
+      const detail = await actions.whatsapp.preview({ id }); if (detail.error) throw detail.error; const preview = detail.data; el("preview-key").textContent = preview.preview_key; el("preview-state").textContent = (preview.display_status || preview.status).replaceAll("_", " "); el("preview-state").className = `preview-state ${(preview.display_status || preview.status).replaceAll("_", "-")}`;
       const approve = el("approve-preview");
       if (!preview.approval && preview.status === "ready" && !preview.stale && preview.delivery_count > 0) {
         approve.hidden = false;
-        approve.textContent = `Approve & queue ${preview.delivery_count}`;
+        approve.textContent = `Approve & queue ${preview.eligible_delivery_count}${preview.blocked_count ? ` · exclude ${preview.blocked_count}` : ""}`;
         approve.addEventListener("click", async () => {
-          if (!await confirmAction("Approve live WhatsApp dispatch?", `Queue the ${preview.delivery_count} exact messages inspected in this frozen preview? This cannot be undone.`, "Approve & queue")) return;
+          const approvalText = `Queue ${preview.eligible_delivery_count} exact eligible messages inspected in this frozen preview?${preview.blocked_count ? ` ${preview.blocked_count} blocked messages will be excluded.` : ""} This cannot be undone.`;
+          if (!await confirmAction("Approve live WhatsApp dispatch?", approvalText, "Approve & queue")) return;
           approve.disabled = true;
           try {
-            const result = await actions.whatsapp.approvePreview({ id, acknowledge_warnings: preview.warning_count > 0, approved_by: "web-operator" });
+            const result = await actions.whatsapp.approvePreview({ id, acknowledge_warnings: preview.warning_issue_count > 0, acknowledge_exclusions: preview.blocked_count > 0, approved_by: "web-operator" });
             if (result.error) throw result.error;
             await showSuccess("Dispatch approved", "The exact frozen payloads were queued for delivery.");
             window.location.href = "/whatsapp/deliveries";

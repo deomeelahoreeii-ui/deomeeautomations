@@ -42,6 +42,7 @@ def _plan(
         "recipient_name": recipient_name, "route_kind": scope_key,
         "row_count": len(rendered.schools), "native_renderer": CONSOLIDATED_DIGEST_RENDERER_KEY,
         "native_context": rendered.context, "native_issues": rendered.issues,
+        "presentation_metadata": rendered.presentation_metadata,
         "source_artifact_id": rendered.source_artifact_id,
         "source_artifact_sha256": rendered.source_artifact_sha256,
         "scoped_emis": [school.emis for school in rendered.schools],

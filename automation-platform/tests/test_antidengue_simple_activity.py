@@ -83,4 +83,66 @@ def test_simple_activity_message_caps_text_but_preserves_full_attachment(tmp_pat
         assert len(rendered.message) < 3500
         assert "17 additional school(s)" in rendered.message
         assert len(rendered.attachment_paths) == 1
-        assert any(issue["severity"] == "info" for issue in rendered.issues)
+        assert rendered.issues == []
+        assert rendered.presentation_metadata == {
+            "message_mode": "summary",
+            "message_summary_complete": True,
+            "complete_evidence_required": True,
+            "complete_evidence_available": True,
+            "complete_evidence_source": "component",
+            "summarized_school_count": 17,
+            "summarized_activity_count": 0,
+        }
+
+
+def test_simple_activity_summary_without_complete_evidence_is_blocked(tmp_path: Path) -> None:
+    engine = _engine()
+    wing = Wing(
+        id=uuid.uuid4(), district_id=uuid.uuid4(), department_id=uuid.uuid4(),
+        name="MEE", code="MEE",
+    )
+    path = tmp_path / "Simple Activity Timing Review - message-only.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Review Required"
+    sheet.append([
+        "School EMIS", "School Name", "Wing ID", "Tehsil ID", "Markaz ID",
+        "Tehsil", "Markaz", "Time Difference(Sec)", "ID",
+    ])
+    for index in range(6):
+        sheet.append([
+            "35210001", "School A", str(wing.id), "", "", "CITY", "M1",
+            100 + index, f"a{index}",
+        ])
+    workbook.save(path)
+    workbook.close()
+
+    with Session(engine) as session:
+        job = Job(
+            type=JobType.antidengue_report.value, title="Run",
+            status=JobStatus.succeeded.value, result={},
+        )
+        session.add(job)
+        session.flush()
+        session.add(Artifact(
+            job_id=job.id, module_key="antidengue", kind="report",
+            name=path.name, path=str(path), size_bytes=path.stat().st_size,
+        ))
+        session.commit()
+        rendered = render_simple_activity_report(
+            session, source_job=job, wing=wing, recipient_name="MEE",
+            scope_key="wing", scope_value=str(wing.id), scope_label="MEE",
+            presentation_policy={"attachment_mode": "none"},
+        )
+
+        assert rendered.attachment_paths == []
+        assert rendered.presentation_metadata["message_summary_complete"] is True
+        assert rendered.presentation_metadata["complete_evidence_required"] is True
+        assert rendered.presentation_metadata["complete_evidence_available"] is False
+        assert rendered.presentation_metadata["complete_evidence_source"] == "none"
+        assert [issue["code"] for issue in rendered.issues] == [
+            "missing_complete_supporting_evidence"
+        ]
+        assert rendered.issues[0]["severity"] == "blocked"
+        assert "attached scope-filtered Excel" not in rendered.message
+        assert "Incomplete payload" in rendered.message

@@ -14,6 +14,10 @@ from sqlmodel import Session, select
 from automation_core.config import get_settings
 from automation_core.models import Artifact, Job
 from master_data.models import Wing
+from whatsapp_gateway.rendering.antidengue.evidence import (
+    evidence_metadata,
+    validate_evidence_coverage,
+)
 from whatsapp_gateway.rendering.antidengue.hotspot_report import _plain_whatsapp_text, _window_label
 from whatsapp_gateway.rendering.antidengue.issues import _issue
 
@@ -53,6 +57,7 @@ class RenderedSimpleActivityReport:
     source_artifact_id: int | None = None
     source_artifact_sha256: str = ""
     source_issues: list[dict[str, Any]] = field(default_factory=list)
+    presentation_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def _details(rows: list[SimpleActivityRow], *, school_limit: int = 8, activity_limit: int = 4) -> tuple[str, int, int]:
@@ -81,12 +86,6 @@ def _details(rows: list[SimpleActivityRow], *, school_limit: int = 8, activity_l
                 interval = f"{row.seconds:,.0f} seconds ({friendly})"
             lines.append(f"⏱️ *Time Difference:* {interval}")
         lines.append("")
-    if omitted_schools or omitted_activities:
-        lines.append(
-            "📎 *Complete evidence:* "
-            f"{omitted_schools} additional school(s) and {omitted_activities} additional activity row(s) "
-            "are included in the attached scope-filtered Excel file."
-        )
     return "\n".join(lines).strip(), omitted_schools, omitted_activities
 
 
@@ -168,18 +167,41 @@ def render_simple_activity_report(session: Session, *, source_job: Job, wing: Wi
             source_issues=source_issues,
         )
     window = dict(((source_job.result or {}).get("summary") or {}).get("portal_acquisition") or {}).get("window") or {}
-    has_attachment = str((presentation_policy or {}).get("attachment_mode") or "excel") != "none"
-    details, omitted_schools, omitted_activities = _details(rows)
-    if omitted_schools or omitted_activities:
-        issues.append(_issue(
-            "message_evidence_summarized" if has_attachment else "message_only_evidence_truncated",
-            "info" if has_attachment else "blocked",
-            (
-                "WhatsApp text shows a concise school sample; the attached Excel contains all scoped evidence."
-                if has_attachment else
-                "Message-only delivery cannot safely omit the remaining timing evidence. Enable an Excel attachment or narrow the rule."
-            ),
-        ))
+    policy = dict(presentation_policy or {})
+    has_attachment = str(policy.get("attachment_mode") or "excel") != "none"
+    parent_attachment = bool(policy.get("evidence_attachment_provided_by_parent"))
+    details, summarized_schools, summarized_activities = _details(rows)
+    details_summarized = bool(summarized_schools or summarized_activities)
+    evidence_source = (
+        "component" if has_attachment else "parent" if parent_attachment else
+        "message" if not details_summarized else "none"
+    )
+    presentation_metadata = evidence_metadata(
+        message_mode="summary" if details_summarized else "complete",
+        message_summary_complete=bool(details.strip()),
+        complete_evidence_required=details_summarized,
+        complete_evidence_available=evidence_source != "none",
+        complete_evidence_source=evidence_source,
+        summarized_school_count=summarized_schools,
+        summarized_activity_count=summarized_activities,
+    )
+    issues.extend(validate_evidence_coverage(presentation_metadata))
+    if details_summarized and evidence_source in {"component", "parent"}:
+        destination = (
+            "attached workbook" if evidence_source == "component"
+            else "consolidated workbook"
+        )
+        details = (
+            f"{details}\n\n📎 *Complete timing detail:* "
+            f"{summarized_schools} additional school(s) and "
+            f"{summarized_activities} additional activity row(s) are available in "
+            f"the {destination}."
+        )
+    elif details_summarized:
+        details = (
+            f"{details}\n\n⚠️ *Incomplete payload:* Complete timing detail is not "
+            "included in this message and no supporting workbook is available."
+        )
     context = {
         "group_name": _plain_whatsapp_text(recipient_name), "scope_name": _plain_whatsapp_text(scope_label),
         "report_window": _window_label(window.get("dateto")) or "Not available",
@@ -193,7 +215,8 @@ def render_simple_activity_report(session: Session, *, source_job: Job, wing: Wi
     if has_attachment:
         derived, path, digest = _attachment(session, source_job, source, header, rows, scope_label); artifact_id = derived.id; attachments.append(path)
     return RenderedSimpleActivityReport(
-        message, context, rows, issues, attachments, artifact_id, digest, source_issues
+        message, context, rows, issues, attachments, artifact_id, digest, source_issues,
+        presentation_metadata,
     )
 
 

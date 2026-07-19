@@ -44,7 +44,9 @@ from whatsapp_gateway.persistence.audience_sources import WhatsAppAudienceSource
 from whatsapp_gateway.configuration.profile_granularity import (
     ensure_dynamic_markaz_profile_granularity,
 )
-from whatsapp_gateway.rendering.antidengue.digest_models import CONSOLIDATED_DIGEST_DEFAULT_TEMPLATE
+from whatsapp_gateway.rendering.antidengue.digest_models import (
+    CONSOLIDATED_DIGEST_DEFAULT_TEMPLATE,
+)
 from whatsapp_gateway.preview_service import (
     cleanup_unreferenced_preview_files,
     delete_preview_records,
@@ -238,9 +240,18 @@ def ensure_consolidated_digest_profiles(
             profile.updated_at = utcnow()
             session.add(profile)
         template = session.get(WhatsAppTemplate, profile.template_id) if profile.template_id else None
-        if template is not None and template.body.strip() == "{{report_body}}":
-            template.body = CONSOLIDATED_DIGEST_DEFAULT_TEMPLATE
-            session.add(template)
+        if template is not None:
+            original_body = template.body
+            if original_body.strip() == "{{report_body}}":
+                template.body = CONSOLIDATED_DIGEST_DEFAULT_TEMPLATE
+            elif "*DETAILS BY MARKAZ*" in original_body and "{{detail_heading}}" not in original_body:
+                # Structural v1-to-v2 upgrade: preserve every operator edit and
+                # replace only the scope-inaccurate fixed heading.
+                template.body = original_body.replace(
+                    "*DETAILS BY MARKAZ*", "*{{detail_heading}}*", 1
+                )
+            if template.body != original_body:
+                session.add(template)
     linked_source_ids = {
         str((profile.presentation_policy or {}).get("digest_source_profile_id") or "")
         for profile in existing

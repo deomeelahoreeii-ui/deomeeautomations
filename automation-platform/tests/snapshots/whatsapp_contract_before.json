@@ -6385,6 +6385,11 @@
     },
     "BulkPreviewApprovalInput": {
       "properties": {
+        "acknowledge_exclusions": {
+          "default": false,
+          "title": "Acknowledge Exclusions",
+          "type": "boolean"
+        },
         "acknowledge_warnings": {
           "default": false,
           "title": "Acknowledge Warnings",
@@ -7411,6 +7416,11 @@
     },
     "PreviewApprovalInput": {
       "properties": {
+        "acknowledge_exclusions": {
+          "default": false,
+          "title": "Acknowledge Exclusions",
+          "type": "boolean"
+        },
         "acknowledge_warnings": {
           "default": false,
           "title": "Acknowledge Warnings",
@@ -11250,6 +11260,20 @@
           "unique": false
         },
         {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "False"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "exclusions_acknowledged",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "BOOLEAN",
+          "unique": false
+        },
+        {
           "default": null,
           "foreign_keys": [],
           "index": true,
@@ -11258,6 +11282,42 @@
           "primary_key": false,
           "server_default": null,
           "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "''"
+          },
+          "foreign_keys": [],
+          "index": true,
+          "name": "approved_content_sha256",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "VARCHAR",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "approved_delivery_ids",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "JSON",
+          "unique": false
+        },
+        {
+          "default": null,
+          "foreign_keys": [],
+          "index": false,
+          "name": "excluded_deliveries",
+          "nullable": true,
+          "primary_key": false,
+          "server_default": null,
+          "type": "JSON",
           "unique": false
         },
         {
@@ -11272,6 +11332,34 @@
           "primary_key": false,
           "server_default": null,
           "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "0"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "excluded_count",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "INTEGER",
+          "unique": false
+        },
+        {
+          "default": {
+            "kind": "ScalarElementColumnDefault",
+            "value": "False"
+          },
+          "foreign_keys": [],
+          "index": false,
+          "name": "partial",
+          "nullable": false,
+          "primary_key": false,
+          "server_default": null,
+          "type": "BOOLEAN",
           "unique": false
         },
         {
@@ -11365,6 +11453,13 @@
             "approved_by"
           ],
           "name": "ix_whatsapp_dispatch_approvals_approved_by",
+          "unique": false
+        },
+        {
+          "columns": [
+            "approved_content_sha256"
+          ],
+          "name": "ix_whatsapp_dispatch_approvals_approved_content_sha256",
           "unique": false
         },
         {

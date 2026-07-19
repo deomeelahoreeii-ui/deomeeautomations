@@ -1,0 +1,95 @@
+{
+  "bundle": "antidengue-preview-integrity-bundle-ad-p1r3",
+  "files": [
+    {
+      "path": "automation-platform/apps/web/src/pages/whatsapp/previews/[id]/issues.astro",
+      "before_exists": true,
+      "before_sha256": "5af5d2e33839df066121a5fe64e77531f38b9b5ae6940acfcb92a6ef96058151",
+      "after_sha256": "ce05199dc5133e0593102f8ff60cb24bfbfefdf844ba4795baf81ff11cd0a48e"
+    },
+    {
+      "path": "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/artifacts.py",
+      "before_exists": true,
+      "before_sha256": "659959764963932740cde7cac6fc6baca3b88b86247ec8ae8c13ef9e81759f2f",
+      "after_sha256": "2ef626f6c39229ef6027c662bcf94444102a2ae8875b24a5d8ca4ef39e22a053"
+    },
+    {
+      "path": "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/compiler/consolidated_plan.py",
+      "before_exists": true,
+      "before_sha256": "bac5fe068078fcbaa7da21c2af251ca08bb464c357e7f3087091739800290f87",
+      "after_sha256": "b2e5df71ef8481cdc6649d9bc0118ca7b23e2759d865481961495c52250e3f75"
+    },
+    {
+      "path": "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/compiler/delivery_builder.py",
+      "before_exists": true,
+      "before_sha256": "9521caedffb8bcb3435d7a3e663b6d75ce2f6a89d8e9a1c80b5c436d5d06c0fb",
+      "after_sha256": "7b4623eaa913ffb679c4e5d5faf9c60183f46242620f41fc57d5b35de8fca853"
+    },
+    {
+      "path": "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/compiler/dynamic_activity_plan.py",
+      "before_exists": true,
+      "before_sha256": "703e397c3526a43942c31ea8fae780a5db6ecd15ca730379bd3768aa541b1705",
+      "after_sha256": "d50788f2edf99f60cb55213270e591d65ca8cba40717c7152c45a9414fc98520"
+    },
+    {
+      "path": "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/issue_taxonomy.py",
+      "before_exists": false,
+      "before_sha256": null,
+      "after_sha256": "71334a88c1e8f13ec88885a7c653c7bdbc2e0c3323ba2c2a7de9e199066bea9d"
+    },
+    {
+      "path": "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/serialization.py",
+      "before_exists": true,
+      "before_sha256": "3789e6a98fb307d5bd82502631aae7561218b4a55c703b21e47856c794acf140",
+      "after_sha256": "719bf1368f5e25f7062eb5a454561966f21649bdf40b7e169585dfb85d8615b7"
+    },
+    {
+      "path": "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/rendering/antidengue/digest_models.py",
+      "before_exists": true,
+      "before_sha256": "ffafbf740d4ba26f82594c9d296df87b8829178b8bd7a93ce9cdfd782093d84f",
+      "after_sha256": "39549687db5062ba75671dc44981df3ecfcf907e861c776ff3472e25598308bf"
+    },
+    {
+      "path": "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/rendering/antidengue/digest_presentation.py",
+      "before_exists": true,
+      "before_sha256": "adc131ec5a93d2886afe7785c69b48d4b0ca6146e68d4f6fbc9e0be2d2be0bbe",
+      "after_sha256": "e3c11e50129c9a7200fe94b5bd3bea1094ad3b46065dee58adaf8bbeaff70f4a"
+    },
+    {
+      "path": "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/rendering/antidengue/digest_report.py",
+      "before_exists": true,
+      "before_sha256": "b6f4748bfd0f0007a0c76e712223e06db9431243aae349dddaea66235763d768",
+      "after_sha256": "7aa4d138de29f39064c7467830e83fb8372710e0f6568bf88e0766023114dafd"
+    },
+    {
+      "path": "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/rendering/antidengue/evidence.py",
+      "before_exists": false,
+      "before_sha256": null,
+      "after_sha256": "156b4db5dbe8a32b20f29ab3117c014aa628c4a3d1ed4fd64ef704407a49eef9"
+    },
+    {
+      "path": "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/rendering/antidengue/simple_activity_report.py",
+      "before_exists": true,
+      "before_sha256": "7060ada6768b7161e01d3cd6503259ca97e008f5477fdcb4fc7213551d03bce0",
+      "after_sha256": "77ac19f9ceeb06dfe00e4aa97b9fcad2e5533795863f534e05cb9126ae5030ad"
+    },
+    {
+      "path": "automation-platform/tests/test_antidengue_simple_activity.py",
+      "before_exists": true,
+      "before_sha256": "f881f7e8e2e5ba8ac9d725107ec7d8ee817c28a7bb2cd0af1291bb24331f3f86",
+      "after_sha256": "f039eb70a1320277156e48509c5f82043bf5ee89b6fb5db3cb71cd63323286ee"
+    },
+    {
+      "path": "automation-platform/tests/test_consolidated_action_digest.py",
+      "before_exists": true,
+      "before_sha256": "1df4fea285058736012cc5c57f1720ad0de2d177437470f65392389995986681",
+      "after_sha256": "c807e989801ecf4eb5addac045257453678cb7357072f87a6fa9a44039c64bc8"
+    },
+    {
+      "path": "automation-platform/tests/test_preview_issue_taxonomy.py",
+      "before_exists": false,
+      "before_sha256": null,
+      "after_sha256": "ae0dbb6e6e4ecb898c116733932cfc1c21dbcf925819a16b742b7267ac89824d"
+    }
+  ]
+}

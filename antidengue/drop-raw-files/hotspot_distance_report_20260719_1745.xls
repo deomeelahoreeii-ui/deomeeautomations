@@ -1,0 +1,158 @@
+<table id="p_table" class="table table-bordered table-hover listing-tbl">
+  <thead>
+    <tr>
+      <th>Sr #</th>
+      <th>ID</th>
+      <th>District</th>
+      <th>Town</th>
+      <th>UC</th>
+      <th>Sub Department</th>
+      <th>Tag</th>
+      <th>Hotspot Name</th>
+      <th>Hotspot Address</th>
+      <th>Hotspot(Lat,Long)</th>
+      <th>Activity(Lat,Long)</th>
+      <th>Distance Difference (In meters)</th>
+      <th>Submitted by</th>
+      <th>Activity Date/Time</th>				
+    </tr>                    
+  </thead>
+  <tbody>
+      <tr>
+        <td>1</td>
+        <td>885282960</td>
+        <td>Lahore</td>
+        <td>Samanabad Town</td>
+        <td>Bahawalpur House</td>
+        <td>School Education Department</td>
+        <td>Schools</td>
+        <td>GGES Bagh Gul Begum Ex Mcl lahore</td>
+        <td>Street 14</td>
+
+        <td>31.5461267,74.309755 </td>
+        <td>31.5461356,74.3097787 </td>
+        <td>2.45</td>
+        <td>35210906.lahore.sed</td>
+        <td>on 07/19/2026 at 08:04AM</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td>885282941</td>
+        <td>Lahore</td>
+        <td>Samanabad Town</td>
+        <td>Bahawalpur House</td>
+        <td>School Education Department</td>
+        <td>Schools</td>
+        <td>GGES Bagh Gul Begum Ex Mcl lahore</td>
+        <td>Street 14</td>
+
+        <td>31.5461267,74.309755 </td>
+        <td>31.5461673,74.3097756 </td>
+        <td>4.92</td>
+        <td>35210906.lahore.sed</td>
+        <td>on 07/19/2026 at 08:03AM</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td>885282923</td>
+        <td>Lahore</td>
+        <td>Samanabad Town</td>
+        <td>Bahawalpur House</td>
+        <td>School Education Department</td>
+        <td>Schools</td>
+        <td>GGES Bagh Gul Begum Ex Mcl lahore</td>
+        <td>Street 14</td>
+
+        <td>31.5461267,74.309755 </td>
+        <td>31.5461291,74.3098376 </td>
+        <td>7.83</td>
+        <td>35210906.lahore.sed</td>
+        <td>on 07/19/2026 at 08:03AM</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td>885282886</td>
+        <td>Lahore</td>
+        <td>Samanabad Town</td>
+        <td>Bahawalpur House</td>
+        <td>School Education Department</td>
+        <td>Schools</td>
+        <td>GGES Bagh Gul Begum Ex Mcl lahore</td>
+        <td>Street 14</td>
+
+        <td>31.5461267,74.309755 </td>
+        <td>31.5460979,74.3097379 </td>
+        <td>3.59</td>
+        <td>35210906.lahore.sed</td>
+        <td>on 07/19/2026 at 08:03AM</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td>885282872</td>
+        <td>Lahore</td>
+        <td>Samanabad Town</td>
+        <td>Bahawalpur House</td>
+        <td>School Education Department</td>
+        <td>Schools</td>
+        <td>GGES Bagh Gul Begum Ex Mcl lahore</td>
+        <td>Street 14</td>
+
+        <td>31.5461267,74.309755 </td>
+        <td>31.5460993,74.30971 </td>
+        <td>5.24</td>
+        <td>35210906.lahore.sed</td>
+        <td>on 07/19/2026 at 08:03AM</td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td>885282855</td>
+        <td>Lahore</td>
+        <td>Samanabad Town</td>
+        <td>Bahawalpur House</td>
+        <td>School Education Department</td>
+        <td>Schools</td>
+        <td>GGES Bagh Gul Begum Ex Mcl lahore</td>
+        <td>Street 14</td>
+
+        <td>31.5461267,74.309755 </td>
+        <td>31.5461616,74.3097368 </td>
+        <td>4.25</td>
+        <td>35210906.lahore.sed</td>
+        <td>on 07/19/2026 at 08:03AM</td>
+      </tr>
+      <tr>
+        <td>7</td>
+        <td>885282842</td>
+        <td>Lahore</td>
+        <td>Samanabad Town</td>
+        <td>Bahawalpur House</td>
+        <td>School Education Department</td>
+        <td>Schools</td>
+        <td>GGES Bagh Gul Begum Ex Mcl lahore</td>
+        <td>Street 14</td>
+
+        <td>31.5461267,74.309755 </td>
+        <td>31.5461131,74.3097476 </td>
+        <td>1.66</td>
+        <td>35210906.lahore.sed</td>
+        <td>on 07/19/2026 at 08:02AM</td>
+      </tr>
+      <tr>
+        <td>8</td>
+        <td>885282625</td>
+        <td>Lahore</td>
+        <td>Nishtar Town</td>
+        <td>Chandrai</td>
+        <td>School Education Department</td>
+        <td>Schools</td>
+        <td>Govt boys Primary school tehait uc143B</td>
+        <td>Tehait pind</td>
+
+        <td>31.4306983,74.3241267 </td>
+        <td>31.4306908,74.3241807 </td>
+        <td>5.19</td>
+        <td>35210452.lahore.sed</td>
+        <td>on 07/19/2026 at 08:00AM</td>
+      </tr>
+  </tbody>
+</table>

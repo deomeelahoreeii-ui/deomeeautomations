@@ -107,6 +107,7 @@
 .preview-identity small { margin-top: 2px; color: #8d98a8; font-size: 8px; }
 .preview-state { border-radius: 999px; background: #edf1f5; padding: 5px 9px; color: #687487; font-size: 8px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
 .preview-state.ready { background: #e2f5ec; color: #168258; }
+.preview-state.ready-with-exclusions { background: #fff2dc; color: #a66c16; }
 .preview-state.blocked { background: #fce8e8; color: #b54242; }
 .preview-state.stale { background: #fff2dc; color: #a66c16; }
 .preview-tabs { display: flex; gap: 4px; margin-bottom: 15px; border-bottom: 1px solid #dce3eb; }

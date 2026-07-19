@@ -20,6 +20,7 @@ from whatsapp_gateway.previews.compiler.finalize import finalize_preview
 from whatsapp_gateway.previews.compiler.issue_reconciliation import reconcile_zero_result_issues
 from whatsapp_gateway.previews.compiler.plans import build_dispatch_plan
 from whatsapp_gateway.previews.compiler.preview_record import configuration_snapshot, create_preview_record
+from whatsapp_gateway.previews.state import apply_preview_state, summarize_preview_state
 
 def compile_antidengue_preview(
     session: Session, *, source_job_id: uuid.UUID, dispatch_profile_id: uuid.UUID | None = None,
@@ -180,6 +181,8 @@ def _merge_profile_previews(
         session.add(delivery)
 
     snapshot = dict(primary.configuration_snapshot or {})
+    snapshot["profile_snapshots"] = profile_snapshots
+    # Backward-compatible compact index retained for older readers.
     snapshot["profiles"] = [item.get("profile", {}) for item in profile_snapshots]
     snapshot["profile_count"] = len(previews)
     primary.configuration_snapshot = snapshot
@@ -200,17 +203,9 @@ def _merge_profile_previews(
         deduplicated_batch_issues.append(batch_issue)
     batch_issues = reconcile_zero_result_issues(deduplicated_batch_issues, retained)
     primary.issues = batch_issues
-    primary.delivery_count = len(retained)
-    primary.ready_count = sum(item.status == "ready" for item in retained)
-    primary.skipped_count = sum(item.status == "skipped" for item in retained)
-    primary.warning_count = sum(
-        issue.get("severity") == "warning" for item in retained for issue in item.issues
-    ) + sum(issue.get("severity") == "warning" for issue in batch_issues)
-    primary.blocked_count = sum(
-        issue.get("severity") == "blocked" for item in retained for issue in item.issues
-    ) + sum(issue.get("severity") == "blocked" for issue in batch_issues)
+    summary = summarize_preview_state(retained, batch_issues, artifacts)
+    apply_preview_state(primary, summary)
     primary.artifact_count = len(artifacts)
-    primary.status = "blocked" if primary.blocked_count else "ready"
     frozen = {
         "configuration": snapshot,
         "deliveries": [{

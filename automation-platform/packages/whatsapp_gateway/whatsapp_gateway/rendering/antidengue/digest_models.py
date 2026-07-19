@@ -25,7 +25,7 @@ CONSOLIDATED_DIGEST_DEFAULT_TEMPLATE = """🚨 *ANTI-DENGUE ACTION DIGEST*
 📏 Activity outside the permitted distance
 ⏱️ Before/after evidence submitted too quickly
 
-*DETAILS BY MARKAZ*
+*{{detail_heading}}*
 
 {{school_details}}
 
@@ -35,6 +35,12 @@ Submit missing activities and review flagged distance or timing evidence.
 📎 *Attached workbook:* Overview · Dormant Schools · Hotspot Distance · Activity Timing
 
 ⚠️ Distance and timing findings are rule-based review candidates, not confirmed violations."""
+
+# Recognized immutable v1 default. Configuration bootstrap upgrades only this
+# exact body (or {{report_body}}), never operator-customized templates.
+CONSOLIDATED_DIGEST_LEGACY_TEMPLATE_V1 = CONSOLIDATED_DIGEST_DEFAULT_TEMPLATE.replace(
+    "*{{detail_heading}}*", "*DETAILS BY MARKAZ*"
+)
 
 
 @dataclass(frozen=True)
@@ -83,12 +89,14 @@ class RenderedConsolidatedDigest:
     attachment_paths: list[Path] = field(default_factory=list)
     source_artifact_id: int | None = None
     source_artifact_sha256: str = ""
+    presentation_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 __all__ = [
     "CONSOLIDATED_DIGEST_RENDERER_KEY",
     "CONSOLIDATED_DIGEST_REPORT_KEY",
     "CONSOLIDATED_DIGEST_DEFAULT_TEMPLATE",
+    "CONSOLIDATED_DIGEST_LEGACY_TEMPLATE_V1",
     "DigestSchool",
     "RenderedConsolidatedDigest",
 ]

@@ -11,6 +11,7 @@ from whatsapp_gateway.models import (
     WhatsAppDispatchApproval, WhatsAppDispatchPreviewArtifact,
     WhatsAppDispatchPreviewDelivery,
 )
+from whatsapp_gateway.previews.issue_taxonomy import partition_issues
 
 def _digits(value: str | None) -> str:
     return re.sub(r"\D", "", value or "")
@@ -43,6 +44,7 @@ def _delivery_dict(
                     "status": artifact.status,
                 }
             )
+    issues, diagnostics = partition_issues(delivery.issues or [])
     return {
         "id": str(delivery.id),
         "preview_id": str(delivery.preview_id),
@@ -57,7 +59,8 @@ def _delivery_dict(
         "message": delivery.message,
         "attachments": attachments,
         "routing_snapshot": delivery.routing_snapshot,
-        "issues": delivery.issues,
+        "issues": issues,
+        "diagnostics": diagnostics,
         "status": delivery.status,
         "idempotency_key": delivery.idempotency_key,
         "created_at": delivery.created_at,

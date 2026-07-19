@@ -11,7 +11,8 @@ def all_clear_digest_message(
         "school_count": "0", "dormant_count": "0", "hotspot_count": "0",
         "timing_count": "0", "omitted_school_count": "0",
         "dormant_summary": "0 schools", "hotspot_summary": "0 schools",
-        "timing_summary": "0 schools", "school_details": "No action items found.",
+        "timing_summary": "0 schools", "detail_heading": "JURISDICTION SUMMARY",
+        "school_details": "No action items found.",
         "deadline": deadline,
     }
     message = (

@@ -81,7 +81,7 @@ import WhatsAppLayout from "../../../layouts/WhatsAppLayout.astro";
     const selectedProfiles = new Set<string>();
 
     const formatDate = (value: string) => new Date(value).toLocaleString();
-    const tone = (status: string) => status === "blocked" ? "warning" : status === "stale" ? "inactive" : "";
+    const tone = (status: string) => status === "blocked" || status === "ready_with_exclusions" ? "warning" : status === "stale" ? "inactive" : "";
 
     function updateBulkBar() {
       const count = selectedPreviews.size;
@@ -219,8 +219,11 @@ import WhatsAppLayout from "../../../layouts/WhatsAppLayout.astro";
         { accessorKey: "preview_key", header: "Preview", enableSorting: false, cell: ({row}: any) => stack(row.original.preview_key, formatDate(row.original.created_at)) },
         { accessorKey: "profile_name", header: "Routing", enableSorting: false, cell: ({row}: any) => stack(row.original.profile_name, `${row.original.audience_name} · v${row.original.profile_version}`) },
         { accessorKey: "wing_name", header: "Wing / report", enableSorting: false, cell: ({row}: any) => stack(row.original.wing_name, row.original.report_type_name) },
-        { accessorKey: "delivery_count", header: "Deliveries", enableSorting: false, cell: ({row}: any) => stack(`${row.original.delivery_count} planned`, `${row.original.ready_count} ready · ${row.original.warning_count} warning · ${row.original.blocked_count} blocked`) },
-        { accessorKey: "status", header: "State", enableSorting: false, cell: ({row}: any) => badge(row.original.status, tone(row.original.status)) },
+        { accessorKey: "delivery_count", header: "Deliveries", enableSorting: false, cell: ({row}: any) => stack(
+          `${row.original.delivery_count} planned`,
+          `${row.original.ready_count} ready · ${row.original.warning_count} warning-state · ${row.original.blocked_count} blocked${row.original.warning_issue_count ? ` · ${row.original.warning_issue_count} warning issue(s)` : ""}${row.original.blocked_issue_count ? ` · ${row.original.blocked_issue_count} blocker issue(s)` : ""}`
+        ) },
+        { accessorKey: "status", header: "State", enableSorting: false, cell: ({row}: any) => badge((row.original.display_status || row.original.status).replaceAll("_", " "), tone(row.original.display_status || row.original.status)) },
         { id: "actions", header: "", enableSorting: false, cell: ({row}: any) => actionButtons(row.original.approved ? [
           { label: "View delivery audit", onClick: () => { window.location.href = `/whatsapp/previews/${row.original.id}`; } },
         ] : [
@@ -262,10 +265,10 @@ import WhatsAppLayout from "../../../layouts/WhatsAppLayout.astro";
     });
     el("bulk-approve").addEventListener("click", async () => {
       const ids = [...selectedPreviews];
-      if (!await confirmAction(`Approve and queue ${ids.length} previews?`, "This acknowledges their warnings and queues every exact frozen delivery for live WhatsApp sending.", "Approve & queue")) return;
+      if (!await confirmAction(`Approve and queue ${ids.length} previews?`, "This acknowledges warnings and explicitly excludes any delivery-scoped blockers. Batch-blocked previews are still rejected.", "Approve & queue")) return;
       try {
         showLoading("Approving selected previews", "Checking gateway readiness and freezing delivery audit records…");
-        const result = await actions.whatsapp.bulkApprovePreviews({preview_ids: ids, acknowledge_warnings: true, approved_by: "web-operator"});
+        const result = await actions.whatsapp.bulkApprovePreviews({preview_ids: ids, acknowledge_warnings: true, acknowledge_exclusions: true, approved_by: "web-operator"});
         if (result.error) throw result.error;
         closeAlert(); selectedPreviews.clear(); updateBulkBar(); await showSuccess("Deliveries queued", `${ids.length} previews were approved and queued.`); await table.refresh(true);
       } catch (error) { closeAlert(); await showError(error); }

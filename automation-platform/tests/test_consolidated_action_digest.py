@@ -121,8 +121,10 @@ def test_digest_merges_by_emis_and_creates_one_four_sheet_workbook(tmp_path: Pat
         assert by_emis["1001"].issue_codes == ["DORMANT"]
         assert by_emis["1002"].issue_codes == ["DORMANT", "DISTANCE", "TIMING"]
         assert by_emis["1003"].issue_codes == ["DISTANCE"]
-        assert rendered.message.count("`1002`") == 1
-        assert "💤 📏 ⏱️" in rendered.message
+        assert "`1002`" not in rendered.message
+        assert "GPS KHAN PUR" not in rendered.message
+        assert "*MARKAZ SUMMARY*" in rendered.message
+        assert "NIAZBAIG - MALE" in rendered.message
         assert "*3 UNIQUE SCHOOLS REQUIRE ATTENTION*" in rendered.message
         assert "Dormant activity: 2 schools" in rendered.message
         assert "Hotspot distance: 2 schools" in rendered.message
@@ -300,6 +302,14 @@ def test_markaz_digest_fans_out_one_delivery_and_workbook_per_live_scope(
             "policy_version": 7, "source": "schedule_override",
         }
         assert all("1:45 PM" in item.message for item in deliveries)
+        assert all(
+            item.routing_snapshot["presentation_metadata"]["message_summary_complete"]
+            for item in deliveries
+        )
+        assert all(
+            item.routing_snapshot["presentation_metadata"]["complete_evidence_available"]
+            for item in deliveries
+        )
 
 
 def test_digest_profiles_are_additive_idempotent_and_reuse_live_audiences() -> None:
@@ -348,6 +358,20 @@ def test_digest_profiles_are_additive_idempotent_and_reuse_live_audiences() -> N
         assert created.presentation_policy["attachment_mode"] == "excel"
         assert created.presentation_policy["digest_source_profile_id"] == str(source.id)
         assert created.template_id != source.template_id
+        created_template = session.get(WhatsAppTemplate, created.template_id)
+        assert created_template is not None
+        assert "{{detail_heading}}" in created_template.body
+
+        created_template.body = created_template.body.replace(
+            "⚠️ Distance and timing findings are rule-based review candidates, not confirmed violations.",
+            "Operator-specific closing line.",
+        ).replace("*{{detail_heading}}*", "*DETAILS BY MARKAZ*")
+        session.add(created_template); session.flush()
+        ensure_consolidated_digest_profiles(session, application=application)
+        session.flush(); session.refresh(created_template)
+        assert "*{{detail_heading}}*" in created_template.body
+        assert "Operator-specific closing line." in created_template.body
+
         session.refresh(source)
         assert source.presentation_policy["attachment_mode"] == "image_excel"
 
@@ -357,3 +381,131 @@ def test_digest_profiles_are_additive_idempotent_and_reuse_live_audiences() -> N
             assert "either the Consolidated Action Digest or detailed profiles" in str(exc)
         else:
             raise AssertionError("Selecting digest and detailed delivery for one audience must be rejected")
+
+
+def test_digest_uses_scope_specific_message_detail(tmp_path: Path, monkeypatch) -> None:
+    import whatsapp_gateway.rendering.antidengue.digest_report as report_module
+    import whatsapp_gateway.rendering.antidengue.digest_workbook as workbook_module
+
+    settings = SimpleNamespace(
+        artifact_root=tmp_path / "artifacts", antidengue_submission_deadline="12:30 PM"
+    )
+    monkeypatch.setattr(report_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(workbook_module, "get_settings", lambda: settings)
+    with Session(_engine()) as session:
+        job, wing, tehsil, markaz = _seed(session, tmp_path)
+
+        wing_rendered = render_consolidated_action_digest(
+            session, source_job=job, wing=wing, recipient_name="MEE Heads",
+            scope_key="wing", scope_value=str(wing.id), scope_label=wing.name,
+        )
+        assert "*TEHSIL AND MARKAZ SUMMARY*" in wing_rendered.message
+        assert "*TEHSIL SUMMARY*" in wing_rendered.message
+        assert "*MARKAZ SUMMARY*" in wing_rendered.message
+        assert "GES CHAH MIRAN" not in wing_rendered.message
+        assert "`1001`" not in wing_rendered.message
+
+        tehsil_rendered = render_consolidated_action_digest(
+            session, source_job=job, wing=wing, recipient_name="CITY Heads",
+            scope_key="tehsil", scope_value=str(tehsil.id), scope_label=tehsil.name,
+        )
+        assert "*MARKAZ SUMMARY*" in tehsil_rendered.message
+        assert "NIAZBAIG - MALE" in tehsil_rendered.message
+        assert "GPS KHAN PUR" not in tehsil_rendered.message
+        assert "`1002`" not in tehsil_rendered.message
+
+        markaz_rendered = render_consolidated_action_digest(
+            session, source_job=job, wing=wing, recipient_name="AEO Niazbaig",
+            scope_key="markaz", scope_value=str(markaz.id),
+            scope_values=[str(markaz.id)], scope_label=markaz.name,
+        )
+        assert "*SCHOOL ACTION DETAILS*" in markaz_rendered.message
+        assert "GPS KHAN PUR" in markaz_rendered.message
+        assert "`1002`" in markaz_rendered.message
+
+
+def test_parent_digest_attachment_covers_timing_sample_without_false_blocker(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    import whatsapp_gateway.rendering.antidengue.digest_report as report_module
+    import whatsapp_gateway.rendering.antidengue.digest_workbook as workbook_module
+
+    settings = SimpleNamespace(
+        artifact_root=tmp_path / "artifacts", antidengue_submission_deadline="12:30 PM"
+    )
+    monkeypatch.setattr(report_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(workbook_module, "get_settings", lambda: settings)
+    with Session(_engine()) as session:
+        job, wing, _, markaz = _seed(session, tmp_path)
+        timing_path = next(tmp_path.glob("Simple Activity Timing Review*.xlsx"))
+        workbook = load_workbook(timing_path)
+        try:
+            sheet = workbook["Review Required"]
+            for index in range(2, 8):
+                sheet.append([
+                    "1002", "GPS KHAN PUR", str(wing.id), str(markaz.tehsil_id),
+                    str(markaz.id), "CITY", markaz.name, 245 + index, f"t{index}",
+                ])
+            workbook.save(timing_path)
+        finally:
+            workbook.close()
+        artifact = session.scalar(select(Artifact).where(Artifact.job_id == job.id, Artifact.name.like("Simple Activity Timing Review%")))
+        assert artifact is not None
+        artifact.size_bytes = timing_path.stat().st_size
+        session.add(artifact)
+        session.commit()
+
+        rendered = render_consolidated_action_digest(
+            session, source_job=job, wing=wing, recipient_name="AEO Niazbaig",
+            scope_key="markaz", scope_value=str(markaz.id),
+            scope_values=[str(markaz.id)], scope_label=markaz.name,
+        )
+
+        assert len(rendered.attachment_paths) == 1
+        assert not any(issue["severity"] == "blocked" for issue in rendered.issues)
+        assert not any(issue.get("category") == "presentation" for issue in rendered.issues)
+        assert not any(
+            issue["code"] == "message_evidence_summarized"
+            for issue in rendered.issues
+        )
+        assert rendered.presentation_metadata["message_summary_complete"] is True
+        assert rendered.presentation_metadata["complete_evidence_required"] is True
+        assert rendered.presentation_metadata["complete_evidence_available"] is True
+        assert rendered.presentation_metadata["complete_evidence_source"] == "parent"
+        assert rendered.presentation_metadata["summarized_activity_count"] > 0
+
+
+def test_parent_digest_does_not_inherit_component_presentation_findings() -> None:
+    from whatsapp_gateway.rendering.antidengue.digest_report import _parent_issue
+
+    assert _parent_issue({
+        "code": "message_only_evidence_truncated",
+        "severity": "blocked",
+        "category": "presentation",
+        "message": "Child-only message sample omitted evidence.",
+    }) is None
+
+    routing_issue = {"code": "missing_recipient", "severity": "blocked", "category": "routing"}
+    assert _parent_issue(routing_issue) is routing_issue
+
+
+def test_consolidated_digest_modules_preserve_renderer_boundaries() -> None:
+    renderer_root = (
+        Path(__file__).resolve().parents[1]
+        / "packages"
+        / "whatsapp_gateway"
+        / "whatsapp_gateway"
+        / "rendering"
+        / "antidengue"
+    )
+    relevant = [
+        renderer_root / "digest_report.py",
+        renderer_root / "digest_scope.py",
+        renderer_root / "digest_presentation.py",
+    ]
+    oversized = {
+        path.name: len(path.read_text(encoding="utf-8").splitlines())
+        for path in relevant
+        if len(path.read_text(encoding="utf-8").splitlines()) > 250
+    }
+    assert oversized == {}

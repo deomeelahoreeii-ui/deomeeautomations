@@ -59,6 +59,7 @@ def persist_delivery(
             "requested_target": state.requested_target, "recipient_channel": ctx.profile.recipient_channel,
             "recipient_scope_key": _plan_recipient_scope(state.plan, ctx.report_type.key),
             "native_renderer": str(state.plan.get("native_renderer") or ""),
+            "presentation_metadata": state.plan.get("presentation_metadata") or {},
             "source_artifact_id": state.plan.get("source_artifact_id"),
             "source_artifact_sha256": str(state.plan.get("source_artifact_sha256") or ""),
             "scoped_emis": state.plan.get("scoped_emis") or [],

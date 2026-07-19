@@ -134,6 +134,7 @@ def test_multi_profile_merge_deduplicates_exact_routes_and_blocks_conflicts() ->
         assert all(any(issue["code"] == "conflicting_profile_payloads" for issue in item.issues) for item in deliveries)
         assert merged.blocked_count == 2
         assert merged.configuration_snapshot["profile_count"] == 2
+        assert len(merged.configuration_snapshot["profile_snapshots"]) == 2
 
 
 def test_multi_profile_merge_keeps_one_copy_of_source_quality_issue() -> None:
@@ -164,7 +165,9 @@ def test_multi_profile_merge_keeps_one_copy_of_source_quality_issue() -> None:
         merged = _merge_profile_previews(session, [one, two])
 
         assert merged.issues == [source_issue]
-        assert merged.warning_count == 1
+        # Stored counts are mutually exclusive delivery states; this is a batch issue.
+        assert merged.warning_count == 0
+        assert merged.status == "ready"
 
 
 def test_multi_profile_merge_allows_distinct_reports_for_same_target() -> None:
