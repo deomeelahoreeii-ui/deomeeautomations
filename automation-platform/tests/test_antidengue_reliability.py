@@ -21,6 +21,7 @@ from antidengue_automation.scheduling import (
     equivalent_profile_ids_clause,
     recover_orphaned_executions,
 )
+from antidengue_automation.tasks import run_antidengue_job
 from automation_api.main import app
 from automation_core.database import get_session
 from automation_core.job_service import add_job, claim_job_running
@@ -36,7 +37,10 @@ from whatsapp_gateway.models import (
     WhatsAppReportType,
 )
 from whatsapp_gateway.previews.maintenance import delete_preview_records
-from whatsapp_gateway.dispatch.task_entrypoints import send_approved_preview_job
+from whatsapp_gateway.dispatch.task_entrypoints import (
+    compile_dispatch_preview_job,
+    send_approved_preview_job,
+)
 from whatsapp_gateway.previews.compiler.capabilities import (
     PREVIEW_COMPILER_PROTOCOL, PREVIEW_COMPILER_QUEUE,
     compiler_build_id, compiler_capabilities, compiler_fingerprint,
@@ -230,6 +234,58 @@ def test_duplicate_broker_delivery_claims_job_once() -> None:
     with Session(engine) as second:
         assert claim_job_running(second, job_id) is None
         assert second.get(Job, job_id).status == JobStatus.running.value
+
+
+def test_antidengue_worker_discards_delivery_after_owning_job_was_deleted(
+    monkeypatch, caplog,
+) -> None:
+    isolated_engine = memory_engine()
+    missing_job_id = uuid.uuid4()
+    monkeypatch.setattr("antidengue_automation.tasks.engine", isolated_engine)
+
+    with caplog.at_level("WARNING"):
+        result = run_antidengue_job.run(str(missing_job_id))
+
+    assert result["discarded"] is True
+    assert result["discard_reason"] == "owning_job_missing"
+    assert result["job_id"] == str(missing_job_id)
+    assert "Discarding orphaned durable task delivery" in caplog.text
+
+
+def test_preview_worker_discards_delivery_after_owning_job_was_deleted(
+    monkeypatch, caplog,
+) -> None:
+    isolated_engine = memory_engine()
+    missing_job_id = uuid.uuid4()
+    monkeypatch.setattr(
+        "whatsapp_gateway.dispatch.task_entrypoints.engine", isolated_engine
+    )
+
+    with caplog.at_level("WARNING"):
+        result = compile_dispatch_preview_job.run(str(missing_job_id))
+
+    assert result["discarded"] is True
+    assert result["discard_reason"] == "owning_job_missing"
+    assert result["job_id"] == str(missing_job_id)
+    assert "Discarding orphaned durable task delivery" in caplog.text
+
+
+def test_send_worker_discards_delivery_after_owning_job_was_deleted(
+    monkeypatch, caplog,
+) -> None:
+    isolated_engine = memory_engine()
+    missing_job_id = uuid.uuid4()
+    monkeypatch.setattr(
+        "whatsapp_gateway.dispatch.task_entrypoints.engine", isolated_engine
+    )
+
+    with caplog.at_level("WARNING"):
+        result = send_approved_preview_job.run(str(missing_job_id))
+
+    assert result["discarded"] is True
+    assert result["discard_reason"] == "owning_job_missing"
+    assert result["job_id"] == str(missing_job_id)
+    assert "Discarding orphaned durable task delivery" in caplog.text
 
 
 def test_send_worker_snapshots_initial_dispatch_parameters_before_session_closes(monkeypatch) -> None:

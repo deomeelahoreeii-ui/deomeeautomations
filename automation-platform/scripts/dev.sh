@@ -774,10 +774,10 @@ info "Synchronizing WhatsApp Web history bridge dependencies"
     PUPPETEER_SKIP_DOWNLOAD=true "${PNPM[@]}" install --prefer-offline
   fi
 )
-info "Checking Docker RabbitMQ"
+info "Checking Docker development dependencies"
 COMPOSE_FILE="$ROOT/compose.yaml"
 command -v docker >/dev/null 2>&1 \
-  || fail "Docker is required because RabbitMQ runs in Docker."
+  || fail "Docker is required because RabbitMQ and NATS run in Docker."
 docker compose version >/dev/null 2>&1 \
   || fail "Docker Compose is unavailable."
 rabbitmq_container_id="$(
@@ -805,6 +805,26 @@ if [[ "$rabbitmq_ready" != true ]]; then
 fi
 echo "Docker RabbitMQ is healthy."
 
+info "Checking NATS with JetStream"
+if (
+  cd "$ROOT"
+  "$UV" run python scripts/check_nats.py --quiet
+); then
+  echo "A compatible NATS server is already running; it will be reused."
+else
+  echo "NATS with JetStream is not ready. Starting it..."
+  docker compose -f "$COMPOSE_FILE" up -d nats \
+    || fail "The Docker NATS service could not be started. Check whether port ${NATS_PORT:-4222} is already occupied."
+  if ! (
+    cd "$ROOT"
+    "$UV" run python scripts/check_nats.py --attempts 30 --delay 1
+  ); then
+    docker compose -f "$COMPOSE_FILE" ps nats || true
+    docker compose -f "$COMPOSE_FILE" logs --tail=80 nats || true
+    fail "NATS started but did not provide a healthy JetStream API."
+  fi
+fi
+
 if (
   cd "$ROOT"
   "$UV" run python - <<'PYNTFY'
@@ -826,10 +846,6 @@ PYNTFYURL
 else
   info "ntfy transport disabled by NTFY_ENABLED=false"
 fi
-
-info "Checking NATS"
-wait_for_port 4222 2 \
-  || fail "NATS is not listening on port 4222. Start your NATS server before the development stack."
 
 info "Stopping stale local platform workers before durable-task recovery"
 stop_existing_platform_workers

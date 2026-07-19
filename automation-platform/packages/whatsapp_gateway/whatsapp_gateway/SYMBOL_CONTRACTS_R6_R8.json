@@ -120,7 +120,7 @@
     "source": "antidengue_renderer.py"
   },
   "send_approved_preview_job": {
-    "ast_sha256": "effb22fd0d7f4f0309fbd7abb09b71626b34548fd39e54cfd3c45e82e730d61a",
+    "ast_sha256": "304e78791d953063e08d509233546829381287216a2ea332a3c00b96de2dc266",
     "destination_file": "dispatch/task_entrypoints.py",
     "source": "tasks.py"
   }

@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
+from typing import Any
 
 from sqlalchemy import select
 from sqlmodel import Session
 
 from automation_core.celery_app import celery_app
 from automation_core.database import engine
-from automation_core.database_identity import database_identity
 from automation_core.job_service import (
     append_log, claim_job_running, get_job, mark_job_failed, mark_job_succeeded,
 )
 from automation_core.time import utcnow
+from automation_core.task_delivery import discarded_missing_job_delivery
 from whatsapp_gateway.dispatch.approved_delivery import _publish_approved_deliveries
 from whatsapp_gateway.dispatch.retry_delivery import _publish_selected_approved_deliveries
 from whatsapp_gateway.models import (
@@ -22,6 +24,9 @@ from whatsapp_gateway.preview_service import compile_antidengue_preview
 from whatsapp_gateway.previews.compiler.capabilities import (
     PREVIEW_COMPILER_TASK, contract_mismatches, local_compiler_runtime,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 @celery_app.task(
@@ -40,7 +45,7 @@ def compile_dispatch_preview_job(job_id: str) -> dict[str, str]:
     soft_time_limit=60 * 10,
     time_limit=60 * 12,
 )
-def compile_dispatch_preview_v2_job(self, job_id: str) -> dict[str, str]:  # type: ignore[no-untyped-def]
+def compile_dispatch_preview_v2_job(self, job_id: str) -> dict[str, Any]:  # type: ignore[no-untyped-def]
     return _compile_dispatch_preview(
         job_id,
         enforce_contract=True,
@@ -50,17 +55,21 @@ def compile_dispatch_preview_v2_job(self, job_id: str) -> dict[str, str]:  # typ
 
 def _compile_dispatch_preview(
     job_id: str, *, enforce_contract: bool, worker_name: str
-) -> dict[str, str]:
+) -> dict[str, Any]:
     uuid.UUID(job_id)
     with Session(engine) as session:
         job = claim_job_running(session, job_id)
         if job is None:
             existing = get_job(session, job_id)
             if existing is None:
-                identity = database_identity()
-                raise ValueError(
-                    f"Job not found after durable outbox publication: {job_id}; "
-                    f"worker_database={identity['fingerprint']} ({identity['display']})"
+                return discarded_missing_job_delivery(
+                    job_id,
+                    task_name=(
+                        PREVIEW_COMPILER_TASK
+                        if enforce_contract
+                        else "whatsapp_gateway.compile_dispatch_preview"
+                    ),
+                    logger=logger,
                 )
             return {**dict(existing.result or {}), "deduplicated": True, "job_status": existing.status}
         parameters = dict(job.parameters)
@@ -110,16 +119,16 @@ def _compile_dispatch_preview(
     soft_time_limit=60 * 15,
     time_limit=60 * 20,
 )
-def send_approved_preview_job(job_id: str) -> dict[str, int]:
+def send_approved_preview_job(job_id: str) -> dict[str, Any]:
     with Session(engine) as session:
         job = claim_job_running(session, job_id)
         if job is None:
             existing = get_job(session, job_id)
             if existing is None:
-                identity = database_identity()
-                raise ValueError(
-                    f"Job not found after durable outbox publication: {job_id}; "
-                    f"worker_database={identity['fingerprint']} ({identity['display']})"
+                return discarded_missing_job_delivery(
+                    job_id,
+                    task_name="whatsapp_gateway.send_approved_preview",
+                    logger=logger,
                 )
             return {**dict(existing.result or {}), "deduplicated": True, "job_status": existing.status}
         # ORM instances must not cross this committing log call or the Session

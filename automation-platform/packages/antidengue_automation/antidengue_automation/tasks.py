@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from pathlib import Path
@@ -15,7 +16,6 @@ from automation_core.celery_app import celery_app
 from automation_core.command_runner import append_job_log, run_streamed_command
 from automation_core.config import get_settings
 from automation_core.database import engine
-from automation_core.database_identity import database_identity
 from automation_core.job_service import (
     claim_job_running,
     get_job,
@@ -25,6 +25,10 @@ from automation_core.job_service import (
 )
 from automation_core.models import SourceFile
 from automation_core.storage_catalog import archive_job_artifacts, ensure_source_file_local
+from automation_core.task_delivery import discarded_missing_job_delivery
+
+
+logger = logging.getLogger(__name__)
 
 
 def _latest_run_summary(output_dir: Path, modified_after: float) -> dict | None:
@@ -58,10 +62,10 @@ def run_antidengue_job(job_id: str) -> dict:
         if job is None:
             existing = get_job(session, job_id)
             if existing is None:
-                identity = database_identity()
-                raise ValueError(
-                    f"Job not found after durable outbox publication: {job_id}; "
-                    f"worker_database={identity['fingerprint']} ({identity['display']})"
+                return discarded_missing_job_delivery(
+                    job_id,
+                    task_name="antidengue_automation.run_report",
+                    logger=logger,
                 )
             return {**dict(existing.result or {}), "deduplicated": True, "job_status": existing.status}
         parameters = dict(job.parameters)

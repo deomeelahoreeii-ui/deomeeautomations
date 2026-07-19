@@ -15,7 +15,7 @@ from automation_api.main import app
 from automation_core.database import engine
 from automation_core.models import Artifact, Job, JobLog, JobStatus, JobType, SourceFile, SourceFileRun
 from automation_core.worker_runtime import register_worker_runtime
-from master_data.models import School, Wing
+from master_data.models import Department, District, School, Tehsil, Wing
 from whatsapp_gateway.api import ensure_defaults
 from whatsapp_gateway.models import (
     WhatsAppApplication,
@@ -379,9 +379,30 @@ def test_antidengue_dispatch_preview_freezes_exact_payload(tmp_path) -> None:
                 WhatsAppReportType.key == "school_activity",
             )
         ).first()
-        school = session.exec(select(School).where(School.active.is_(True))).first()
-        wing = session.get(Wing, school.wing_id) if school else None
-        assert report_type is not None and wing is not None and school is not None
+        district = District(name=f"Preview district {suffix}", code=suffix)
+        department = Department(name=f"Preview department {suffix}", code=suffix)
+        session.add_all([district, department])
+        session.flush()
+        wing = Wing(
+            district_id=district.id,
+            department_id=department.id,
+            name=f"Preview wing {suffix}",
+            code=suffix,
+        )
+        tehsil = Tehsil(district_id=district.id, name=f"Preview tehsil {suffix}")
+        session.add_all([wing, tehsil])
+        session.flush()
+        school = School(
+            emis=f"9{suffix[:7]}",
+            name=f"Preview school {suffix}",
+            district_id=district.id,
+            department_id=department.id,
+            wing_id=wing.id,
+            tehsil_id=tehsil.id,
+        )
+        session.add(school)
+        session.flush()
+        assert report_type is not None
 
         workbook = Workbook()
         sheet = workbook.active
@@ -495,6 +516,11 @@ def test_antidengue_dispatch_preview_freezes_exact_payload(tmp_path) -> None:
             "configured_group": (WhatsAppGroup, configured_group.id),
             "directory_group": (WhatsAppDirectoryGroup, directory_group.id),
             "worker_runtime": (type(runtime), runtime.id),
+            "school": (School, school.id),
+            "tehsil": (Tehsil, tehsil.id),
+            "wing": (Wing, wing.id),
+            "department": (Department, department.id),
+            "district": (District, district.id),
         }
 
     try:
@@ -579,6 +605,11 @@ def test_antidengue_dispatch_preview_freezes_exact_payload(tmp_path) -> None:
                 "artifact",
                 "job",
                 "worker_runtime",
+                "school",
+                "tehsil",
+                "wing",
+                "department",
+                "district",
             ):
                 model, item_id = created[key]
                 item = session.get(model, item_id)

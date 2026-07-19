@@ -1,4 +1,20 @@
 services:
+  nats:
+    image: nats:2.12.11-alpine
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${NATS_PORT:-4222}:4222"
+      - "127.0.0.1:${NATS_MONITOR_PORT:-8222}:8222"
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- 'http://127.0.0.1:8222/healthz?js-enabled-only=true' >/dev/null"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 2s
+
   ntfy:
     image: binwiederhier/ntfy:v2.26.0
     command: serve
@@ -218,6 +234,7 @@ services:
         condition: service_healthy
 
 volumes:
+  nats-data:
   ntfy-data:
   postgres-data:
   rabbitmq-data:

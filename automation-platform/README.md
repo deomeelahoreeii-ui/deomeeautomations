@@ -24,7 +24,17 @@ Install Python and web dependencies:
 cd apps/web && npm install
 ```
 
-Start RabbitMQ, then use three terminals:
+For the complete local stack, run `./scripts/dev.sh`. It starts and health-checks
+the Compose-managed RabbitMQ and NATS/JetStream dependencies automatically, and
+reuses a compatible NATS server if one is already listening at the configured
+`WHATSAPP_NATS_URL`.
+
+To run application processes manually, first start their infrastructure and then
+use three terminals:
+
+```bash
+docker compose up -d rabbitmq nats
+```
 
 ```bash
 # API
