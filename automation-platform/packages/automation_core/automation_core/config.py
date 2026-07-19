@@ -33,6 +33,25 @@ class Settings(BaseSettings):
     paperless_max_pages: int = 10
     crm_job_stale_minutes: int = 15
 
+    # Frappe Helpdesk is the operational complaint-case system. Paperless remains
+    # the document archive; this integration stores only durable links and case data.
+    frappe_helpdesk_enabled: bool = False
+    frappe_helpdesk_url: str = "http://127.0.0.1:8082"
+    frappe_helpdesk_public_url: str = ""
+    frappe_helpdesk_site: str = "helpdesk.localhost"
+    frappe_helpdesk_api_key: str = ""
+    frappe_helpdesk_api_secret: str = ""
+    frappe_helpdesk_timeout_seconds: float = 15.0
+    frappe_helpdesk_preview_token_ttl_seconds: int = 1800
+    frappe_helpdesk_verify_ssl: bool = True
+    frappe_helpdesk_ca_bundle: Path | None = None
+    frappe_helpdesk_default_raised_by: str = "complaints@deomee.local"
+    frappe_helpdesk_default_priority: str = "Medium"
+    frappe_helpdesk_default_status: str = "New"
+    frappe_helpdesk_sync_states: str = "published"
+    frappe_helpdesk_crm_public_url: str = "http://localhost:4321"
+    frappe_helpdesk_paperless_url_template: str = ""
+
     antidengue_project_root: Path | None = None
     antidengue_python_bin: Path | None = None
     antidengue_pocketbase_db_path: Path | None = None
@@ -113,7 +132,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    @field_validator("paperless_ca_bundle", "object_storage_ca_bundle", mode="before")
+    @field_validator("paperless_ca_bundle", "object_storage_ca_bundle", "frappe_helpdesk_ca_bundle", mode="before")
     @classmethod
     def normalize_optional_ca_bundle(cls, value: object) -> object:
         """Treat empty optional CA-bundle settings as unset."""
@@ -124,6 +143,34 @@ class Settings(BaseSettings):
             return None
 
         return value
+
+    @field_validator("frappe_helpdesk_url", "frappe_helpdesk_public_url", "frappe_helpdesk_crm_public_url")
+    @classmethod
+    def normalize_optional_service_url(cls, value: str) -> str:
+        normalized = value.strip().rstrip("/")
+        if normalized and not normalized.startswith(("http://", "https://")):
+            raise ValueError("service URLs must start with http:// or https://")
+        return normalized
+
+    @field_validator("frappe_helpdesk_timeout_seconds")
+    @classmethod
+    def validate_frappe_timeout(cls, value: float) -> float:
+        if value <= 0 or value > 300:
+            raise ValueError("frappe_helpdesk_timeout_seconds must be between 0 and 300")
+        return value
+
+    @field_validator("frappe_helpdesk_preview_token_ttl_seconds")
+    @classmethod
+    def validate_frappe_preview_ttl(cls, value: int) -> int:
+        if value < 60 or value > 86400:
+            raise ValueError(
+                "frappe_helpdesk_preview_token_ttl_seconds must be between 60 and 86400"
+            )
+        return value
+
+    @property
+    def frappe_helpdesk_sync_state_list(self) -> list[str]:
+        return [value.strip() for value in self.frappe_helpdesk_sync_states.split(",") if value.strip()]
 
     @field_validator("ntfy_exposure_mode")
     @classmethod

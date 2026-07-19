@@ -1,0 +1,8 @@
+Bundle: Frappe Complaint Foundation B1.2
+Installed: 2026-07-20T02:07:54+05:00
+Project: /home/ahmad/code/deomeeautomations/automation-platform
+Backup: /home/ahmad/code/deomeeautomations/automation-platform/.update-backups/frappe-complaint-foundation-b1.2-20260720-020614
+Frappe site: helpdesk.localhost
+Helpdesk URL: http://localhost:8082/helpdesk/tickets
+Database migration: b1f4a7c9d203
+Import performed: no (preview/import scripts remain explicit)

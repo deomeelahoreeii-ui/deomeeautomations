@@ -234,6 +234,21 @@ export const server = {
       handler: ({caseIds}) => api("/api/v1/crm/cases/publication-batches", {method:"POST", body:JSON.stringify({case_ids:caseIds})}),
     }),
     backfillPaperlessCases: defineAction({ input: z.object({limit:z.number().int().positive().max(100000).optional()}), handler: ({limit}) => api("/api/v1/crm/cases/backfill-paperless", {method:"POST", body:JSON.stringify({limit})}) }),
+    helpdeskHealth: defineAction({ input: z.object({}), handler: () => api("/api/v1/crm/helpdesk/health") }),
+    helpdeskStatistics: defineAction({ input: z.object({}), handler: () => api("/api/v1/crm/helpdesk/statistics") }),
+    helpdeskPreview: defineAction({
+      input: z.object({ limit: z.number().int().min(1).max(1000).default(200) }),
+      handler: ({ limit }) => api(`/api/v1/crm/helpdesk/preview?limit=${limit}`),
+    }),
+    bootstrapHelpdesk: defineAction({ input: z.object({}), handler: () => api("/api/v1/crm/helpdesk/bootstrap", { method: "POST" }) }),
+    syncHelpdeskCase: defineAction({
+      input: z.object({ id: z.string().uuid(), force: z.boolean().default(false) }),
+      handler: ({ id, force }) => api(`/api/v1/crm/helpdesk/cases/${id}/sync?force=${force}`, { method: "POST" }),
+    }),
+    syncHelpdeskBatch: defineAction({
+      input: z.object({ caseIds: z.array(z.string().uuid()).max(200).default([]), previewToken: z.string().min(20).optional(), limit: z.number().int().min(1).max(200).default(100), force: z.boolean().default(false) }),
+      handler: ({ caseIds, previewToken, limit, force }) => api("/api/v1/crm/helpdesk/sync", { method: "POST", body: JSON.stringify({ case_ids: caseIds, preview_token: previewToken, limit, force }) }),
+    }),
     sheets: defineAction({
       input: z.object({
         search: z.string().default(""),

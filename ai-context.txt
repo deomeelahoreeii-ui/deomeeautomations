@@ -1,0 +1,11 @@
+uv run --project /home/ahmad/code/deomeeautomations/automation-platform python \
+  ~/Downloads/deomee_ai_context_bundle_v6_compact_unfiltered.py \
+  /home/ahmad/code/deomeeautomations \
+  --platform-root /home/ahmad/code/deomeeautomations/automation-platform \
+  --frappe-root /home/ahmad/frappe-helpdesk-docker \
+  --frappe-site helpdesk.localhost \
+  --verify-artifacts \
+  --run-checks full \
+  --context-note "Current task: integrate Frappe Helpdesk with CRM complaints, categories, replies and Paperless" \
+  --yes
+
