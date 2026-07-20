@@ -1,0 +1,13 @@
+[
+  "automation-platform/alembic/versions/c3d8e1f4a702_zero_result_acknowledgements_all_scopes.py",
+  "automation-platform/apps/web/src/pages/antidengue/messages.astro",
+  "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/compiler/consolidated_plan.py",
+  "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/compiler/dynamic_plan_members.py",
+  "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/compiler/plan_members.py",
+  "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/compiler/zero_result_acknowledgements.py",
+  "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/compiler/zero_result_claims.py",
+  "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/compiler/zero_result_plan_helpers.py",
+  "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/compiler/zero_result_templates.py",
+  "automation-platform/tests/test_preview_partial_approval.py",
+  "automation-platform/tests/test_zero_result_acknowledgements_all_scopes.py"
+]

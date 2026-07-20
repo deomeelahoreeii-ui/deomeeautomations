@@ -8,10 +8,7 @@ const requestedLevel = Astro.url.searchParams.get("level");
 const initialLevel = requestedLevel === "tehsil" || requestedLevel === "markaz" ? requestedLevel : "wing";
 const initialLevelLabel = initialLevel === "markaz" ? "Markaz" : initialLevel === "tehsil" ? "Tehsil" : "Wing";
 const initialCategoryLabel = initialCategory === "hotspot" ? "Hotspot distance" : initialCategory === "simple" ? "Simple activity timing" : initialCategory === "digest" ? "Action digest" : "Dormant users";
-const showAcknowledgements = initialCategory === "dormant" || initialCategory === "digest";
-const acknowledgementDescription = initialCategory === "digest"
-  ? `Positive once-daily all-clear acknowledgement for the configured ${initialLevelLabel} recipient when the consolidated digest has no action items.`
-  : `Positive once-daily zero-dormancy acknowledgement for the configured ${initialLevelLabel} recipient instead of an empty report.`;
+const showAcknowledgements = initialCategory === "dormant" && initialLevel === "tehsil";
 ---
 
 <AntiDengueLayout
@@ -57,10 +54,10 @@ const acknowledgementDescription = initialCategory === "digest"
   <section class="notification-settings-grid" id="acknowledgement-workspace" style="margin-top:1.5rem" hidden={!showAcknowledgements}>
     <article class="panel notification-settings-panel">
       <div class="panel-heading">
-        <div><p class="eyebrow">Message category</p><h2>Zero dormancy / all clear</h2><p>{acknowledgementDescription}</p></div>
+        <div><p class="eyebrow">Message category</p><h2>Zero dormant schools</h2><p>Positive acknowledgement sent to the configured tehsil group instead of a report attachment.</p></div>
         <span class="badge" id="pool-count">Loading…</span>
       </div>
-      <p class="field-help">Available variables: <code>&#123;&#123;scope_name&#125;&#125;</code>, <code>&#123;&#123;scope_type&#125;&#125;</code>, <code>&#123;&#123;recipient_name&#125;&#125;</code>, <code>&#123;&#123;group_name&#125;&#125;</code>, <code>&#123;&#123;markaz&#125;&#125;</code>, <code>&#123;&#123;tehsil&#125;&#125;</code>, <code>&#123;&#123;wing&#125;&#125;</code>, <code>&#123;&#123;wing_name&#125;&#125;</code>, <code>&#123;&#123;report_date&#125;&#125;</code>, <code>&#123;&#123;checked_at&#125;&#125;</code>, and <code>&#123;&#123;submission_deadline&#125;&#125;</code>.</p>
+      <p class="field-help">Available variables: <code>&#123;&#123;tehsil&#125;&#125;</code>, <code>&#123;&#123;wing&#125;&#125;</code>, <code>&#123;&#123;report_date&#125;&#125;</code>, <code>&#123;&#123;checked_at&#125;&#125;</code>, <code>&#123;&#123;group_name&#125;&#125;</code>, and <code>&#123;&#123;submission_deadline&#125;&#125;</code>.</p>
     </article>
     <aside class="panel notification-help-panel">
       <p class="eyebrow">Selection rule</p><h2>Predictable rotation</h2>
@@ -127,8 +124,7 @@ const acknowledgementDescription = initialCategory === "digest"
     let hotspotReportType: any;
     let simpleActivityReportType: any;
     let digestReportType: any;
-    let acknowledgementScope: any;
-    let acknowledgementChannel: "group" | "individual" = "group";
+    let tehsilScope: any;
     let variants: any[] = [];
     let allTemplates: any[] = [];
     let profiles: any[] = [];
@@ -232,25 +228,12 @@ const acknowledgementDescription = initialCategory === "digest"
       const options = result.data as any;
       configuration = options;
       application = options.applications.find((item: any) => item.key === "antidengue");
-      const reportKey = activeCategory === "digest"
-        ? "consolidated_action_digest"
-        : activeLevel === "markaz"
-        ? "markaz_dormant_summary"
-        : activeLevel === "wing"
-        ? "wing_summary"
-        : "tehsil_dormant_summary";
-      acknowledgementChannel = activeLevel === "markaz" ? "individual" : "group";
-      const acknowledgementScopeKey = activeLevel === "markaz" ? "aeo" : activeLevel;
-      reportType = options.report_types.find((item: any) => item.application_key === "antidengue" && item.key === reportKey);
+      reportType = options.report_types.find((item: any) => item.application_key === "antidengue" && item.key === "tehsil_dormant_summary");
       hotspotReportType = options.report_types.find((item: any) => item.application_key === "antidengue" && item.key === "hotspot_distance_activity");
       simpleActivityReportType = options.report_types.find((item: any) => item.application_key === "antidengue" && item.key === "simple_activity_timing");
       digestReportType = options.report_types.find((item: any) => item.application_key === "antidengue" && item.key === "consolidated_action_digest");
-      acknowledgementScope = options.recipient_scopes.find((item: any) =>
-        item.application_key === "antidengue" &&
-        item.channel === acknowledgementChannel &&
-        item.key === acknowledgementScopeKey
-      );
-      if (!application || !reportType || !hotspotReportType || !simpleActivityReportType || !digestReportType || !acknowledgementScope) throw new Error("AntiDengue message configuration is incomplete.");
+      tehsilScope = options.recipient_scopes.find((item: any) => item.application_key === "antidengue" && item.channel === "group" && item.key === "tehsil");
+      if (!application || !reportType || !hotspotReportType || !simpleActivityReportType || !digestReportType || !tehsilScope) throw new Error("AntiDengue message configuration is incomplete.");
     }
 
     async function loadVariants() {
@@ -258,8 +241,8 @@ const acknowledgementDescription = initialCategory === "digest"
         item.application_id === application.id &&
         item.report_type_id === reportType.id &&
         item.category === "zero_result_acknowledgement" &&
-        (item.recipient_channel === acknowledgementChannel || item.recipient_channel === "any") &&
-        (!item.recipient_scope_id || item.recipient_scope_id === acknowledgementScope.id)
+        item.recipient_channel === "group" &&
+        (!item.recipient_scope_id || item.recipient_scope_id === tehsilScope.id)
       );
       const active = variants.filter((item) => item.enabled).length;
       el("pool-count").textContent = `${active} enabled · ${variants.length} total`;
@@ -363,7 +346,7 @@ const acknowledgementDescription = initialCategory === "digest"
       el<HTMLFormElement>("variant-form").reset();
       el("variant-title").textContent = item ? "Edit acknowledgement variant" : "Add acknowledgement variant";
       el<HTMLInputElement>("variant-id").value = item?.id || "";
-      el<HTMLInputElement>("variant-key").value = item?.key || `antidengue_zero_ack_${activeCategory}_${activeLevel}_${Date.now()}`;
+      el<HTMLInputElement>("variant-key").value = item?.key || `antidengue_zero_result_ack_${Date.now()}`;
       el<HTMLInputElement>("variant-name").value = item?.name || "";
       el<HTMLSelectElement>("variant-enabled").value = String(item?.enabled ?? true);
       el<HTMLTextAreaElement>("variant-body").value = item?.body || "";
@@ -375,8 +358,8 @@ const acknowledgementDescription = initialCategory === "digest"
         id: item.id || undefined,
         application_id: application.id,
         report_type_id: reportType.id,
-        recipient_scope_id: acknowledgementScope.id,
-        recipient_channel: acknowledgementChannel,
+        recipient_scope_id: tehsilScope.id,
+        recipient_channel: "group",
         key: item.key,
         name: item.name,
         category: "zero_result_acknowledgement",

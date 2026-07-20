@@ -10,7 +10,6 @@ from whatsapp_gateway.previews.compiler.dynamic_activity_plan import plan_dynami
 from whatsapp_gateway.rendering.antidengue.markaz_report import render_aeo_markaz_dormant_report
 from whatsapp_gateway.rendering.antidengue.models import MARKAZ_RENDERER_KEY
 from whatsapp_gateway.previews.compiler.consolidated_plan import plan_consolidated_dynamic_member
-from whatsapp_gateway.previews.compiler.zero_result_acknowledgements import build_zero_result_plan
 
 
 def plan_dynamic_contact_member(
@@ -36,15 +35,6 @@ def plan_dynamic_contact_member(
             "The AEO-by-Markaz audience requires the Markaz Dormant Summary report.",
         ))
         return None, True
-    dynamic_snapshot = {
-        "source_id": str(member.source_id),
-        "member_id": str(member.id),
-        "fingerprint": member.source_fingerprint,
-        "officer_id": str(member.officer_id),
-        "jurisdiction_ids": [str(value) for value in member.jurisdiction_ids],
-        "markaz_ids": [str(value) for value in member.scope_ids],
-        "school_ids": [str(value) for value in member.school_ids],
-    }
     try:
         rendered = render_aeo_markaz_dormant_report(
             ctx.session,
@@ -59,35 +49,17 @@ def plan_dynamic_contact_member(
         batch_issues.append(issue("native_report_error", "blocked", str(exc)))
         return None, True
     if not rendered.schools:
-        try:
-            acknowledgement = build_zero_result_plan(
-                ctx,
-                member_id=member.id,
-                target_type="contact",
-                target_jid=member.target_jid,
-                recipient_name=officer.name,
-                scope_key="markaz",
-                # One AEO may own several Markaz. Use the recipient identity so
-                # dormant and consolidated profiles share one daily claim.
-                scope_value=f"officer:{officer.id}",
-                scope_label=member.route_scope_label or officer.name,
-                route_metadata={
-                    "markaz": member.route_scope_label,
-                    "markaz_ids": [str(value) for value in member.scope_ids],
-                },
-                dynamic_snapshot=dynamic_snapshot,
-            )
-        except ValueError as exc:
-            batch_issues.append(issue("acknowledgement_template_error", "blocked", str(exc)))
-            return None, True
-        if acknowledgement is not None:
-            acknowledgement["native_issues"] = [
-                item for item in rendered.issues
-                if item.get("code") != "nothing_to_dispatch"
-            ] + list(acknowledgement.get("native_issues") or [])
-            return acknowledgement, True
         batch_issues.extend(rendered.issues)
         return None, True
+    dynamic_snapshot = {
+        "source_id": str(member.source_id),
+        "member_id": str(member.id),
+        "fingerprint": member.source_fingerprint,
+        "officer_id": str(member.officer_id),
+        "jurisdiction_ids": [str(value) for value in member.jurisdiction_ids],
+        "markaz_ids": [str(value) for value in member.scope_ids],
+        "school_ids": [str(value) for value in member.school_ids],
+    }
     return {
         "job_id": f"{MARKAZ_RENDERER_KEY}:{member.id}", "status": "planned",
         "channel": "contact", "target": member.target_jid, "recipient_name": officer.name,

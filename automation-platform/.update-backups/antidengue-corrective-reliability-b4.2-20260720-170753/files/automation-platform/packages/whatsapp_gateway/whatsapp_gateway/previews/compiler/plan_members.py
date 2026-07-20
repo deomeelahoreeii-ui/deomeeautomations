@@ -18,7 +18,7 @@ from whatsapp_gateway.previews.compiler.routes import (
     _canonical_contact_target, _plan_matches_audience_route, _plan_recipient_channel,
     _plan_recipient_scope, _plan_target, _retarget_group_plan,
 )
-from whatsapp_gateway.previews.compiler.zero_result_plan_helpers import plan_empty_group_result
+from whatsapp_gateway.previews.compiler.zero_result_acknowledgements import build_zero_result_plan
 from whatsapp_gateway.previews.compiler.consolidated_plan import plan_consolidated_group_member
 def plan_group_member(
     ctx: CompileContext, member: WhatsAppAudienceMember, batch_issues: list[dict[str, Any]]
@@ -134,13 +134,8 @@ def plan_group_member(
             batch_issues.append(issue("native_report_error", "blocked", str(exc)))
             return None, True
         if not rendered.schools:
-            return plan_empty_group_result(
-                ctx, member_id=member.id, directory_group=directory_group,
-                rendered_issues=rendered.issues, batch_issues=batch_issues,
-                scope_key=expected_scope, scope_value=member.route_scope_value,
-                scope_label=member.route_scope_label or ctx.wing.name,
-                route_metadata={"wing": ctx.wing.name, "wing_id": str(ctx.wing.id)},
-            ), True
+            batch_issues.extend(rendered.issues)
+            return None, True
         return {
             "job_id": f"{WING_RENDERER_KEY}:{member.id}", "status": "planned", "channel": "group",
             "target": directory_group.jid, "recipient_name": directory_group.name,
@@ -173,15 +168,26 @@ def plan_group_member(
             return None, True
         if not rendered.schools:
             tehsil = session.get(Tehsil, tehsil_id)
-            if tehsil is None:
-                batch_issues.extend(rendered.issues)
-                return None, True
-            return plan_empty_group_result(
-                ctx, member_id=member.id, directory_group=directory_group,
-                rendered_issues=rendered.issues, batch_issues=batch_issues,
-                scope_key="tehsil", scope_value=str(tehsil.id), scope_label=tehsil.name,
-                route_metadata={"tehsil": tehsil.name, "tehsil_id": str(tehsil.id)},
-            ), True
+            if tehsil is not None:
+                try:
+                    acknowledgement = build_zero_result_plan(
+                        ctx,
+                        member_id=member.id,
+                        directory_group=directory_group,
+                        tehsil=tehsil,
+                    )
+                except ValueError as exc:
+                    batch_issues.append(issue("acknowledgement_template_error", "blocked", str(exc)))
+                    return None, True
+                if acknowledgement is not None:
+                    acknowledgement["native_issues"] = [
+                        item
+                        for item in rendered.issues
+                        if item.get("code") != "nothing_to_dispatch"
+                    ] + list(acknowledgement.get("native_issues") or [])
+                    return acknowledgement, True
+            batch_issues.extend(rendered.issues)
+            return None, True
         return {
             "job_id": f"{TEHSIL_DORMANT_RENDERER_KEY}:{member.id}", "status": "planned",
             "channel": "group", "target": directory_group.jid, "recipient_name": directory_group.name,

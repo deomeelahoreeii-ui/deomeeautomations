@@ -1,191 +1,153 @@
 from __future__ import annotations
 
-import hashlib
-from datetime import UTC, datetime
-from zoneinfo import ZoneInfo
+from typing import Any
 
-from sqlalchemy import or_, select
-
-from automation_core.time import utcnow
 from master_data.models import Tehsil
-from whatsapp_gateway.models import (
-    WhatsAppDailyMessageClaim,
-    WhatsAppDirectoryGroup,
-    WhatsAppTemplate,
-)
+from whatsapp_gateway.models import WhatsAppDirectoryGroup
 from whatsapp_gateway.previews.compiler.context import CompileContext
 from whatsapp_gateway.previews.compiler.errors import issue
-from whatsapp_gateway.previews.compiler.messages import PLACEHOLDER_RE
-from whatsapp_gateway.rendering.antidengue.formatting import _wing_label
-
-PURPOSE = "zero_result_acknowledgement"
-BUSINESS_TIMEZONE = ZoneInfo("Asia/Karachi")
-
-
-def _business_datetime(ctx: CompileContext) -> datetime:
-    value = ctx.source_job.finished_at or ctx.source_job.created_at or utcnow()
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.astimezone(BUSINESS_TIMEZONE)
-
-
-def _matching_templates(ctx: CompileContext) -> list[WhatsAppTemplate]:
-    scope_id = ctx.recipient_scope.id if ctx.recipient_scope else None
-    statement = select(WhatsAppTemplate).where(
-        WhatsAppTemplate.enabled.is_(True),
-        WhatsAppTemplate.category == PURPOSE,
-        WhatsAppTemplate.application_id == ctx.application.id,
-        WhatsAppTemplate.report_type_id == ctx.report_type.id,
-        WhatsAppTemplate.recipient_channel.in_(["group", "any"]),
-    )
-    if scope_id:
-        statement = statement.where(
-            or_(
-                WhatsAppTemplate.recipient_scope_id.is_(None),
-                WhatsAppTemplate.recipient_scope_id == scope_id,
-            )
-        )
-    else:
-        statement = statement.where(WhatsAppTemplate.recipient_scope_id.is_(None))
-    return list(ctx.session.scalars(statement.order_by(WhatsAppTemplate.key, WhatsAppTemplate.id)))
-
-
-def _select_daily_template(
-    templates: list[WhatsAppTemplate], *, business_date, scope_value: str
-) -> WhatsAppTemplate:
-    scope_offset = int(hashlib.sha256(scope_value.encode("utf-8")).hexdigest()[:8], 16)
-    return templates[(business_date.toordinal() + scope_offset) % len(templates)]
-
-
-def _semantic_key(
-    ctx: CompileContext,
-    *,
-    target_jid: str,
-    scope_key: str,
-    scope_value: str,
-    business_date,
-) -> str:
-    raw = "|".join(
-        (
-            str(ctx.account.id),
-            target_jid,
-            str(ctx.report_type.id),
-            scope_key,
-            scope_value,
-            business_date.isoformat(),
-            PURPOSE,
-        )
-    )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+from whatsapp_gateway.previews.compiler.zero_result_claims import existing_claim, semantic_key
+from whatsapp_gateway.previews.compiler.zero_result_templates import (
+    BUSINESS_TIMEZONE,
+    PURPOSE,
+    resolve_message,
+)
 
 
 def build_zero_result_plan(
     ctx: CompileContext,
     *,
     member_id,
-    directory_group: WhatsAppDirectoryGroup,
-    tehsil: Tehsil,
-) -> dict | None:
+    target_type: str | None = None,
+    target_jid: str | None = None,
+    recipient_name: str | None = None,
+    scope_key: str | None = None,
+    scope_value: str | None = None,
+    scope_label: str | None = None,
+    route_metadata: dict[str, Any] | None = None,
+    dynamic_snapshot: dict[str, Any] | None = None,
+    # Backward-compatible arguments used by the original Tehsil planner/tests.
+    directory_group: WhatsAppDirectoryGroup | None = None,
+    tehsil: Tehsil | None = None,
+) -> dict[str, Any] | None:
     quality = ctx.summary.get("quality_gate") if isinstance(ctx.summary, dict) else {}
     if isinstance(quality, dict) and quality.get("passed") is False:
         return None
-    templates = _matching_templates(ctx)
-    if not templates:
-        return None
 
-    business_time = _business_datetime(ctx)
-    business_date = business_time.date()
-    template = _select_daily_template(
-        templates,
-        business_date=business_date,
-        scope_value=str(tehsil.id),
-    )
-    values = {
-        "tehsil": tehsil.name,
-        "wing": _wing_label(ctx.wing),
-        "report_date": business_date.isoformat(),
-        "checked_at": business_time.strftime("%I:%M %p").lstrip("0"),
-        "group_name": directory_group.name,
-        "submission_deadline": ctx.deadline.label if ctx.deadline else "12:30 PM",
-    }
-    missing = sorted({key for key in PLACEHOLDER_RE.findall(template.body) if key not in values})
-    if missing:
-        raise ValueError(
-            f"Acknowledgement template {template.name} has unsupported variable(s): "
-            + ", ".join(missing)
-        )
-    message = PLACEHOLDER_RE.sub(lambda match: values[match.group(1)], template.body).strip()
-    if not message:
-        raise ValueError(f"Acknowledgement template {template.name} renders an empty message")
+    if directory_group is not None:
+        target_type = target_type or "group"
+        target_jid = target_jid or directory_group.jid
+        recipient_name = recipient_name or directory_group.name
+    if tehsil is not None:
+        scope_key = scope_key or "tehsil"
+        scope_value = scope_value or str(tehsil.id)
+        scope_label = scope_label or tehsil.name
 
-    semantic_key = _semantic_key(
+    target_type = target_type or "group"
+    recipient_channel = "individual" if target_type == "contact" else "group"
+    target_jid = (target_jid or "").strip()
+    recipient_name = (recipient_name or "").strip()
+    scope_key = (scope_key or "").strip().lower()
+    scope_value = (scope_value or "").strip()
+    scope_label = (scope_label or "").strip()
+    if target_type not in {"contact", "group"}:
+        raise ValueError(f"Unsupported acknowledgement target type: {target_type}")
+    if not target_jid:
+        raise ValueError("The zero-result acknowledgement has no WhatsApp target")
+    if not scope_key or not scope_value:
+        raise ValueError("The zero-result acknowledgement has no stable administrative scope")
+    if not scope_label:
+        scope_label = recipient_name or scope_key.replace("_", " ").title()
+    if not recipient_name:
+        recipient_name = scope_label
+
+    template, values, message, business_date = resolve_message(
         ctx,
-        target_jid=directory_group.jid,
-        scope_key="tehsil",
-        scope_value=str(tehsil.id),
+        recipient_channel=recipient_channel,
+        recipient_name=recipient_name,
+        scope_key=scope_key,
+        scope_value=scope_value,
+        scope_label=scope_label,
+    )
+    claim_key = semantic_key(
+        ctx,
+        target_jid=target_jid,
+        scope_key=scope_key,
+        scope_value=scope_value,
         business_date=business_date,
     )
-    existing = ctx.session.scalar(
-        select(WhatsAppDailyMessageClaim).where(
-            WhatsAppDailyMessageClaim.semantic_key == semantic_key
-        )
-    )
-    skipped = existing is not None
+    skipped = existing_claim(
+        ctx,
+        claim_key=claim_key,
+        target_jid=target_jid,
+        scope_key=scope_key,
+        scope_value=scope_value,
+        business_date=business_date,
+    ) is not None
     daily_claim = {
-        "semantic_key": semantic_key,
+        "semantic_key": claim_key,
         "business_date": business_date.isoformat(),
         "purpose": PURPOSE,
-        "scope_key": "tehsil",
-        "scope_value": str(tehsil.id),
-        "scope_label": tehsil.name,
-        "template_id": str(template.id),
+        "scope_key": scope_key,
+        "scope_value": scope_value,
+        "scope_label": scope_label,
+        "template_id": str(template.id) if template.id is not None else None,
         "template_key": template.key,
     }
-    return {
+    dispatch_route = {
+        "route_kind": scope_key,
+        "recipient_scope": ctx.recipient_scope.key if ctx.recipient_scope else scope_key,
+        "scope_label": scope_label,
+        scope_key: scope_label,
+        "scope_id": scope_value,
+        "wing": ctx.wing.name,
+        "wing_id": str(ctx.wing.id),
+        "row_count": 0,
+        "delivery_kind": PURPOSE,
+        **dict(route_metadata or {}),
+    }
+    plan: dict[str, Any] = {
         "job_id": f"antidengue.zero_result_acknowledgement:{member_id}:{business_date}",
         "status": "skipped" if skipped else "planned",
         "cause": (
-            f"{tehsil.name} was already acknowledged on {business_date.isoformat()}."
+            f"{scope_label} was already acknowledged on {business_date.isoformat()}."
             if skipped
             else ""
         ),
         "skip_issue_code": "acknowledgement_already_sent_today" if skipped else "",
         "skip_issue_severity": "info",
-        "channel": "group",
-        "target": directory_group.jid,
-        "recipient_name": directory_group.name,
-        "route_kind": "tehsil",
+        "channel": "contact" if target_type == "contact" else "group",
+        "target": target_jid,
+        "recipient_name": recipient_name,
+        "route_kind": scope_key,
         "row_count": 0,
-        "native_renderer": "antidengue.zero_result_acknowledgement.v1",
+        "native_renderer": "antidengue.zero_result_acknowledgement.v2",
         "native_context": values,
         "native_issues": [
             issue(
                 "zero_result_acknowledgement_planned",
                 "info",
-                f"A once-daily zero-result acknowledgement is planned for {tehsil.name}.",
+                f"A once-daily zero-dormancy acknowledgement is planned for {scope_label}.",
                 template_key=template.key,
                 business_date=business_date.isoformat(),
+                scope_key=scope_key,
             )
         ],
         "daily_claim": daily_claim,
         "message_template_final": True,
         "message_only": True,
         "payload": {
-            "type": "group",
-            "target": directory_group.jid,
-            "recipient_name": directory_group.name,
+            "type": target_type,
+            "target": target_jid,
+            "recipient_name": recipient_name,
             "text": message,
             "attachment_paths": [],
-            "dispatch_route": {
-                "route_kind": "tehsil",
-                "recipient_scope": "tehsil",
-                "tehsil": tehsil.name,
-                "tehsil_id": str(tehsil.id),
-                "row_count": 0,
-                "delivery_kind": PURPOSE,
-            },
+            "dispatch_route": dispatch_route,
         },
     }
+    if dynamic_snapshot is not None:
+        plan["dynamic_audience"] = dynamic_snapshot
+    return plan
 
 
 __all__ = ["BUSINESS_TIMEZONE", "PURPOSE", "build_zero_result_plan"]

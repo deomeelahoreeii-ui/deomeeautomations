@@ -8,7 +8,6 @@ from whatsapp_gateway.configuration.dynamic_audiences import ResolvedAudienceMem
 from whatsapp_gateway.models import WhatsAppAudienceMember, WhatsAppDirectoryGroup
 from whatsapp_gateway.previews.compiler.context import CompileContext
 from whatsapp_gateway.previews.compiler.errors import extend_unique_issues, issue
-from whatsapp_gateway.previews.compiler.zero_result_acknowledgements import build_zero_result_plan
 from whatsapp_gateway.rendering.antidengue.digest_models import (
     CONSOLIDATED_DIGEST_RENDERER_KEY,
     CONSOLIDATED_DIGEST_REPORT_KEY,
@@ -20,7 +19,6 @@ def _plan(
     ctx: CompileContext, *, member_id: Any, target_type: str, target: str,
     recipient_name: str, scope_key: str, scope_value: str, scope_values: list[str],
     scope_label: str, dynamic_snapshot: dict[str, Any] | None = None,
-    claim_scope_value: str | None = None,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     rendered = render_consolidated_action_digest(
         ctx.session, source_job=ctx.source_job, wing=ctx.wing,
@@ -30,30 +28,6 @@ def _plan(
         deadline=ctx.deadline.label if ctx.deadline else "12:30 PM",
         deadline_timezone=ctx.deadline.timezone if ctx.deadline else "Asia/Karachi",
     )
-    if not rendered.schools:
-        acknowledgement = build_zero_result_plan(
-            ctx,
-            member_id=member_id,
-            target_type=target_type,
-            target_jid=target,
-            recipient_name=recipient_name,
-            scope_key=scope_key,
-            scope_value=claim_scope_value or scope_value,
-            scope_label=scope_label,
-            route_metadata={
-                "scope_ids": scope_values,
-                "delivery_kind": "consolidated_zero_result_acknowledgement",
-            },
-            dynamic_snapshot=dynamic_snapshot,
-        )
-        if acknowledgement is None:
-            return None, rendered.issues
-        acknowledgement["native_issues"] = [
-            item for item in rendered.issues
-            if item.get("code") != "nothing_to_dispatch"
-        ] + list(acknowledgement.get("native_issues") or [])
-        acknowledgement["presentation_metadata"] = rendered.presentation_metadata
-        return acknowledgement, acknowledgement["native_issues"]
     if not rendered.message:
         return None, rendered.issues
     route = {
@@ -141,7 +115,6 @@ def plan_consolidated_dynamic_member(
             recipient_name=officer.name, scope_key="markaz",
             scope_value=scope_values[0] if scope_values else "", scope_values=scope_values,
             scope_label=member.route_scope_label, dynamic_snapshot=snapshot,
-            claim_scope_value=f"officer:{officer.id}",
         )
     except (ValueError, OSError) as exc:
         batch_issues.append(issue("native_report_error", "blocked", str(exc)))
