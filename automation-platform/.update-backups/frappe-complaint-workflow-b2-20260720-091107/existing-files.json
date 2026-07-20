@@ -1,0 +1,18 @@
+[
+  ".env.example",
+  "apps/web/src/actions/index.ts",
+  "apps/web/src/layouts/CrmLayout.astro",
+  "apps/web/src/pages/crm/cases/[id].astro",
+  "apps/web/src/pages/master-data/officers.astro",
+  "packages/automation_core/automation_core/config.py",
+  "packages/crm_domain/crm_domain/api.py",
+  "packages/crm_domain/crm_domain/models.py",
+  "packages/crm_integrations/crm_integrations/frappe_helpdesk/api.py",
+  "packages/crm_integrations/crm_integrations/frappe_helpdesk/bootstrap.py",
+  "packages/crm_integrations/crm_integrations/frappe_helpdesk/cli.py",
+  "packages/crm_integrations/crm_integrations/frappe_helpdesk/client.py",
+  "packages/master_data/master_data/models.py",
+  "packages/master_data/master_data/postgres_repository.py",
+  "packages/master_data/master_data/schemas.py",
+  "tests/test_preview_partial_approval.py"
+]

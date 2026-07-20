@@ -52,6 +52,8 @@ const officerInput = z.object({
   wing_ref: z.string().min(1),
   tehsil_ref: z.string().min(1),
   markaz_ref: z.string().default(""),
+  helpdesk_user_email: z.string().email().or(z.literal("")).default(""),
+  helpdesk_enabled: z.boolean().default(false),
   active: z.boolean().default(true),
 });
 
@@ -248,6 +250,56 @@ export const server = {
     syncHelpdeskBatch: defineAction({
       input: z.object({ caseIds: z.array(z.string().uuid()).max(200).default([]), previewToken: z.string().min(20).optional(), limit: z.number().int().min(1).max(200).default(100), force: z.boolean().default(false) }),
       handler: ({ caseIds, previewToken, limit, force }) => api("/api/v1/crm/helpdesk/sync", { method: "POST", body: JSON.stringify({ case_ids: caseIds, preview_token: previewToken, limit, force }) }),
+    }),
+    bootstrapHelpdeskTeams: defineAction({ input: z.object({}), handler: () => api("/api/v1/crm/helpdesk/teams/bootstrap", { method: "POST" }) }),
+    helpdeskRoutingStatistics: defineAction({ input: z.object({}), handler: () => api("/api/v1/crm/helpdesk/routing/statistics") }),
+    helpdeskRoutingPreview: defineAction({
+      input: z.object({ limit: z.number().int().min(1).max(500).default(200) }),
+      handler: ({ limit }) => api(`/api/v1/crm/helpdesk/routing/preview?limit=${limit}`),
+    }),
+    applyHelpdeskRouting: defineAction({
+      input: z.object({ previewToken: z.string().min(20), force: z.boolean().default(false) }),
+      handler: ({ previewToken, force }) => api("/api/v1/crm/helpdesk/routing/apply", { method: "POST", body: JSON.stringify({ preview_token: previewToken, force }) }),
+    }),
+    helpdeskWorkflowStatistics: defineAction({ input: z.object({}), handler: () => api("/api/v1/crm/helpdesk/workflow/statistics") }),
+    helpdeskWorkflowPreview: defineAction({
+      input: z.object({ limit: z.number().int().min(1).max(500).default(200) }),
+      handler: ({ limit }) => api(`/api/v1/crm/helpdesk/workflow/preview?limit=${limit}`),
+    }),
+    pullHelpdeskWorkflow: defineAction({
+      input: z.object({ caseIds: z.array(z.string().uuid()).max(500).default([]), limit: z.number().int().min(1).max(500).default(200) }),
+      handler: ({ caseIds, limit }) => api("/api/v1/crm/helpdesk/workflow/pull", { method: "POST", body: JSON.stringify({ case_ids: caseIds, limit }) }),
+    }),
+    pullHelpdeskCaseWorkflow: defineAction({
+      input: z.object({ id: z.string().uuid() }),
+      handler: ({ id }) => api(`/api/v1/crm/helpdesk/cases/${id}/workflow/pull`, { method: "POST" }),
+    }),
+    helpdeskWorkflowAudit: defineAction({ input: z.object({ limit: z.number().int().min(1).max(500).default(200) }), handler: ({limit}) => api(`/api/v1/crm/helpdesk/workflow/audit?limit=${limit}`) }),
+    helpdeskEvents: defineAction({ input: z.object({ limit: z.number().int().min(1).max(500).default(100) }), handler: ({limit}) => api(`/api/v1/crm/helpdesk/events?limit=${limit}`) }),
+    knowledgeFacets: defineAction({ input: z.object({}), handler: () => api("/api/v1/crm/knowledge/facets") }),
+    knowledgeStatistics: defineAction({
+      input: z.object({
+        category: z.string().default(""), subCategory: z.string().default(""), sourceSystem: z.string().default(""), search: z.string().default(""),
+        replyScope: z.enum(["approved", "with_reply", "awaiting", "all"]).default("approved"), aiEligibleOnly: z.boolean().default(false),
+        dateFrom: z.string().default(""), dateTo: z.string().default(""),
+      }),
+      handler: (input) => {
+        const params = new URLSearchParams({ category: input.category, sub_category: input.subCategory, source_system: input.sourceSystem, search: input.search, reply_scope: input.replyScope, ai_eligible_only: String(input.aiEligibleOnly), date_from: input.dateFrom, date_to: input.dateTo });
+        for (const [key, value] of [...params]) if (!value) params.delete(key);
+        return api(`/api/v1/crm/knowledge/statistics?${params}`);
+      },
+    }),
+    knowledgeRecords: defineAction({
+      input: z.object({
+        category: z.string().default(""), subCategory: z.string().default(""), sourceSystem: z.string().default(""), search: z.string().default(""),
+        replyScope: z.enum(["approved", "with_reply", "awaiting", "all"]).default("approved"), aiEligibleOnly: z.boolean().default(false),
+        dateFrom: z.string().default(""), dateTo: z.string().default(""), page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(200).default(25),
+      }),
+      handler: (input) => {
+        const params = new URLSearchParams({ category: input.category, sub_category: input.subCategory, source_system: input.sourceSystem, search: input.search, reply_scope: input.replyScope, ai_eligible_only: String(input.aiEligibleOnly), date_from: input.dateFrom, date_to: input.dateTo, page: String(input.page), page_size: String(input.pageSize) });
+        for (const [key, value] of [...params]) if (!value) params.delete(key);
+        return api(`/api/v1/crm/knowledge/records?${params}`);
+      },
     }),
     sheets: defineAction({
       input: z.object({

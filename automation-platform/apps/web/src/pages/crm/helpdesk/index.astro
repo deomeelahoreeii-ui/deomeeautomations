@@ -1,0 +1,49 @@
+---
+import CrmLayout from "../../../layouts/CrmLayout.astro";
+---
+<CrmLayout title="Helpdesk Workflow" description="Pull approved complaint outcomes and replies into PostgreSQL. Team, tehsil and officer routing is available but optional." page="helpdesk">
+  <a class="btn btn-sm" href="http://localhost:8082/helpdesk/tickets" target="_blank" rel="noreferrer" slot="actions">Open Frappe Helpdesk ↗</a>
+  <section class="workflow-metrics">
+    <article class="master-card"><span>Linked tickets</span><strong id="linked-count">—</strong></article>
+    <article class="master-card"><span>Routed</span><strong id="routed-count">—</strong></article>
+    <article class="master-card"><span>Workflow pulled</span><strong id="pulled-count">—</strong></article>
+    <article class="master-card"><span>Approved replies</span><strong id="reply-count">—</strong></article>
+  </section>
+  <section class="workflow-grid">
+    <article class="master-card workflow-card">
+      <p class="eyebrow">Optional routing</p><h2>Teams and officer links</h2>
+      <p>Creates triage and tehsil teams. Individual assignment is used only for officers whose Helpdesk email is explicitly enabled in Master Data.</p>
+      <button class="btn btn-primary" id="bootstrap-teams">Verify teams</button>
+    </article>
+    <article class="master-card workflow-card">
+      <p class="eyebrow">Optional routing</p><h2>Route linked tickets</h2>
+      <p>Previews the exact team/officer selection. Existing unrelated manual assignments are preserved unless a forced route is deliberately requested through the API or CLI.</p>
+      <button class="btn btn-primary" id="route-tickets">Preview and route</button>
+    </article>
+    <article class="master-card workflow-card">
+      <p class="eyebrow">Primary workflow</p><h2>Pull workflow and replies</h2>
+      <p>Copies ticket status, findings and only Approved or Issued final replies into PostgreSQL. Drafts and rejected replies are excluded. Routing is not required.</p>
+      <button class="btn btn-primary" id="pull-workflow">Preview and pull</button>
+    </article>
+  </section>
+  <section class="master-card workflow-audit">
+    <div><p class="eyebrow">Synchronization audit</p><h2>Current complaint workflow</h2></div>
+    <button class="btn btn-sm" id="refresh-workflow">Refresh</button>
+    <div id="workflow-message" class="alert" hidden></div>
+    <div class="workflow-table-wrap"><table class="table table-sm"><thead><tr><th>Complaint</th><th>Ticket</th><th>Status</th><th>Team / officer</th><th>Reply</th><th>Last pull</th></tr></thead><tbody id="workflow-rows"></tbody></table></div>
+  </section>
+  <style>
+    .workflow-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.8rem;margin:1rem 0}.workflow-metrics article{padding:1rem}.workflow-metrics span,.workflow-metrics strong{display:block}.workflow-metrics span{color:#6b7787;font-size:.72rem}.workflow-metrics strong{margin-top:.25rem;font-size:1.65rem}.workflow-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem}.workflow-card{padding:1.1rem}.workflow-card h2,.workflow-audit h2{margin:.1rem 0 .45rem;font-size:1rem}.workflow-card p:not(.eyebrow){min-height:5rem;color:#66758a;font-size:.78rem}.workflow-audit{margin-top:1rem;padding:1.1rem}.workflow-audit>div:first-child{display:inline-block}.workflow-audit>button{float:right}.workflow-table-wrap{clear:both;overflow-x:auto;margin-top:1rem}.workflow-table-wrap td{vertical-align:top}.workflow-secondary{display:block;color:#7b8796;font-size:.7rem}@media(max-width:900px){.workflow-metrics{grid-template-columns:repeat(2,1fr)}.workflow-grid{grid-template-columns:1fr}}
+  </style>
+  <script>
+    import { actions } from "astro:actions";
+    const el=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T;
+    const esc=(v:unknown)=>String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]!));
+    function message(text:string,error=false){const node=el("workflow-message");node.hidden=false;node.className=`alert ${error?"alert-error":"alert-success"}`;node.textContent=text}
+    async function load(){const [stats,audit]=await Promise.all([actions.crm.helpdeskWorkflowStatistics({}),actions.crm.helpdeskWorkflowAudit({limit:200})]);if(stats.data){const d=stats.data as any;el("linked-count").textContent=String(d.linked_cases||0);el("routed-count").textContent=String(d.routing_statuses?.routed||0);el("pulled-count").textContent=String(d.pulled_cases||0);el("reply-count").textContent=String(d.approved_replies||0)}if(audit.data){const rows=(audit.data as any).items||[];el("workflow-rows").innerHTML=rows.map((x:any)=>`<tr><td><a href="/crm/cases/${esc(x.case_id)}">${esc(x.complaint_number||x.case_id)}</a></td><td>${esc(x.ticket_id)}</td><td>${esc(x.workflow_status||"Not pulled")}<span class="workflow-secondary">${esc(x.routing_status||"not routed")}</span></td><td>${esc(x.team||"Unassigned")}<span class="workflow-secondary">${esc(x.assigned_officer||x.assigned_users?.join(", ")||"Team only")}</span></td><td>${esc(x.reply_approval_status||"Not pulled")}<span class="workflow-secondary">${x.reply_imported?"Imported":"Not imported"}</span></td><td>${x.last_pull_at?new Date(x.last_pull_at).toLocaleString():"—"}</td></tr>`).join("")||`<tr><td colspan="6">No linked complaint tickets.</td></tr>`}}
+    el("bootstrap-teams").addEventListener("click",async()=>{const r=await actions.crm.bootstrapHelpdeskTeams({});if(r.error){message(r.error.message,true);return}const d=r.data as any;message(`Teams ready: ${d.teams?.created||0} created, ${d.teams?.unchanged||0} unchanged. ${d.helpdesk_linked_ddeos||0}/${d.active_ddeos||0} DDEOs have individual Helpdesk accounts.`);await load()});
+    el("route-tickets").addEventListener("click",async()=>{const p=await actions.crm.helpdeskRoutingPreview({limit:200});if(p.error){message(p.error.message,true);return}const d=p.data as any;if(!d.batch_token){message("No linked tickets are available for routing.",true);return}const ready=d.counts?.ready||0,manual=d.counts?.manual_assignment_preserved||0;if(!confirm(`Route the exact ${d.selected_count} previewed tickets? ${ready} ready; ${manual} existing manual assignments will be preserved.`))return;const r=await actions.crm.applyHelpdeskRouting({previewToken:d.batch_token,force:false});if(r.error){message(r.error.message,true);return}const c=(r.data as any).counts||{};message(`Routing complete: ${c.routed||0} routed, ${c.manual_preserved||0} manual assignments preserved, ${c.failed||0} failed.`);await load()});
+    el("pull-workflow").addEventListener("click",async()=>{const p=await actions.crm.helpdeskWorkflowPreview({limit:200});if(p.error){message(p.error.message,true);return}const d=p.data as any;if(!confirm(`Pull workflow for exactly ${d.selected_count||0} linked complaint tickets? Only Approved or Issued final replies can replace the CRM reply.`))return;const r=await actions.crm.pullHelpdeskWorkflow({caseIds:d.selected_case_ids||[],limit:200});if(r.error){message(r.error.message,true);return}const c=(r.data as any).counts||{};message(`Workflow pull complete: ${c.pulled||0} pulled, ${c.failed||0} failed.`);await load()});
+    el("refresh-workflow").addEventListener("click",load);await load();
+  </script>
+</CrmLayout>

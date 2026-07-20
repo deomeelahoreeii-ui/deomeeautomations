@@ -588,6 +588,10 @@ def test_combined_execution_logs_normalize_mixed_sqlite_timestamps_to_utc() -> N
             dispatch_profile_id=profile.id,
             created_by="test",
         )
+        # create_execution records an automatic orchestration event using the
+        # real current clock. Use later relative timestamps so this regression
+        # remains deterministic after 2026-07-20 04:06 UTC as well.
+        base_time = datetime.now(UTC).replace(microsecond=0) + timedelta(minutes=1)
         source = Job(
             type=JobType.antidengue_report.value,
             title="Dry run",
@@ -603,7 +607,7 @@ def test_combined_execution_logs_normalize_mixed_sqlite_timestamps_to_utc() -> N
                 execution_id=execution.id,
                 event_type="queued",
                 message="Orchestrator queued the run.",
-                created_at=datetime(2026, 7, 20, 4, 5, tzinfo=UTC),
+                created_at=base_time,
             )
         )
         session.add(
@@ -611,7 +615,7 @@ def test_combined_execution_logs_normalize_mixed_sqlite_timestamps_to_utc() -> N
                 job_id=source.id,
                 level="info",
                 message="Dry-run worker started.",
-                created_at=datetime(2026, 7, 20, 4, 6),
+                created_at=(base_time + timedelta(minutes=1)).replace(tzinfo=None),
             )
         )
         session.commit()
@@ -624,4 +628,4 @@ def test_combined_execution_logs_normalize_mixed_sqlite_timestamps_to_utc() -> N
         assert [entry["created_at"] for entry in logs] == sorted(
             entry["created_at"] for entry in logs
         )
-        assert logs[-1]["created_at"] == datetime(2026, 7, 20, 4, 6, tzinfo=UTC)
+        assert logs[-1]["created_at"] == base_time + timedelta(minutes=1)

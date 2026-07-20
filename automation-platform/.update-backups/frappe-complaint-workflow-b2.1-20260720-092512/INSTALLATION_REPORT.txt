@@ -1,0 +1,21 @@
+Frappe Complaint Workflow Bundle 2.1
+Installed: 2026-07-20T09:26:32+05:00
+Project: /home/ahmad/code/deomeeautomations/automation-platform
+Backup: /home/ahmad/code/deomeeautomations/automation-platform/.update-backups/frappe-complaint-workflow-b2.1-20260720-092512
+Database head: b2c7d9e1f304
+
+Automatic live changes:
+- PostgreSQL additive migration applied.
+- Frappe additive workflow/routing fields ensured.
+- Triage and tehsil Helpdesk teams ensured.
+
+Deliberately not performed:
+- No existing ticket was routed.
+- No manual assignment was changed.
+- No workflow or reply was pulled into CRM.
+
+Next:
+1. Link existing Frappe agent emails to officers in Master Data as needed.
+2. Run preview-helpdesk-routing.sh.
+3. Run apply-helpdesk-routing.sh only after reviewing the preview.
+4. Run pull-helpdesk-workflow.sh after officers update tickets/replies.

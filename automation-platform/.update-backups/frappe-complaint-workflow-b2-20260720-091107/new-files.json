@@ -1,0 +1,8 @@
+[
+  "alembic/versions/b2c7d9e1f304_helpdesk_workflow_and_reply_sync.py",
+  "apps/web/src/pages/crm/helpdesk/index.astro",
+  "packages/crm_integrations/crm_integrations/frappe_helpdesk/batch_tokens.py",
+  "packages/crm_integrations/crm_integrations/frappe_helpdesk/routing.py",
+  "packages/crm_integrations/crm_integrations/frappe_helpdesk/workflow.py",
+  "tests/test_frappe_helpdesk_workflow_b2.py"
+]

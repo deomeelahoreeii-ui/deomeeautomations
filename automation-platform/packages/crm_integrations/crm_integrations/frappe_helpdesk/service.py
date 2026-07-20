@@ -204,7 +204,26 @@ class ComplaintHelpdeskSyncService:
 
     @staticmethod
     def _b64decode(value: str) -> bytes:
-        return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        """Decode only canonical, unpadded Base64URL values.
+
+        Python's permissive Base64 decoder accepts multiple final characters that
+        can decode to the same bytes when the unused padding bits differ. Tokens
+        are operator approvals, so alternate encodings must be rejected rather
+        than treated as equivalent.
+        """
+        text = str(value or "")
+        if not text or "=" in text:
+            raise ValueError("Base64URL value must be non-empty and unpadded")
+        try:
+            encoded = text.encode("ascii")
+        except UnicodeEncodeError as exc:
+            raise ValueError("Base64URL value must be ASCII") from exc
+        padded = encoded + b"=" * (-len(encoded) % 4)
+        decoded = base64.b64decode(padded, altchars=b"-_", validate=True)
+        canonical = base64.urlsafe_b64encode(decoded).decode("ascii").rstrip("=")
+        if not hmac.compare_digest(text, canonical):
+            raise ValueError("Base64URL value is not canonical")
+        return decoded
 
     def _encode_preview_token(self, payload: dict[str, Any]) -> str:
         body = json.dumps(
@@ -219,10 +238,16 @@ class ComplaintHelpdeskSyncService:
     def _decode_preview_token(self, token: str) -> dict[str, Any]:
         try:
             encoded_body, encoded_signature = str(token or "").strip().split(".", 1)
-            body = self._b64decode(encoded_body)
-            signature = self._b64decode(encoded_signature)
-        except Exception as exc:
+        except (AttributeError, ValueError) as exc:
             raise PreviewBatchError("Malformed Helpdesk preview token") from exc
+        try:
+            body = self._b64decode(encoded_body)
+        except (ValueError, TypeError) as exc:
+            raise PreviewBatchError("Malformed Helpdesk preview token") from exc
+        try:
+            signature = self._b64decode(encoded_signature)
+        except (ValueError, TypeError) as exc:
+            raise PreviewBatchError("Helpdesk preview token signature is invalid") from exc
         expected = hmac.new(self._preview_signing_key(), body, hashlib.sha256).digest()
         if not hmac.compare_digest(signature, expected):
             raise PreviewBatchError("Helpdesk preview token signature is invalid")

@@ -1,0 +1,7 @@
+[
+  "apps/api/automation_api/main.py",
+  "apps/web/src/actions/index.ts",
+  "apps/web/src/layouts/CrmLayout.astro",
+  "apps/web/src/pages/crm/helpdesk/index.astro",
+  "apps/web/src/pages/crm/replies/index.astro"
+]

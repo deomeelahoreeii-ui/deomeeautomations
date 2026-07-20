@@ -4,13 +4,15 @@ import AppLayout from "./AppLayout.astro";
 interface Props {
   title: string;
   description: string;
-  page: "intake" | "cases" | "sheet-filter" | "pdf-filter" | "sheet-to-pdf";
+  page: "intake" | "cases" | "helpdesk" | "knowledge" | "sheet-filter" | "pdf-filter" | "sheet-to-pdf";
 }
 
 const { title, description, page } = Astro.props;
 const links = [
   ["intake", "Complaint Intake", "/crm/intake/"],
   ["cases", "Complaint Cases", "/crm/cases/"],
+  ["helpdesk", "Helpdesk Workflow", "/crm/helpdesk/"],
+  ["knowledge", "AI Reply Archive", "/crm/knowledge/"],
   ["sheet-filter", "Sheet Duplicate Filter", "/crm/"],
   ["pdf-filter", "PDF Duplicate Filter", "/crm/pdfs/"],
   ["sheet-to-pdf", "Sheet Rows to PDFs", "/crm/convert/"],

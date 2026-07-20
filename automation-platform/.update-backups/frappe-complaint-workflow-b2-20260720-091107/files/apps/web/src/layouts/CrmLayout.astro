@@ -1,0 +1,26 @@
+---
+import AppLayout from "./AppLayout.astro";
+
+interface Props {
+  title: string;
+  description: string;
+  page: "intake" | "cases" | "sheet-filter" | "pdf-filter" | "sheet-to-pdf";
+}
+
+const { title, description, page } = Astro.props;
+const links = [
+  ["intake", "Complaint Intake", "/crm/intake/"],
+  ["cases", "Complaint Cases", "/crm/cases/"],
+  ["sheet-filter", "Sheet Duplicate Filter", "/crm/"],
+  ["pdf-filter", "PDF Duplicate Filter", "/crm/pdfs/"],
+  ["sheet-to-pdf", "Sheet Rows to PDFs", "/crm/convert/"],
+];
+---
+
+<AppLayout title={title} eyebrow="Operations / CRM" description={description} active="crm">
+  <slot name="actions" slot="actions" />
+  <nav class="section-tabs" aria-label="CRM pages">
+    {links.map(([id, label, href]) => <a class:list={{ active: page === id }} href={href}>{label}</a>)}
+  </nav>
+  <slot />
+</AppLayout>

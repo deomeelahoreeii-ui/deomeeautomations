@@ -4,6 +4,7 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
 const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
 ---
 <CrmLayout title="CRM Replies & Formal Letters" description="Export published complaint remarks, import reviewed replies, and generate native DEO Report packages." page="cases">
+  <a class="btn btn-sm" href="/crm/knowledge/" slot="actions">AI Reply Archive</a>
   <a class="btn btn-sm" href="/crm/intake/review" slot="actions">← Review queue</a>
   <CrmIntakeNav active="packages" />
 
