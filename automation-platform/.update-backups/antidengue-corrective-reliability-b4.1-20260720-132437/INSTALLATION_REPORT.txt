@@ -1,0 +1,20 @@
+AntiDengue Corrective Compliance & Scheduler Reliability Bundle 4.1
+Installed: 2026-07-20T13:26:10+05:00
+Workspace: /home/ahmad/code/deomeeautomations
+Backup: /home/ahmad/code/deomeeautomations/automation-platform/.update-backups/antidengue-corrective-reliability-b4.1-20260720-132437
+Database migration: none
+Database data changed by installer: no
+
+Implemented:
+- One later valid matching activity closes one earlier wrong activity (FIFO, 1:1).
+- Wrong rows remain in corrected/audit workbook sheets.
+- Earlier valid activity cannot prepay a later wrong activity.
+- Cross-school, cross-task and cross-day correction credit is blocked.
+- A complete unchanged portal bundle finishes safely as a no-change source result.
+- Runtime history distinguishes preview-only Test Runs from completed deliveries.
+- Platform scheduler marks no-change executions completed and skips duplicate preview/send.
+- Schedule Run now shows queueing state and opens exact run history.
+
+Schedule data:
+- Installer only audits schedules; it does not silently enable or rewrite them.
+- Use scripts/repair_antidengue_consolidated_schedules.py after reviewing dry-run output.

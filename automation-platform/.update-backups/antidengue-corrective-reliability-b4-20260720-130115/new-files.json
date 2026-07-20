@@ -1,0 +1,6 @@
+[
+  "antidengue/compliance_reconciliation.py",
+  "antidengue/test_compliance_reconciliation.py",
+  "automation-platform/scripts/repair_antidengue_consolidated_schedules.py",
+  "automation-platform/tests/test_antidengue_corrective_reliability_b4.py"
+]

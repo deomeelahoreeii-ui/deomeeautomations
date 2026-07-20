@@ -1137,16 +1137,18 @@ def test_duplicate_portal_export_detection_does_not_block_manual_input(
     assert result["duplicate"] is False
 
 
-def test_stale_duplicate_portal_export_is_not_marked_completed():
+def test_stale_duplicate_portal_export_completes_as_no_change(caplog):
     summary = {
         "quality_gate": {"passed": True},
         "whatsapp": {
             "queued": False,
             "skipped_reason": "stale duplicate portal export",
+            "outcome": "no_change",
         },
     }
 
-    assert main._derive_pocketbase_run_status(summary) == "failed"
+    assert main._derive_pocketbase_run_status(summary) == "completed_no_change"
+    main._raise_if_summary_not_completed(summary, main._get_logger())
 
 
 def test_jetstream_publish_retry_reuses_message_id(monkeypatch):
@@ -1185,3 +1187,188 @@ def test_antidengue_runtime_has_no_prefect_dependency():
 
     assert "prefect" not in runtime_source
     assert not hasattr(main.process_file_flow, "fn")
+
+
+def _portal_bundle(*, dormant: str, hotspot: str, timing: str) -> dict:
+    return {
+        "reports": [
+            {"report_key": "dormant_users", "status": "completed", "sha256": dormant},
+            {"report_key": "hotspot_distance", "status": "completed", "sha256": hotspot},
+            {"report_key": "simple_activity_list", "status": "completed", "sha256": timing},
+        ]
+    }
+
+
+def _write_previous_bundle_summary(
+    output_dir, bundle: dict, *, dry_run: bool = False, status: str = "completed"
+) -> None:
+    run_dir = output_dir / "2026-07-20_09-00-00"
+    run_dir.mkdir(parents=True)
+    whatsapp = {
+        "queued": not dry_run,
+        "dry_run": dry_run,
+        "total_payloads": 3,
+    }
+    if status == "completed_no_change":
+        whatsapp.update(
+            {
+                "queued": False,
+                "dry_run": True,
+                "skipped_reason": "stale duplicate portal export",
+                "outcome": "no_change",
+            }
+        )
+    (run_dir / "run_summary.json").write_text(
+        json.dumps(
+            {
+                "run_started_at": "2026-07-20T09:00:00",
+                "report_source": "unfiltered",
+                "input": {
+                    "name": "user_wise_dormancy_report.xls",
+                    "sha256": "dormant-same",
+                },
+                "portal_acquisition": bundle,
+                "quality_gate": {"passed": True},
+                "whatsapp": whatsapp,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_complete_portal_bundle_duplicate_is_no_change(tmp_path, monkeypatch):
+    output_dir = tmp_path / "output-files"
+    previous = _portal_bundle(
+        dormant="dormant-same", hotspot="hotspot-same", timing="timing-same"
+    )
+    _write_previous_bundle_summary(output_dir, previous)
+    monkeypatch.setattr(main, "OUTPUT_DIR", output_dir)
+    monkeypatch.setattr(main, "RUNTIME_SNAPSHOT_PATH", None)
+
+    result = main._detect_duplicate_portal_export(
+        extraction_diagnostics={"source_file_sha256": "dormant-same"},
+        current_time_obj=main.datetime.datetime.fromisoformat("2026-07-20T09:30:00"),
+        input_source="portal",
+        portal_acquisition=previous,
+    )
+
+    assert result["duplicate"] is True
+    assert result["primary_duplicate"] is True
+    assert result["duplicate_scope"] == "complete_report_bundle"
+    assert result["changed_report_keys"] == []
+
+
+
+
+def test_test_run_dry_run_does_not_consume_future_send_now(tmp_path, monkeypatch):
+    output_dir = tmp_path / "output-files"
+    bundle = _portal_bundle(
+        dormant="dormant-same", hotspot="hotspot-same", timing="timing-same"
+    )
+    _write_previous_bundle_summary(output_dir, bundle, dry_run=True)
+    monkeypatch.setattr(main, "OUTPUT_DIR", output_dir)
+    monkeypatch.setattr(main, "RUNTIME_SNAPSHOT_PATH", None)
+
+    result = main._detect_duplicate_portal_export(
+        extraction_diagnostics={"source_file_sha256": "dormant-same"},
+        current_time_obj=main.datetime.datetime.fromisoformat("2026-07-20T09:30:00"),
+        input_source="portal",
+        portal_acquisition=bundle,
+    )
+
+    assert result["duplicate"] is False
+    assert result["duplicate_scope"] == "none"
+
+
+def test_incomplete_current_bundle_is_not_reported_as_no_change(tmp_path, monkeypatch):
+    output_dir = tmp_path / "output-files"
+    previous = _portal_bundle(
+        dormant="dormant-same", hotspot="hotspot-same", timing="timing-same"
+    )
+    current = {
+        "reports": [
+            {"report_key": "dormant_users", "status": "completed", "sha256": "dormant-same"},
+            {"report_key": "hotspot_distance", "status": "failed", "sha256": ""},
+            {"report_key": "simple_activity_list", "status": "completed", "sha256": "timing-same"},
+        ]
+    }
+    _write_previous_bundle_summary(output_dir, previous)
+    monkeypatch.setattr(main, "OUTPUT_DIR", output_dir)
+    monkeypatch.setattr(main, "RUNTIME_SNAPSHOT_PATH", None)
+
+    result = main._detect_duplicate_portal_export(
+        extraction_diagnostics={"source_file_sha256": "dormant-same"},
+        current_time_obj=main.datetime.datetime.fromisoformat("2026-07-20T09:30:00"),
+        input_source="portal",
+        portal_acquisition=current,
+    )
+
+    assert result["duplicate"] is False
+    assert result["primary_duplicate"] is True
+    assert result["duplicate_scope"] == "incomplete_report_bundle"
+
+
+def test_same_dormant_but_changed_activity_report_is_not_blocked(tmp_path, monkeypatch):
+    output_dir = tmp_path / "output-files"
+    previous = _portal_bundle(
+        dormant="dormant-same", hotspot="hotspot-old", timing="timing-same"
+    )
+    current = _portal_bundle(
+        dormant="dormant-same", hotspot="hotspot-new", timing="timing-same"
+    )
+    _write_previous_bundle_summary(output_dir, previous)
+    monkeypatch.setattr(main, "OUTPUT_DIR", output_dir)
+    monkeypatch.setattr(main, "RUNTIME_SNAPSHOT_PATH", None)
+
+    result = main._detect_duplicate_portal_export(
+        extraction_diagnostics={"source_file_sha256": "dormant-same"},
+        current_time_obj=main.datetime.datetime.fromisoformat("2026-07-20T09:30:00"),
+        input_source="portal",
+        portal_acquisition=current,
+    )
+
+    assert result["duplicate"] is False
+    assert result["primary_duplicate"] is True
+    assert result["duplicate_scope"] == "primary_report_only"
+    assert result["changed_report_keys"] == ["hotspot_distance"]
+    warning = main._duplicate_portal_export_warning(result)
+    assert "will continue" in warning
+
+
+def test_failed_runtime_execution_is_not_a_duplicate_baseline(tmp_path, monkeypatch):
+    output_dir = tmp_path / "output-files"
+    output_dir.mkdir()
+    bundle = _portal_bundle(
+        dormant="dormant-same", hotspot="hotspot-same", timing="timing-same"
+    )
+    snapshot_path = tmp_path / "runtime-snapshot.json"
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "schema_version": main.RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+                "source": "automation-platform-postgresql",
+                "previous_portal_runs": [
+                    {
+                        "started_at": "2026-07-20T09:00:00",
+                        "status": "failed",
+                        "raw_file_name": "user_wise_dormancy_report.xls",
+                        "raw_file_sha256": "dormant-same",
+                        "portal_acquisition": bundle,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(main, "OUTPUT_DIR", output_dir)
+    monkeypatch.setattr(main, "RUNTIME_SNAPSHOT_PATH", snapshot_path)
+
+    result = main._detect_duplicate_portal_export(
+        extraction_diagnostics={"source_file_sha256": "dormant-same"},
+        current_time_obj=main.datetime.datetime.fromisoformat("2026-07-20T09:30:00"),
+        input_source="portal",
+        portal_acquisition=bundle,
+    )
+
+    assert result["duplicate"] is False
+    assert result["duplicate_scope"] == "none"

@@ -3744,7 +3744,7 @@ def _derive_pocketbase_run_status(summary: dict) -> str:
         return "partial"
 
     if whatsapp.get("skipped_reason") == "stale duplicate portal export":
-        return "failed"
+        return "completed_no_change"
 
     if whatsapp.get("skipped_reason"):
         return "completed"
@@ -3763,7 +3763,7 @@ def _derive_pocketbase_run_status(summary: dict) -> str:
 
 def _raise_if_summary_not_completed(summary: dict, logger) -> None:
     status = _derive_pocketbase_run_status(summary)
-    if status == "completed":
+    if status in {"completed", "completed_no_change"}:
         return
 
     whatsapp = summary.get("whatsapp") or {}
@@ -4330,12 +4330,18 @@ def _previous_portal_run_from_runtime_snapshot(
     runs = snapshot.get("previous_portal_runs") or []
     if not isinstance(runs, list):
         raise RuntimeError("Runtime snapshot previous_portal_runs must be a list.")
+    successful_statuses = {
+        "completed",
+        "completed_no_change",
+        "completed_with_delivery_errors",
+    }
     matches = [
         row
         for row in runs
         if isinstance(row, dict)
         and str(row.get("raw_file_sha256") or "") == raw_sha256
         and str(row.get("started_at") or "") < current_started_at
+        and str(row.get("status") or "").strip().lower() in successful_statuses
     ]
     return sorted(
         matches,
@@ -4381,6 +4387,48 @@ def _previous_portal_run_from_pocketbase(
         return None
 
 
+def _portal_report_signature(portal_acquisition: dict | None) -> dict:
+    """Build a stable signature for the complete requested portal report bundle."""
+
+    captures = (portal_acquisition or {}).get("reports") or []
+    reports: list[dict[str, str]] = []
+    for capture in captures:
+        if not isinstance(capture, dict):
+            continue
+        report_key = str(capture.get("report_key") or "").strip()
+        if not report_key:
+            continue
+        reports.append(
+            {
+                "report_key": report_key,
+                "status": str(capture.get("status") or "").strip().lower(),
+                "sha256": str(capture.get("sha256") or "").strip().lower(),
+            }
+        )
+    reports.sort(key=lambda item: item["report_key"])
+    complete = bool(reports) and all(
+        item["status"] == "completed" and item["sha256"] for item in reports
+    )
+    canonical = json.dumps(reports, sort_keys=True, separators=(",", ":"))
+    return {
+        "complete": complete,
+        "fingerprint": hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        if complete
+        else "",
+        "reports": reports,
+        "report_keys": [item["report_key"] for item in reports],
+    }
+
+
+def _portal_report_changes(current: dict, previous: dict) -> dict:
+    current_by_key = {item["report_key"]: item for item in current.get("reports") or []}
+    previous_by_key = {item["report_key"]: item for item in previous.get("reports") or []}
+    all_keys = sorted(set(current_by_key) | set(previous_by_key))
+    unchanged = [key for key in all_keys if current_by_key.get(key) == previous_by_key.get(key)]
+    changed = [key for key in all_keys if current_by_key.get(key) != previous_by_key.get(key)]
+    return {"unchanged_report_keys": unchanged, "changed_report_keys": changed}
+
+
 def _previous_portal_run_from_local_summaries(
     raw_sha256: str,
     current_started_at: str,
@@ -4411,13 +4459,27 @@ def _previous_portal_run_from_local_summaries(
         }:
             continue
 
+        previous_status = _derive_pocketbase_run_status(summary)
+        whatsapp = summary.get("whatsapp") or {}
+        if previous_status not in {"completed", "completed_no_change"}:
+            continue
+        # Platform Test Run/preview source jobs intentionally execute the legacy
+        # extractor with dry_run=True. A preview must never consume the future
+        # real Send Now/scheduled delivery by being mistaken for a prior send.
+        if bool(whatsapp.get("dry_run")) and previous_status != "completed_no_change":
+            continue
+
         matches.append(
             {
                 "started_at": started_at,
-                "status": _derive_pocketbase_run_status(summary),
+                "status": previous_status,
                 "raw_file_name": str(input_info.get("name") or ""),
                 "raw_file_sha256": raw_sha256,
                 "summary_path": str(summary_path),
+                "portal_acquisition": summary.get("portal_acquisition") or {},
+                "portal_report_signature": _portal_report_signature(
+                    summary.get("portal_acquisition") or {}
+                ),
             }
         )
 
@@ -4429,45 +4491,93 @@ def _detect_duplicate_portal_export(
     extraction_diagnostics: dict,
     current_time_obj: datetime.datetime,
     input_source: str,
+    portal_acquisition: dict | None = None,
 ) -> dict:
     raw_sha256 = str(extraction_diagnostics.get("source_file_sha256") or "")
     current_started_at = current_time_obj.isoformat()
+    current_bundle = _portal_report_signature(portal_acquisition)
     result = {
         "duplicate": False,
+        "primary_duplicate": False,
+        "duplicate_scope": "none",
         "policy": PORTAL_DUPLICATE_RAW_POLICY,
         "current_sha256": raw_sha256,
+        "current_report_bundle": current_bundle,
     }
     if input_source != "portal" or not raw_sha256:
         return result
 
-    previous = _previous_portal_run_from_runtime_snapshot(raw_sha256, current_started_at)
-    previous = previous or _previous_portal_run_from_local_summaries(
+    local_previous = _previous_portal_run_from_local_summaries(
         raw_sha256,
         current_started_at,
     )
-    if not previous:
+    runtime_previous = _previous_portal_run_from_runtime_snapshot(
+        raw_sha256,
+        current_started_at,
+    )
+    candidates = [item for item in (local_previous, runtime_previous) if item]
+    if not candidates:
         return result
+    previous = max(candidates, key=lambda item: str(item.get("started_at") or ""))
 
     result.update(
         {
-            "duplicate": True,
+            "primary_duplicate": True,
             "previous_run_started_at": str(previous.get("started_at") or ""),
             "previous_status": str(previous.get("status") or ""),
             "previous_raw_file_name": str(previous.get("raw_file_name") or ""),
             "previous_summary_path": str(previous.get("summary_path") or ""),
         }
     )
+
+    previous_bundle = dict(
+        previous.get("portal_report_signature")
+        or _portal_report_signature(previous.get("portal_acquisition") or {})
+    )
+    if current_bundle.get("complete") and previous_bundle.get("complete"):
+        changes = _portal_report_changes(current_bundle, previous_bundle)
+        result.update(changes)
+        if current_bundle.get("fingerprint") == previous_bundle.get("fingerprint"):
+            result.update(
+                {
+                    "duplicate": True,
+                    "duplicate_scope": "complete_report_bundle",
+                    "previous_report_bundle": previous_bundle,
+                }
+            )
+        else:
+            result["duplicate_scope"] = "primary_report_only"
+        return result
+
+    # An incomplete current report bundle must never be converted into a
+    # successful no-change run. Let the normal acquisition/quality gate expose
+    # the missing or failed component. The legacy primary-only behaviour is
+    # retained only when no component-level capture metadata exists at all.
+    if current_bundle.get("reports"):
+        result["duplicate_scope"] = "incomplete_report_bundle"
+    elif not current_bundle.get("complete"):
+        result.update({"duplicate": True, "duplicate_scope": "legacy_primary_report"})
+    else:
+        result["duplicate_scope"] = "primary_report_only"
     return result
 
 
 def _duplicate_portal_export_warning(stale_check: dict) -> str:
     previous = stale_check.get("previous_run_started_at") or "an earlier run"
     sha = stale_check.get("current_sha256") or "-"
+    if stale_check.get("duplicate"):
+        return (
+            "Portal returned the exact same complete report bundle as "
+            f"{previous} (primary sha256={sha}). "
+            "The run is completed as no-change and duplicate preview/WhatsApp "
+            "delivery is skipped safely."
+        )
+    changed = ", ".join(stale_check.get("changed_report_keys") or []) or "other reports"
     return (
-        "Portal returned the exact same raw export as "
-        f"{previous} (sha256={sha}). "
-        "This usually means the portal/download was stale; WhatsApp dispatch is "
-        "blocked by default to avoid resending old dormant counts."
+        "The dormant-users export matched "
+        f"{previous} (sha256={sha}), but {changed} changed. "
+        "The changed distance/timing evidence will continue through consolidated "
+        "preview generation instead of being incorrectly blocked."
     )
 
 
@@ -4692,15 +4802,20 @@ def _process_raw_report_file(
         extraction_diagnostics=extraction_diagnostics,
         current_time_obj=current_time_obj,
         input_source=input_source,
+        portal_acquisition=portal_acquisition,
     )
     extraction_diagnostics["portal_duplicate_raw_check"] = stale_check
-    if stale_check.get("duplicate"):
+    if stale_check.get("duplicate") or stale_check.get("primary_duplicate"):
         warning = _duplicate_portal_export_warning(stale_check)
         if warning not in quality_gate["warnings"]:
             quality_gate["warnings"].append(warning)
             quality_gate.setdefault("issues", []).append(
                 {
-                    "code": "duplicate_portal_export",
+                    "code": (
+                        "duplicate_portal_report_bundle"
+                        if stale_check.get("duplicate")
+                        else "unchanged_dormant_export_with_changed_components"
+                    ),
                     "severity": "warning",
                     "message": warning,
                 }
@@ -4785,6 +4900,8 @@ def _process_raw_report_file(
             "dry_run": dry_run,
             "total_payloads": 0,
             "skipped_reason": "stale duplicate portal export",
+            "outcome": "no_change",
+            "no_change": True,
             "stale_duplicate": stale_check,
         }
         _append_lifecycle_event(
@@ -4802,9 +4919,10 @@ def _process_raw_report_file(
         )
         _append_lifecycle_event(
             lifecycle_events,
-            "failed",
-            "failed",
-            "Run ended before dispatch because the portal export was stale.",
+            "completed_no_change",
+            "ok",
+            "Run completed safely with no dispatch because the portal export was unchanged.",
+            {"status": "completed_no_change", "dispatch_prevented": True},
         )
         summary = _build_run_summary(
             current_time_obj=current_time_obj,
@@ -4822,9 +4940,9 @@ def _process_raw_report_file(
             lifecycle_events=lifecycle_events,
         )
         _save_run_summary(summary_path, summary, clean_df, logger)
-        logger.error(
-            "WhatsApp sending blocked because the portal returned a duplicate raw "
-            f"export. Run summary saved to {summary_path}."
+        logger.info(
+            "Portal report bundle was unchanged. Duplicate WhatsApp dispatch was prevented "
+            f"and the run completed as no-change. Run summary saved to {summary_path}."
         )
         return summary
 
@@ -4940,10 +5058,11 @@ def _process_raw_report_file(
         "ok",
         f"Run summary prepared at {summary_path}.",
     )
+    successful_statuses = {"completed", "completed_no_change"}
     _append_lifecycle_event(
         lifecycle_events,
-        "completed" if final_status == "completed" else "failed",
-        "ok" if final_status == "completed" else "warning",
+        final_status if final_status in successful_statuses else "failed",
+        "ok" if final_status in successful_statuses else "warning",
         f"Run finished with status: {final_status}.",
         {"status": final_status},
     )

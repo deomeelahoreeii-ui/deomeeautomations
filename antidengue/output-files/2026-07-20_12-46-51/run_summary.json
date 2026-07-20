@@ -1,0 +1,839 @@
+{
+  "dry_run": true,
+  "filter": {
+    "applied": true,
+    "available_activity_columns": [
+      "Simple Activities",
+      "Patient Activities",
+      "Vector Surveillance Activities",
+      "Larvae Case Response",
+      "Total Activities"
+    ],
+    "dormant_raw_rows": 14,
+    "missing_activity_columns": [
+      "TPV Activities"
+    ],
+    "raw_rows": 1021,
+    "strategy": "Total Activities"
+  },
+  "input": {
+    "name": "user_wise_dormancy_report.xls",
+    "path": "/home/ahmad/code/deomeeautomations/antidengue/drop-raw-files/user_wise_dormancy_report.xls",
+    "portal_duplicate_raw_check": {
+      "current_sha256": "d9799a39874ff754c7bc96d642bdf23e255dc187f405b16de2392d5fce88c91b",
+      "duplicate": false,
+      "policy": "block_send"
+    },
+    "sha256": "d9799a39874ff754c7bc96d642bdf23e255dc187f405b16de2392d5fce88c91b",
+    "size_bytes": 101104,
+    "source": "portal"
+  },
+  "lifecycle": [
+    {
+      "created_at": "2026-07-20T12:46:54",
+      "message": "Run started.",
+      "payload": {
+        "dry_run": true,
+        "file": "/home/ahmad/code/deomeeautomations/antidengue/drop-raw-files/user_wise_dormancy_report.xls",
+        "input_source": "portal"
+      },
+      "stage": "started",
+      "status": "started"
+    },
+    {
+      "created_at": "2026-07-20T12:46:54",
+      "message": "Raw report loaded with 1021 row(s).",
+      "payload": {
+        "raw_file_sha256": "d9799a39874ff754c7bc96d642bdf23e255dc187f405b16de2392d5fce88c91b",
+        "raw_file_size_bytes": 101104,
+        "raw_rows": 1021
+      },
+      "stage": "downloaded",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-20T12:46:54",
+      "message": "Dormant filter produced 14 row(s).",
+      "payload": {
+        "dormant_rows": 14,
+        "filter_applied": true,
+        "filter_strategy": "Total Activities"
+      },
+      "stage": "processed",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-20T12:46:55",
+      "message": "Generated Excel report, officer mapping audit, and activity evidence.",
+      "payload": {
+        "activity_evidence": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/Activity Evidence - 20-07-2026 - 12-46 PM.xlsx",
+        "excel_report": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/Anti-Dengue App Dormant Users - 20-07-2026 - 12-46 PM.xlsx",
+        "invalid_contacts": 0,
+        "officer_mapping_audit": "/home/ahmad/code/deomeeautomations/antidengue/unmapped-officer-reports/2026-07-20_12-46-51/Officer Mapping Audit - 20-07-2026 - 12-46 PM.xlsx",
+        "unmapped_schools": 12
+      },
+      "stage": "processed",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-20T12:46:55",
+      "message": "Data quality gate passed.",
+      "payload": {
+        "dormant_rows": 14,
+        "duplicate_portal_export": false,
+        "warnings": []
+      },
+      "stage": "validated",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-20T12:46:55",
+      "message": "WhatsApp dispatch started.",
+      "payload": {
+        "dormant_rows": 14,
+        "dry_run": true
+      },
+      "stage": "dispatch_started",
+      "status": "started"
+    },
+    {
+      "created_at": "2026-07-20T12:46:55",
+      "message": "WhatsApp dispatch finished without queueing messages.",
+      "payload": {
+        "dynamic_payloads": 4,
+        "fixed_payloads": 2,
+        "queued": false,
+        "queued_dynamic_payloads": 4,
+        "total_payloads": 6
+      },
+      "stage": "dispatch_finished",
+      "status": "warning"
+    },
+    {
+      "created_at": "2026-07-20T12:46:55",
+      "message": "Run summary prepared at /home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/run_summary.json.",
+      "payload": {},
+      "stage": "summary_saved",
+      "status": "ok"
+    },
+    {
+      "created_at": "2026-07-20T12:46:55",
+      "message": "Run finished with status: completed.",
+      "payload": {
+        "status": "completed"
+      },
+      "stage": "completed",
+      "status": "ok"
+    }
+  ],
+  "outputs": {
+    "activity_evidence": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/Activity Evidence - 20-07-2026 - 12-46 PM.xlsx",
+    "audit_dir": "/home/ahmad/code/deomeeautomations/antidengue/unmapped-officer-reports/2026-07-20_12-46-51",
+    "excel_report": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/Anti-Dengue App Dormant Users - 20-07-2026 - 12-46 PM.xlsx",
+    "officer_delivery_audit": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/Officer Delivery Audit - 20-07-2026 - 12-46 PM.xlsx",
+    "officer_mapping_audit": "/home/ahmad/code/deomeeautomations/antidengue/unmapped-officer-reports/2026-07-20_12-46-51/Officer Mapping Audit - 20-07-2026 - 12-46 PM.xlsx",
+    "output_dir": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51"
+  },
+  "portal_acquisition": {
+    "reports": [
+      {
+        "acquisition": "page_export_button",
+        "analysis": null,
+        "content_type": null,
+        "error": null,
+        "name": "user_wise_dormancy_report.xls",
+        "path": "/home/ahmad/code/deomeeautomations/antidengue/drop-raw-files/user_wise_dormancy_report.xls",
+        "report_key": "dormant_users",
+        "report_name": "Dormant users",
+        "requested_url": "https://dashboard-tracking.punjab.gov.pk/user_wise_larva_report?district_id=18&date_range=0",
+        "required": true,
+        "sha256": "d9799a39874ff754c7bc96d642bdf23e255dc187f405b16de2392d5fce88c91b",
+        "size_bytes": 101104,
+        "status": "completed"
+      },
+      {
+        "acquisition": "authenticated_export",
+        "analysis": {
+          "classification": "review_required",
+          "column_count": 14,
+          "columns": [
+            "Sr #",
+            "ID",
+            "District",
+            "Town",
+            "UC",
+            "Sub Department",
+            "Tag",
+            "Hotspot Name",
+            "Hotspot Address",
+            "Hotspot(Lat,Long)",
+            "Activity(Lat,Long)",
+            "Distance Difference (In meters)",
+            "Submitted by",
+            "Activity Date/Time"
+          ],
+          "distance_meters": {
+            "maximum": 2122163.6,
+            "median": 24.895,
+            "minimum": 0.86,
+            "p90": 321.9040000000004
+          },
+          "missing_distance_count": 0,
+          "review_candidate_count": 226,
+          "review_candidate_sample": [
+            {
+              "activity_datetime": "on 07/20/2026 at 10:03AM",
+              "activity_id": "885529677",
+              "distance_meters": 2122163.6,
+              "hotspot_name": "Government Girls Middle School",
+              "submitted_by": "35220567.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 11:08AM",
+              "activity_id": "885579633",
+              "distance_meters": 222025.46,
+              "hotspot_name": "GGES Ameeepur Jhuggian",
+              "submitted_by": "35220346.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 08:44AM",
+              "activity_id": "885443446",
+              "distance_meters": 16042.32,
+              "hotspot_name": "Govt Girls High school sattukatla",
+              "submitted_by": "35220370.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 08:54AM",
+              "activity_id": "885449445",
+              "distance_meters": 16023.31,
+              "hotspot_name": "Govt Girls High school sattukatla",
+              "submitted_by": "35220370.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 08:52AM",
+              "activity_id": "885449042",
+              "distance_meters": 16018.62,
+              "hotspot_name": "Govt Girls High school sattukatla",
+              "submitted_by": "35220370.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 08:49AM",
+              "activity_id": "885446974",
+              "distance_meters": 16017.61,
+              "hotspot_name": "Govt Girls High school sattukatla",
+              "submitted_by": "35220370.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 08:46AM",
+              "activity_id": "885445410",
+              "distance_meters": 16014.57,
+              "hotspot_name": "Govt Girls High school sattukatla",
+              "submitted_by": "35220370.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 09:18AM",
+              "activity_id": "885482659",
+              "distance_meters": 11352.7,
+              "hotspot_name": "Govt girls primary school shezada",
+              "submitted_by": "35210713.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 09:54AM",
+              "activity_id": "885520542",
+              "distance_meters": 10862.72,
+              "hotspot_name": "Govrnment High School",
+              "submitted_by": "35210990.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 09:58AM",
+              "activity_id": "885524972",
+              "distance_meters": 10857.09,
+              "hotspot_name": "Govrnment High School",
+              "submitted_by": "35210990.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 10:38AM",
+              "activity_id": "885558580",
+              "distance_meters": 10325.99,
+              "hotspot_name": "(H) govt boyes sachool UC 143 A",
+              "submitted_by": "35210454.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 12:38PM",
+              "activity_id": "885624342",
+              "distance_meters": 10324.46,
+              "hotspot_name": "(H) govt boyes sachool UC 143 A",
+              "submitted_by": "35210454.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 11:01AM",
+              "activity_id": "885574723",
+              "distance_meters": 10324.22,
+              "hotspot_name": "(H) govt boyes sachool UC 143 A",
+              "submitted_by": "35210454.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 10:43AM",
+              "activity_id": "885562904",
+              "distance_meters": 10321.2,
+              "hotspot_name": "(H) govt boyes sachool UC 143 A",
+              "submitted_by": "35210454.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 11:23AM",
+              "activity_id": "885587806",
+              "distance_meters": 10149.64,
+              "hotspot_name": "govt girls parimariy school murid waal",
+              "submitted_by": "35220362.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 09:53AM",
+              "activity_id": "885519533",
+              "distance_meters": 9751.3,
+              "hotspot_name": "Lahore Cantt public school",
+              "submitted_by": "35210538.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 09:51AM",
+              "activity_id": "885517999",
+              "distance_meters": 9750.13,
+              "hotspot_name": "Lahore Cantt public school",
+              "submitted_by": "35210538.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 09:49AM",
+              "activity_id": "885515412",
+              "distance_meters": 9747.2,
+              "hotspot_name": "Lahore Cantt public school",
+              "submitted_by": "35210538.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 10:01AM",
+              "activity_id": "885528473",
+              "distance_meters": 7454.07,
+              "hotspot_name": "Govt boys high school",
+              "submitted_by": "35210016.lahore.sed"
+            },
+            {
+              "activity_datetime": "on 07/20/2026 at 10:07AM",
+              "activity_id": "885533310",
+              "distance_meters": 7449.86,
+              "hotspot_name": "Govt boys high school",
+              "submitted_by": "35210016.lahore.sed"
+            }
+          ],
+          "review_report_path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/Hotspot Distance Review - 20-07-2026 - 12-46 PM.xlsx",
+          "review_selection_mode": "published_rules",
+          "review_threshold_meters": null,
+          "row_count": 1240,
+          "rule_results": [
+            {
+              "activity_id_sample": [
+                "885624342",
+                "885613756",
+                "885611608",
+                "885609945",
+                "885609264",
+                "885607435",
+                "885594223",
+                "885593663",
+                "885593526",
+                "885593446",
+                "885593213",
+                "885590167",
+                "885587806",
+                "885587803",
+                "885585985",
+                "885580406",
+                "885579633",
+                "885578715",
+                "885575301",
+                "885574723"
+              ],
+              "classification": "review_required",
+              "matching_activity_count": 226,
+              "rule_id": "972ac5f5-8bc0-47d3-994c-32f46513ac9d",
+              "rule_key": "e54746eb-3046-40c7-adf9-dcdcc30e1a54",
+              "rule_name": "Distance and submission-time review",
+              "rule_version": 1,
+              "unique_submitter_count": 82
+            }
+          ],
+          "schema_version": "hotspot_distance.v1",
+          "source_format": "html_table_xls",
+          "unique_submitter_count": 297,
+          "valid": true,
+          "valid_distance_count": 1240
+        },
+        "content_type": "application/vnd.ms-excel; charset=utf-8",
+        "error": null,
+        "name": "hotspot_distance_report_20260720_1246.xls",
+        "path": "/home/ahmad/code/deomeeautomations/antidengue/drop-raw-files/hotspot_distance_report_20260720_1246.xls",
+        "report_key": "hotspot_distance",
+        "report_name": "Hotspot-distance activities",
+        "requested_url": "https://dashboard-tracking.punjab.gov.pk/reports/activities/hotspot_distance_report?act_tag=&action=hotspot_distance_report&controller=reports%2Factivities&format=xls&hotspot_distance=&is_filter_selected=true&pagination=No&parent_department=&sub_department=&tehsil_id=&uc=&district_id=18&datefrom=2026-07-20T00%3A00&dateto=2026-07-20T12%3A46",
+        "required": false,
+        "review_report": {
+          "candidate_count": 226,
+          "name": "Hotspot Distance Review - 20-07-2026 - 12-46 PM.xlsx",
+          "path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/Hotspot Distance Review - 20-07-2026 - 12-46 PM.xlsx",
+          "rule_results": [
+            {
+              "activity_id_sample": [
+                "885624342",
+                "885613756",
+                "885611608",
+                "885609945",
+                "885609264",
+                "885607435",
+                "885594223",
+                "885593663",
+                "885593526",
+                "885593446",
+                "885593213",
+                "885590167",
+                "885587806",
+                "885587803",
+                "885585985",
+                "885580406",
+                "885579633",
+                "885578715",
+                "885575301",
+                "885574723"
+              ],
+              "classification": "review_required",
+              "matching_activity_count": 226,
+              "rule_id": "972ac5f5-8bc0-47d3-994c-32f46513ac9d",
+              "rule_key": "e54746eb-3046-40c7-adf9-dcdcc30e1a54",
+              "rule_name": "Distance and submission-time review",
+              "rule_version": 1,
+              "unique_submitter_count": 82
+            }
+          ],
+          "selection_mode": "published_rules",
+          "unique_school_count": 82,
+          "unmapped_school_count": 0
+        },
+        "sha256": "d35b140e217f6ea18066ca20e966c1c3f15ef996fbb477bcdd7ca83a654b4602",
+        "size_bytes": 628075,
+        "status": "completed"
+      },
+      {
+        "acquisition": "authenticated_export",
+        "analysis": {
+          "column_count": 15,
+          "columns": [
+            "Sr #",
+            "ID",
+            "District",
+            "Town",
+            "UC",
+            "Parent Department",
+            "Sub Department",
+            "Tag",
+            "Name/Address",
+            "Dengue Larvae",
+            "Latitude",
+            "Longitude",
+            "Submitted by",
+            "Activity Date/Time",
+            "Picture Time Difference(Sec)"
+          ],
+          "invalid_time_difference_count": 0,
+          "review_candidate_count": 4151,
+          "review_report_path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/Simple Activity Timing Review - 20-07-2026 - 12-46 PM.xlsx",
+          "review_selection_mode": "published_rules",
+          "row_count": 4539,
+          "rule_results": [
+            {
+              "classification": "review_required",
+              "matching_activity_count": 4151,
+              "rule_id": "63cba0fb-1131-4ccf-b3b7-3104c3b01b01",
+              "rule_key": "63cba0fb-1131-4ccf-b3b7-3104c3b01b00",
+              "rule_name": "Minimum five-minute before/after interval",
+              "rule_version": 1
+            }
+          ],
+          "schema_version": "simple_activity_timing.v1",
+          "source_format": "html_table_xls",
+          "valid": true,
+          "valid_time_difference_count": 4539
+        },
+        "content_type": "application/vnd.ms-excel; charset=utf-8",
+        "error": null,
+        "name": "simple_activity_list_20260720_1246.xls",
+        "path": "/home/ahmad/code/deomeeautomations/antidengue/drop-raw-files/simple_activity_list_20260720_1246.xls",
+        "report_key": "simple_activity_list",
+        "report_name": "Simple Activity List",
+        "requested_url": "https://dashboard-tracking.punjab.gov.pk/activities/simples/line_list?act_tag=&action=line_list&controller=activities%2Fsimples&format=xls&larva_type=&pagination=No&parent_department=&period=simple_activities&sub_department=&submitted_by=&tehsil_id=&uc=&district_id=18&datefrom=2026-07-20T00%3A00&dateto=2026-07-20T12%3A46",
+        "required": false,
+        "review_report": {
+          "candidate_count": 4151,
+          "name": "Simple Activity Timing Review - 20-07-2026 - 12-46 PM.xlsx",
+          "path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/Simple Activity Timing Review - 20-07-2026 - 12-46 PM.xlsx",
+          "rule_results": [
+            {
+              "classification": "review_required",
+              "matching_activity_count": 4151,
+              "rule_id": "63cba0fb-1131-4ccf-b3b7-3104c3b01b01",
+              "rule_key": "63cba0fb-1131-4ccf-b3b7-3104c3b01b00",
+              "rule_name": "Minimum five-minute before/after interval",
+              "rule_version": 1
+            }
+          ],
+          "selection_mode": "published_rules",
+          "unique_school_count": 945,
+          "unmapped_school_count": 1
+        },
+        "sha256": "7537da77d0daf547cc5f4fe51ed95e934179060d25f28c5c50b543fbda941541",
+        "size_bytes": 2129099,
+        "status": "completed"
+      }
+    ],
+    "window": {
+      "datefrom": "2026-07-20T00:00",
+      "dateto": "2026-07-20T12:46",
+      "end": "2026-07-20T12:46:00+05:00",
+      "start": "2026-07-20T00:00:00+05:00",
+      "timezone": "Asia/Karachi"
+    }
+  },
+  "quality_gate": {
+    "activity_schema_mode": "total_activities",
+    "dormancy_rate_check_applicable": true,
+    "dormancy_ratio": 0.013725490196078431,
+    "dormancy_warning_after_hour": 8,
+    "dormant_activity_conflict_rows": 0,
+    "dormant_reconciled_school_count": 14,
+    "errors": [],
+    "export_coverage_ratio": 0.9912536443148688,
+    "exported_school_count": 1021,
+    "final_school_count": 14,
+    "invalid_contact_count": 0,
+    "invalid_contact_ratio": 0.0,
+    "invalid_total_activity_rows": 0,
+    "issues": [],
+    "master_count": 1029,
+    "master_coverage_ratio": 0.013605442176870748,
+    "master_missing_from_export_count": 9,
+    "master_missing_from_export_emis_sample": [
+      "35210957",
+      "35211012",
+      "35211013",
+      "35211014",
+      "35211015",
+      "35211016",
+      "35220592",
+      "35299991",
+      "35299992"
+    ],
+    "max_dormancy_ratio": 0.98,
+    "max_master_coverage": 0.98,
+    "max_unmapped_ratio": 0.1,
+    "min_export_coverage": 0.98,
+    "officer_delivery_quality_enforced": false,
+    "officer_mapping_check_applicable": false,
+    "optional_missing_activity_columns": [
+      "TPV Activities"
+    ],
+    "passed": true,
+    "reconciled_export_school_count": 1020,
+    "unknown_export_emis_sample": [
+      "35210283"
+    ],
+    "unknown_export_school_count": 1,
+    "unmapped_ratio": 0.8571428571428571,
+    "unmapped_school_count": 12,
+    "warnings": []
+  },
+  "report_source": "unfiltered",
+  "run_started_at": "2026-07-20T12:46:51.928920",
+  "whatsapp": {
+    "dispatch_plan": [
+      {
+        "cause": "Dry run; not queued.",
+        "channel": "individual",
+        "created_at": "2026-07-20T12:46:55",
+        "excel_path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/Anti-Dengue App Dormant Users - 20-07-2026 - 12-46 PM.xlsx",
+        "job_id": "d0efcc7b-f5b4-4363-90f5-38b36702fc56",
+        "message_mode": "individual",
+        "payload": {
+          "attachment_text_mode": "separate",
+          "delay_ms": 1500,
+          "excel_filename": "Anti-Dengue App Dormant Users - 20-07-2026 - 12-46 PM.xlsx",
+          "excel_path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/Anti-Dengue App Dormant Users - 20-07-2026 - 12-46 PM.xlsx",
+          "image_path": null,
+          "job_id": "d0efcc7b-f5b4-4363-90f5-38b36702fc56",
+          "recipient_name": "Mubasher Shahzad",
+          "status_subject": null,
+          "target": "923005747462",
+          "text": "\ud83d\udea8 *Anti-Dengue Dormant Users - 20-Jul-2026 - 12:46 PM*\n\n*For:* Mubasher Shahzad\n*Role:* DDEO\n*Dormant schools mapped to you in this run:* 1\n\n\ud83d\udccd *Tehsil Summary*\n1. RAIWIND: 1\n\n\ud83c\udfeb *Markaz Summary*\n1. CHUNG - MALE: 1\n\n\ud83d\udccb *Schools*\n1. GPS FATAH SINGH WALA (Tehsil: RAIWIND, Markaz: CHUNG - MALE)",
+          "type": "contact"
+        },
+        "recipient_name": "Mubasher Shahzad",
+        "route_kind": "",
+        "row_count": 1,
+        "status": "planned",
+        "target": "923005747462",
+        "updated_at": "2026-07-20T12:46:55"
+      },
+      {
+        "cause": "Dry run; not queued.",
+        "channel": "individual",
+        "created_at": "2026-07-20T12:46:55",
+        "excel_path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/Anti-Dengue App Dormant Users - 20-07-2026 - 12-46 PM.xlsx",
+        "job_id": "d1ffb08f-f00a-464d-8f4f-3fd5fba55d7f",
+        "message_mode": "individual",
+        "payload": {
+          "attachment_text_mode": "separate",
+          "delay_ms": 1500,
+          "excel_filename": "Anti-Dengue App Dormant Users - 20-07-2026 - 12-46 PM.xlsx",
+          "excel_path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/Anti-Dengue App Dormant Users - 20-07-2026 - 12-46 PM.xlsx",
+          "image_path": null,
+          "job_id": "d1ffb08f-f00a-464d-8f4f-3fd5fba55d7f",
+          "recipient_name": "Ali Faran",
+          "status_subject": null,
+          "target": "923044366546",
+          "text": "\ud83d\udea8 *Anti-Dengue Dormant Users - 20-Jul-2026 - 12:46 PM*\n\n*For:* Ali Faran\n*Role:* DDEO\n*Dormant schools mapped to you in this run:* 1\n\n\ud83d\udccd *Tehsil Summary*\n1. MODEL TOWN: 1\n\n\ud83c\udfeb *Markaz Summary*\n1. BADOKI-MALE: 1\n\n\ud83d\udccb *Schools*\n1. GPS LADHAKI BHULLAR (Tehsil: MODEL TOWN, Markaz: BADOKI-MALE)",
+          "type": "contact"
+        },
+        "recipient_name": "Ali Faran",
+        "route_kind": "",
+        "row_count": 1,
+        "status": "planned",
+        "target": "923044366546",
+        "updated_at": "2026-07-20T12:46:55"
+      },
+      {
+        "cause": "Dry run; not queued.",
+        "channel": "individual",
+        "created_at": "2026-07-20T12:46:55",
+        "excel_path": "",
+        "job_id": "90f45bf6-4fea-415a-8596-3ba8d9d09fc9",
+        "message_mode": "individual",
+        "payload": {
+          "attachment_text_mode": "separate",
+          "delay_ms": 1500,
+          "excel_filename": "Anti-Dengue App Dormant Users - 20-07-2026 - 12-46 PM.xlsx",
+          "excel_path": null,
+          "image_path": null,
+          "job_id": "90f45bf6-4fea-415a-8596-3ba8d9d09fc9",
+          "recipient_name": "Waleed Ashraf",
+          "status_subject": null,
+          "target": "923098080101",
+          "text": "\ud83d\udea8 *Anti-Dengue Dormant Users - 20-Jul-2026 - 12:46 PM*\n\n*For:* Waleed Ashraf\n*Role:* AEO\n*Dormant schools mapped to you in this run:* 1\n\n\ud83c\udfeb *Markaz Summary*\n1. CHUNG - MALE: 1\n\n\ud83d\udccb *Schools*\n1. GPS FATAH SINGH WALA (Tehsil: RAIWIND, Markaz: CHUNG - MALE)",
+          "type": "contact"
+        },
+        "recipient_name": "Waleed Ashraf",
+        "route_kind": "",
+        "row_count": 1,
+        "status": "planned",
+        "target": "923098080101",
+        "updated_at": "2026-07-20T12:46:55"
+      },
+      {
+        "cause": "Dry run; not queued.",
+        "channel": "individual",
+        "created_at": "2026-07-20T12:46:55",
+        "excel_path": "",
+        "job_id": "28846576-1731-4037-b3d2-710c72894cba",
+        "message_mode": "individual",
+        "payload": {
+          "attachment_text_mode": "separate",
+          "delay_ms": 1500,
+          "excel_filename": "Anti-Dengue App Dormant Users - 20-07-2026 - 12-46 PM.xlsx",
+          "excel_path": null,
+          "image_path": null,
+          "job_id": "28846576-1731-4037-b3d2-710c72894cba",
+          "recipient_name": "Muhammad Awais",
+          "status_subject": null,
+          "target": "923216575896",
+          "text": "\ud83d\udea8 *Anti-Dengue Dormant Users - 20-Jul-2026 - 12:46 PM*\n\n*For:* Muhammad Awais\n*Role:* AEO\n*Dormant schools mapped to you in this run:* 1\n\n\ud83c\udfeb *Markaz Summary*\n1. BADOKI-MALE: 1\n\n\ud83d\udccb *Schools*\n1. GPS LADHAKI BHULLAR (Tehsil: MODEL TOWN, Markaz: BADOKI-MALE)",
+          "type": "contact"
+        },
+        "recipient_name": "Muhammad Awais",
+        "route_kind": "",
+        "row_count": 1,
+        "status": "planned",
+        "target": "923216575896",
+        "updated_at": "2026-07-20T12:46:55"
+      },
+      {
+        "cause": "Dry run; not queued.",
+        "channel": "group",
+        "created_at": "2026-07-20T12:46:55",
+        "excel_path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/group-route-excels/01 - Muhammad Awais - markaz - BADOKI-MALE.xlsx",
+        "job_id": "35505482-7138-4b9b-935d-f7dc9abb8823",
+        "message_mode": "full_report",
+        "payload": {
+          "attachment_text_mode": "separate",
+          "delay_ms": 1500,
+          "dispatch_route": {
+            "markaz": "BADOKI-MALE",
+            "message_mode": "full_report",
+            "route_kind": "markaz",
+            "row_count": 1,
+            "tehsil": ""
+          },
+          "excel_filename": "01 - Muhammad Awais - markaz - BADOKI-MALE.xlsx",
+          "excel_path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/group-route-excels/01 - Muhammad Awais - markaz - BADOKI-MALE.xlsx",
+          "image_path": null,
+          "job_id": "35505482-7138-4b9b-935d-f7dc9abb8823",
+          "recipient_name": "Muhammad Awais",
+          "status_subject": null,
+          "target": "923216575896@s.whatsapp.net",
+          "text": "*Anti-Dengue Dormant Users - 20-Jul-2026 - 12:46 PM*\n*Group:* Muhammad Awais\n*Scope:* BADOKI-MALE\n*Total dormant:* 1 school\n\n*TEHSIL SUMMARY*\n1. MODEL TOWN: 1 school\n\n*DETAILS BY TEHSIL / MARKAZ*\n\n*MODEL TOWN - 1 school*\n\n*BADOKI-MALE - 1 school*\n1. 35210440 - GPS LADHAKI BHULLAR\n\nPlease ensure activities are submitted/updated on the portal today.",
+          "type": "contact"
+        },
+        "recipient_name": "Muhammad Awais",
+        "route_kind": "markaz",
+        "row_count": 1,
+        "status": "planned",
+        "target": "923216575896@s.whatsapp.net",
+        "updated_at": "2026-07-20T12:46:55"
+      },
+      {
+        "cause": "Dry run; not queued.",
+        "channel": "group",
+        "created_at": "2026-07-20T12:46:55",
+        "excel_path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/group-route-excels/09 - Waleed Ashraf - markaz - CHUNG - MALE.xlsx",
+        "job_id": "577103eb-cd12-459d-8e12-82ad836ced93",
+        "message_mode": "full_report",
+        "payload": {
+          "attachment_text_mode": "separate",
+          "delay_ms": 1500,
+          "dispatch_route": {
+            "markaz": "CHUNG - MALE",
+            "message_mode": "full_report",
+            "route_kind": "markaz",
+            "row_count": 1,
+            "tehsil": ""
+          },
+          "excel_filename": "09 - Waleed Ashraf - markaz - CHUNG - MALE.xlsx",
+          "excel_path": "/home/ahmad/code/deomeeautomations/antidengue/output-files/2026-07-20_12-46-51/group-route-excels/09 - Waleed Ashraf - markaz - CHUNG - MALE.xlsx",
+          "image_path": null,
+          "job_id": "577103eb-cd12-459d-8e12-82ad836ced93",
+          "recipient_name": "Waleed Ashraf",
+          "status_subject": null,
+          "target": "923098080101@s.whatsapp.net",
+          "text": "*Anti-Dengue Dormant Users - 20-Jul-2026 - 12:46 PM*\n*Group:* Waleed Ashraf\n*Scope:* CHUNG - MALE\n*Total dormant:* 1 school\n\n*TEHSIL SUMMARY*\n1. RAIWIND: 1 school\n\n*DETAILS BY TEHSIL / MARKAZ*\n\n*RAIWIND - 1 school*\n\n*CHUNG - MALE - 1 school*\n1. 35220216 - GPS FATAH SINGH WALA\n\nPlease ensure activities are submitted/updated on the portal today.",
+          "type": "contact"
+        },
+        "recipient_name": "Waleed Ashraf",
+        "route_kind": "markaz",
+        "row_count": 1,
+        "status": "planned",
+        "target": "923098080101@s.whatsapp.net",
+        "updated_at": "2026-07-20T12:46:55"
+      }
+    ],
+    "dispatch_settings": {
+      "allow_groups": true,
+      "allow_individual": true,
+      "attach_excel": true,
+      "manual_only": false,
+      "require_preview": false,
+      "send_failed_only": false
+    },
+    "dry_run": true,
+    "dynamic_payloads": 4,
+    "fixed_payloads": 2,
+    "officer_delivery_audit": [
+      {
+        "Delivery Error": "",
+        "Delivery Status": "not queued",
+        "Includes Excel": true,
+        "Job ID": "d0efcc7b-f5b4-4363-90f5-38b36702fc56",
+        "Markazes": "CHUNG - MALE",
+        "Mobile Number": "923005747462",
+        "Officer Name": "Mubasher Shahzad",
+        "Roles": "DDEO",
+        "School Count": 1,
+        "Schools": "GPS FATAH SINGH WALA",
+        "Target": "923005747462@s.whatsapp.net",
+        "Tehsils": "RAIWIND",
+        "WhatsApp Ack Statuses": "",
+        "WhatsApp Actual Send Target": "",
+        "WhatsApp Canonical Target": "",
+        "WhatsApp Known LID": "",
+        "WhatsApp Message IDs": "",
+        "WhatsApp Remote JIDs": "",
+        "WhatsApp Requested Target": "",
+        "WhatsApp Target Policy": "",
+        "WhatsApp Token Preflight": ""
+      },
+      {
+        "Delivery Error": "",
+        "Delivery Status": "not queued",
+        "Includes Excel": true,
+        "Job ID": "d1ffb08f-f00a-464d-8f4f-3fd5fba55d7f",
+        "Markazes": "BADOKI-MALE",
+        "Mobile Number": "923044366546",
+        "Officer Name": "Ali Faran",
+        "Roles": "DDEO",
+        "School Count": 1,
+        "Schools": "GPS LADHAKI BHULLAR",
+        "Target": "923044366546@s.whatsapp.net",
+        "Tehsils": "MODEL TOWN",
+        "WhatsApp Ack Statuses": "",
+        "WhatsApp Actual Send Target": "",
+        "WhatsApp Canonical Target": "",
+        "WhatsApp Known LID": "",
+        "WhatsApp Message IDs": "",
+        "WhatsApp Remote JIDs": "",
+        "WhatsApp Requested Target": "",
+        "WhatsApp Target Policy": "",
+        "WhatsApp Token Preflight": ""
+      },
+      {
+        "Delivery Error": "",
+        "Delivery Status": "not queued",
+        "Includes Excel": false,
+        "Job ID": "90f45bf6-4fea-415a-8596-3ba8d9d09fc9",
+        "Markazes": "CHUNG - MALE",
+        "Mobile Number": "923098080101",
+        "Officer Name": "Waleed Ashraf",
+        "Roles": "AEO",
+        "School Count": 1,
+        "Schools": "GPS FATAH SINGH WALA",
+        "Target": "923098080101@s.whatsapp.net",
+        "Tehsils": "RAIWIND",
+        "WhatsApp Ack Statuses": "",
+        "WhatsApp Actual Send Target": "",
+        "WhatsApp Canonical Target": "",
+        "WhatsApp Known LID": "",
+        "WhatsApp Message IDs": "",
+        "WhatsApp Remote JIDs": "",
+        "WhatsApp Requested Target": "",
+        "WhatsApp Target Policy": "",
+        "WhatsApp Token Preflight": ""
+      },
+      {
+        "Delivery Error": "",
+        "Delivery Status": "not queued",
+        "Includes Excel": false,
+        "Job ID": "28846576-1731-4037-b3d2-710c72894cba",
+        "Markazes": "BADOKI-MALE",
+        "Mobile Number": "923216575896",
+        "Officer Name": "Muhammad Awais",
+        "Roles": "AEO",
+        "School Count": 1,
+        "Schools": "GPS LADHAKI BHULLAR",
+        "Target": "923216575896@s.whatsapp.net",
+        "Tehsils": "MODEL TOWN",
+        "WhatsApp Ack Statuses": "",
+        "WhatsApp Actual Send Target": "",
+        "WhatsApp Canonical Target": "",
+        "WhatsApp Known LID": "",
+        "WhatsApp Message IDs": "",
+        "WhatsApp Remote JIDs": "",
+        "WhatsApp Requested Target": "",
+        "WhatsApp Target Policy": "",
+        "WhatsApp Token Preflight": ""
+      }
+    ],
+    "queued": false,
+    "queued_dynamic_payloads": 4,
+    "total_payloads": 6
+  }
+}

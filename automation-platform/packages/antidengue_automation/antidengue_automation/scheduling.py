@@ -785,6 +785,23 @@ def advance_execution(session: Session, execution: AntiDengueScheduleExecution) 
         return True
     execution.source_summary = dict(source_job.result or {})
 
+    source_run_summary = execution.source_summary.get("summary") or {}
+    whatsapp_summary = source_run_summary.get("whatsapp") or {}
+    if (
+        bool(whatsapp_summary.get("no_change"))
+        or str(whatsapp_summary.get("outcome") or "").strip().lower() == "no_change"
+    ):
+        mark_execution_terminal(
+            session,
+            execution,
+            "completed",
+            message=(
+                "Portal data matched the previous successfully delivered report bundle. "
+                "Duplicate preview compilation and WhatsApp delivery were safely skipped."
+            ),
+        )
+        return True
+
     if execution.preview_job_id is None:
         summary = execution.source_summary.get("summary") or {}
         append_milestone_once(

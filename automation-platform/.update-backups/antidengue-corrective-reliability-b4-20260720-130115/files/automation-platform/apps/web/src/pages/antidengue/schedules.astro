@@ -1,0 +1,296 @@
+---
+import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
+---
+
+<AntiDengueLayout
+  title="AntiDengue schedules"
+  description="Automate safe report generation and exact WhatsApp planning on a server-owned schedule."
+  page="schedules"
+>
+  <div class="page-actions schedule-page-actions" slot="actions"><button class="btn btn-sm btn-ghost" id="refresh-button" type="button">↻ Refresh</button><button class="btn btn-sm btn-primary" id="new-schedule" type="button">＋ New schedule</button></div>
+
+  <div class="notice antidengue-safety-notice">
+    Every scheduled occurrence starts with report generation and an exact frozen plan. Live delivery is possible only when the selected policy and every safety gate allow it.
+  </div>
+
+  <section class="schedule-overview" aria-label="Scheduler overview">
+    <article><span>Scheduler</span><strong id="scheduler-state">Loading…</strong><small>PostgreSQL-backed and restart-safe</small></article>
+    <article><span>Enabled schedules</span><strong id="enabled-count">—</strong><small id="schedule-total">Loading schedules…</small></article>
+    <article><span>Active runs</span><strong id="active-count">—</strong><small>Preview or guarded delivery</small></article>
+    <article><span>Next occurrence</span><strong id="next-run">—</strong><small id="next-schedule">No enabled schedule</small></article>
+  </section>
+
+  <section class="schedule-page-grid schedule-guided-grid">
+    <article class="panel schedule-form-panel schedule-editor-panel">
+      <div class="panel-heading schedule-editor-heading">
+        <div><p class="eyebrow">Guided schedule</p><h2 id="form-title">Create a schedule</h2><p>Choose what runs, when it runs, and what may happen after validation.</p></div>
+        <button class="btn btn-xs btn-ghost" id="reset-form" type="button">Reset</button>
+      </div>
+      <form id="schedule-form" class="schedule-form schedule-guided-form">
+        <input id="schedule-id" type="hidden" />
+
+        <section class="schedule-form-section">
+          <div class="schedule-step-heading"><span>1</span><div><h3>Name this automation</h3><p>Use a name operators will recognize in run history.</p></div></div>
+          <label class="field-label" for="schedule-name">Schedule name</label>
+          <input class="input input-bordered w-full" id="schedule-name" maxlength="180" placeholder="Weekday dormant-school review" required />
+        </section>
+
+        <section class="schedule-form-section">
+          <div class="schedule-step-heading"><span>2</span><div><h3>When should it run?</h3><p>All times use Asia/Karachi and remain server-owned after restarts.</p></div></div>
+          <div class="schedule-form-row">
+            <label><span class="field-label">Frequency</span><select class="select select-bordered w-full" id="recurrence"><option value="daily">Every day</option><option value="weekly">Selected weekdays</option><option value="once">One time</option></select></label>
+            <label id="date-field" hidden><span class="field-label">Run date</span><input class="input input-bordered w-full" id="run-date" type="date" /></label>
+          </div>
+          <fieldset class="weekday-field schedule-weekday-field" id="weekday-field" hidden>
+            <legend class="field-label">Run on</legend>
+            <div class="weekday-grid">
+              <label><input class="checkbox checkbox-sm" type="checkbox" value="0" /> Mon</label><label><input class="checkbox checkbox-sm" type="checkbox" value="1" /> Tue</label><label><input class="checkbox checkbox-sm" type="checkbox" value="2" /> Wed</label><label><input class="checkbox checkbox-sm" type="checkbox" value="3" /> Thu</label><label><input class="checkbox checkbox-sm" type="checkbox" value="4" /> Fri</label><label><input class="checkbox checkbox-sm" type="checkbox" value="5" /> Sat</label><label><input class="checkbox checkbox-sm" type="checkbox" value="6" /> Sun</label>
+            </div>
+          </fieldset>
+          <label class="field-label" for="new-time">Run times</label>
+          <div class="schedule-time-entry"><input class="input input-bordered" id="new-time" type="time" value="08:30" /><button class="btn" id="add-time" type="button">Add time</button></div>
+          <div class="schedule-time-chips" id="schedule-time-chips" aria-live="polite"></div>
+        </section>
+
+        <section class="schedule-form-section">
+          <div class="schedule-step-heading"><span>3</span><div><h3>What should it prepare?</h3><p>Select one or more module-owned routing profiles.</p></div></div>
+          <label class="field-label" for="schedule-profile-selector">Routing profiles</label>
+          <details class="routing-profile-selector" id="schedule-profile-selector">
+            <summary class="select select-bordered w-full" id="schedule-profile-summary">Select routing profiles</summary>
+            <div class="routing-profile-popover">
+              <div class="schedule-form-row"><input class="input input-bordered" id="schedule-profile-search" type="search" placeholder="Search profiles" /><select class="select select-bordered" id="schedule-profile-filter"><option value="">All reports / wings</option></select></div>
+              <div class="routing-profile-tools"><button class="btn btn-xs btn-ghost" id="schedule-profile-select-visible" type="button">Select all visible</button><button class="btn btn-xs btn-ghost" id="schedule-profile-clear" type="button">Clear</button><button class="btn btn-xs btn-ghost" id="schedule-profile-refresh" type="button">Refresh</button></div>
+              <div id="schedule-profile-options" class="routing-profile-options" role="group" aria-label="Scheduled routing profiles"><p>Loading enabled profiles…</p></div>
+            </div>
+          </details>
+          <div id="schedule-profile-chips" class="routing-profile-chips" aria-live="polite"></div>
+          <a class="schedule-routing-link" href="/antidengue/routing">Manage AntiDengue routing profiles →</a>
+        </section>
+
+        <section class="schedule-form-section">
+          <div class="schedule-step-heading"><span>4</span><div><h3>What happens after validation?</h3><p>Both choices generate the same dry-run report and frozen exact plan.</p></div></div>
+          <div class="schedule-policy-options">
+            <label class="schedule-policy-card"><input type="radio" name="dispatch-policy" value="preview_only" checked /><span><strong>Prepare for review</strong><small>Never sends automatically. Review the exact plan first.</small></span><em>Recommended</em></label>
+            <label class="schedule-policy-card warning"><input type="radio" name="dispatch-policy" value="auto_send_when_clean" /><span><strong>Send only when clean</strong><small>Automatically sends only with zero warnings and zero blockers.</small></span></label>
+          </div>
+          <details class="schedule-advanced">
+            <summary>Advanced execution settings</summary>
+            <div class="schedule-form-row">
+              <label><span class="field-label">Portal login</span><select class="select select-bordered w-full" id="login-mode"><option value="auto">Auto sign in</option><option value="manual">Manual sign in</option><option value="remote_approve">Remote approval</option></select></label>
+              <label><span class="field-label">Submission deadline</span><select class="select select-bordered w-full" id="deadline-mode"><option value="inherit">Use Settings default</option><option value="override">Override for this schedule</option></select></label>
+              <label id="deadline-value-field" hidden><span class="field-label">Schedule deadline</span><input class="input input-bordered w-full" id="schedule-deadline" type="time" /></label>
+              <label><span class="field-label">Missed-run grace</span><div class="input-with-unit"><input class="input input-bordered w-full" id="missed-grace" type="number" min="0" max="240" value="15" /><span>minutes</span></div></label>
+              <label><span class="field-label">Overlap grace</span><div class="input-with-unit"><input class="input input-bordered w-full" id="overlap-grace" type="number" min="0" max="240" value="15" /><span>minutes</span></div></label>
+            </div>
+          </details>
+        </section>
+
+        <div class="schedule-review-box"><span>This schedule will</span><strong id="schedule-review">Run every day at 08:30 and prepare an exact plan for review.</strong></div>
+        <label class="schedule-enabled"><input class="toggle toggle-primary" id="schedule-enabled" type="checkbox" checked /><span><strong>Schedule enabled</strong><small>Disabled schedules remain saved but do not create occurrences.</small></span></label>
+        <div class="form-message" id="form-message" role="status"></div>
+        <div class="schedule-save-actions"><button class="btn" id="cancel-edit" type="button" hidden>Cancel edit</button><button class="btn btn-primary" id="save-button" type="submit">Create schedule</button></div>
+      </form>
+    </article>
+
+    <article class="panel schedule-list-panel schedule-library-panel">
+      <div class="panel-heading"><div><p class="eyebrow">Saved automations</p><h2>Schedule library</h2><p class="field-help">Run, pause, edit or archive without losing execution history.</p></div></div>
+      <div id="schedule-list" class="schedule-list schedule-card-list"><p class="empty-state">Loading schedules…</p></div>
+      <div class="form-message" id="list-message" role="status"></div>
+    </article>
+  </section>
+
+  <script>
+    const API = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    let schedules: any[] = [];
+    let profiles: any[] = [];
+    let profilesLoaded = false;
+    let scheduleTimes = ["08:30"];
+    let globalDeadlineLabel = "Settings default";
+    const selectedProfileIds = new Set<string>();
+    const weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+    async function api(path: string, init?: RequestInit) {
+      const response = await fetch(`${API}${path}`, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers || {}) } });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data));
+      return data;
+    }
+    const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString() : "—";
+    const policyLabel = (value: string) => value === "auto_send_when_clean" ? "Send only when clean" : "Prepare for review";
+    const selectedPolicy = () => (document.querySelector<HTMLInputElement>('input[name="dispatch-policy"]:checked')?.value || "preview_only");
+
+    function recurrenceText(recurrence: string, weekdays: number[], runDate: string | null) {
+      if (recurrence === "weekly") return weekdays.length ? `every ${weekdays.map((day) => weekdayNames[day]).join(", ")}` : "on selected weekdays";
+      if (recurrence === "once") return runDate ? `once on ${new Date(`${runDate}T00:00:00`).toLocaleDateString()}` : "once on the selected date";
+      return "every day";
+    }
+
+    function checkedWeekdays() {
+      return Array.from(document.querySelectorAll<HTMLInputElement>('#weekday-field input[type="checkbox"]:checked')).map((box) => Number(box.value));
+    }
+
+    function updateRecurrenceFields() {
+      const recurrence = el<HTMLSelectElement>("recurrence").value;
+      el("date-field").hidden = recurrence !== "once";
+      el("weekday-field").hidden = recurrence !== "weekly";
+      updateReview();
+    }
+
+    function renderTimes() {
+      const container = el("schedule-time-chips"); container.replaceChildren();
+      for (const time of scheduleTimes) {
+        const chip = document.createElement("span"); chip.className = "schedule-time-chip"; chip.textContent = time;
+        const remove = document.createElement("button"); remove.type = "button"; remove.setAttribute("aria-label", `Remove ${time}`); remove.textContent = "×";
+        remove.addEventListener("click", () => { scheduleTimes = scheduleTimes.filter((value) => value !== time); renderTimes(); updateReview(); });
+        chip.append(remove); container.append(chip);
+      }
+      if (!scheduleTimes.length) container.innerHTML = '<p class="schedule-inline-warning">Add at least one run time.</p>';
+      updateReview();
+    }
+
+    function addTime() {
+      const time = el<HTMLInputElement>("new-time").value;
+      if (time && !scheduleTimes.includes(time)) scheduleTimes = [...scheduleTimes, time].sort();
+      renderTimes();
+    }
+
+    function updatePolicyCards() {
+      document.querySelectorAll<HTMLElement>(".schedule-policy-card").forEach((card) => card.classList.toggle("selected", Boolean(card.querySelector<HTMLInputElement>("input")?.checked)));
+      updateReview();
+    }
+
+    function updateDeadlineFields() {
+      const overriding = el<HTMLSelectElement>("deadline-mode").value === "override";
+      el("deadline-value-field").hidden = !overriding;
+      el<HTMLInputElement>("schedule-deadline").required = overriding;
+      updateReview();
+    }
+
+    function updateReview() {
+      const recurrence = el<HTMLSelectElement>("recurrence")?.value || "daily";
+      const cadence = recurrenceText(recurrence, checkedWeekdays(), el<HTMLInputElement>("run-date")?.value || null);
+      const timeText = scheduleTimes.length ? scheduleTimes.join(" and ") : "no configured time";
+      const profilesText = selectedProfileIds.size ? `${selectedProfileIds.size} routing profile${selectedProfileIds.size === 1 ? "" : "s"}` : "no routing profiles";
+      const outcome = selectedPolicy() === "auto_send_when_clean" ? "send only after a completely clean plan" : "prepare an exact plan for review";
+      const deadline = el<HTMLSelectElement>("deadline-mode")?.value === "override"
+        ? (el<HTMLInputElement>("schedule-deadline")?.value || "no deadline")
+        : globalDeadlineLabel;
+      if (el("schedule-review")) el("schedule-review").textContent = `Run ${cadence} at ${timeText} for ${profilesText}, use the ${deadline} action deadline, then ${outcome}.`;
+    }
+
+    function resetForm() {
+      el<HTMLInputElement>("schedule-id").value = ""; el<HTMLInputElement>("schedule-name").value = ""; el<HTMLSelectElement>("recurrence").value = "daily"; el<HTMLInputElement>("run-date").value = "";
+      document.querySelectorAll<HTMLInputElement>('#weekday-field input[type="checkbox"]').forEach((box) => box.checked = false);
+      scheduleTimes = ["08:30"]; selectedProfileIds.clear(); renderTimes(); renderProfileOptions(); renderProfileSummary();
+      el<HTMLSelectElement>("login-mode").value = "auto"; document.querySelector<HTMLInputElement>('input[name="dispatch-policy"][value="preview_only"]')!.checked = true;
+      el<HTMLSelectElement>("deadline-mode").value = "inherit"; el<HTMLInputElement>("schedule-deadline").value = ""; updateDeadlineFields();
+      el<HTMLInputElement>("missed-grace").value = "15"; el<HTMLInputElement>("overlap-grace").value = "15"; el<HTMLInputElement>("schedule-enabled").checked = true;
+      el("form-title").textContent = "Create a schedule"; el("save-button").textContent = "Create schedule"; el("cancel-edit").hidden = true; el("form-message").textContent = "";
+      updateRecurrenceFields(); updatePolicyCards();
+    }
+
+    function editSchedule(item: any) {
+      el<HTMLInputElement>("schedule-id").value = item.id; el<HTMLInputElement>("schedule-name").value = item.name; el<HTMLSelectElement>("recurrence").value = item.recurrence_type; el<HTMLInputElement>("run-date").value = item.run_date || "";
+      const weekdays = new Set(item.weekdays || []); document.querySelectorAll<HTMLInputElement>('#weekday-field input[type="checkbox"]').forEach((box) => box.checked = weekdays.has(Number(box.value)));
+      scheduleTimes = [...(item.times || [])]; selectedProfileIds.clear(); (item.dispatch_profile_ids || [item.dispatch_profile_id]).forEach((value: string) => selectedProfileIds.add(value));
+      el<HTMLSelectElement>("login-mode").value = item.login_mode; document.querySelector<HTMLInputElement>(`input[name="dispatch-policy"][value="${item.dispatch_policy}"]`)!.checked = true;
+      el<HTMLSelectElement>("deadline-mode").value = item.submission_deadline_override ? "override" : "inherit"; el<HTMLInputElement>("schedule-deadline").value = item.submission_deadline_override || ""; updateDeadlineFields();
+      el<HTMLInputElement>("missed-grace").value = String(item.missed_run_grace_minutes); el<HTMLInputElement>("overlap-grace").value = String(item.overlap_grace_minutes); el<HTMLInputElement>("schedule-enabled").checked = item.enabled;
+      el("form-title").textContent = "Edit schedule"; el("save-button").textContent = "Save changes"; el("cancel-edit").hidden = false;
+      renderTimes(); renderProfileOptions(); renderProfileSummary(); updateRecurrenceFields(); updatePolicyCards();
+      el("schedule-form").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function profileNames(ids: string[]) {
+      return ids.map((id) => profiles.find((profile) => profile.id === id)?.name).filter(Boolean);
+    }
+
+    function renderSchedules() {
+      const container = el("schedule-list"); container.replaceChildren();
+      if (!schedules.length) {
+        container.innerHTML = '<div class="schedule-empty-state"><span>◷</span><h3>No schedules yet</h3><p>Create a safe recurring preview or guarded delivery schedule. You can pause or edit it at any time.</p><button class="btn btn-primary" id="empty-create" type="button">Create first schedule</button></div>';
+        el("empty-create")?.addEventListener("click", () => { resetForm(); el<HTMLInputElement>("schedule-name").focus(); });
+        return;
+      }
+      for (const item of schedules) {
+        const profileIds = item.dispatch_profile_ids || [item.dispatch_profile_id];
+        const names = profileNames(profileIds);
+        const cadence = `${recurrenceText(item.recurrence_type, item.weekdays || [], item.run_date)} at ${(item.times || []).join(" and ")}`;
+        const card = document.createElement("article"); card.className = `schedule-library-card${item.enabled ? "" : " paused"}`;
+        card.innerHTML = `<header><div><span class="route-status"></span><h3></h3><p></p></div><span class="schedule-policy-badge"></span></header><div class="schedule-card-timeline"><div><span>Next occurrence</span><strong></strong></div><div><span>Last result</span><strong></strong></div></div><div class="schedule-card-routes"></div><div class="schedule-card-actions"></div>`;
+        const state = card.querySelector(".route-status")!; state.classList.add(item.enabled ? "enabled" : "archived"); state.textContent = item.enabled ? "Enabled" : "Paused";
+        card.querySelector("h3")!.textContent = item.name; card.querySelector("header p")!.textContent = `${cadence} · Asia/Karachi`; card.querySelector(".schedule-policy-badge")!.textContent = policyLabel(item.dispatch_policy);
+        const timeline = card.querySelectorAll(".schedule-card-timeline strong"); timeline[0].textContent = item.enabled ? formatDate(item.next_run_at) : "Paused"; timeline[1].textContent = item.last_run_status ? String(item.last_run_status).replaceAll("_", " ") : "Never run";
+        const routes = card.querySelector(".schedule-card-routes")!;
+        for (const name of names.slice(0, 3)) { const pill = document.createElement("span"); pill.textContent = name; routes.append(pill); }
+        if (!names.length) { const pill = document.createElement("span"); pill.className = "warning"; pill.textContent = `${profileIds.length} configured profile${profileIds.length === 1 ? "" : "s"}`; routes.append(pill); }
+        const deadlinePill = document.createElement("span"); deadlinePill.textContent = item.submission_deadline_override ? `Deadline ${item.submission_deadline_override}` : `Deadline ${globalDeadlineLabel}`; routes.append(deadlinePill);
+        const actions = card.querySelector(".schedule-card-actions")!;
+        const run = document.createElement("button"); run.className = "btn btn-sm btn-primary"; run.type = "button"; run.textContent = item.dispatch_policy === "auto_send_when_clean" ? "Run guarded send now" : "Run preview now";
+        run.addEventListener("click", async () => { if (item.dispatch_policy === "auto_send_when_clean" && !confirm("Run this guarded send schedule now? It sends only after a clean exact plan.")) return; try { const execution = await api(`/api/v1/antidengue/schedules/${item.id}/run-now`, { method: "POST", body: JSON.stringify({ created_by: "web-operator" }) }); location.href = `/?execution_id=${execution.id}`; } catch (error) { el("list-message").textContent = error instanceof Error ? error.message : "Could not run schedule"; } });
+        const toggle = document.createElement("button"); toggle.className = "btn btn-sm"; toggle.type = "button"; toggle.textContent = item.enabled ? "Pause" : "Enable";
+        toggle.addEventListener("click", async () => { try { await api(`/api/v1/antidengue/schedules/${item.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !item.enabled }) }); await loadAll(); } catch (error) { el("list-message").textContent = error instanceof Error ? error.message : "Could not update schedule"; } });
+        const edit = document.createElement("button"); edit.className = "btn btn-sm btn-ghost"; edit.type = "button"; edit.textContent = "Edit"; edit.addEventListener("click", () => editSchedule(item));
+        const archive = document.createElement("button"); archive.className = "btn btn-sm btn-ghost"; archive.type = "button"; archive.textContent = "Archive";
+        archive.addEventListener("click", async () => { if (!confirm(`Archive schedule “${item.name}”? Execution history will be retained.`)) return; try { await api(`/api/v1/antidengue/schedules/${item.id}`, { method: "DELETE" }); await loadAll(); } catch (error) { el("list-message").textContent = error instanceof Error ? error.message : "Could not archive schedule"; } });
+        actions.append(run, toggle, edit, archive); container.append(card);
+      }
+    }
+
+    async function loadProfiles(force = false) {
+      if (profilesLoaded && !force) return;
+      const data = await api("/api/v1/whatsapp/previews/options"); profiles = data.profiles.filter((item: any) => item.application_key === "antidengue"); profilesLoaded = true;
+      const filter = el<HTMLSelectElement>("schedule-profile-filter"); filter.innerHTML = '<option value="">All reports / wings</option>';
+      for (const category of [...new Set(profiles.map((item) => `${item.report_type_name} · ${item.wing_name}`))].sort()) filter.add(new Option(category, category));
+      renderProfileOptions(); renderProfileSummary(); renderSchedules();
+    }
+
+    function visibleProfiles() {
+      const search = el<HTMLInputElement>("schedule-profile-search").value.toLowerCase(); const filter = el<HTMLSelectElement>("schedule-profile-filter").value;
+      return profiles.filter((item) => { const category = `${item.report_type_name} · ${item.wing_name}`; return (!filter || category === filter) && `${item.name} ${item.audience_name} ${category}`.toLowerCase().includes(search); });
+    }
+
+    function renderProfileOptions() {
+      const container = el("schedule-profile-options"); container.replaceChildren();
+      for (const profile of visibleProfiles()) {
+        const option = document.createElement("label"); option.className = "routing-profile-option"; const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.className = "checkbox checkbox-sm"; checkbox.checked = selectedProfileIds.has(profile.id);
+        checkbox.addEventListener("change", () => { checkbox.checked ? selectedProfileIds.add(profile.id) : selectedProfileIds.delete(profile.id); renderProfileOptions(); renderProfileSummary(); });
+        const text = document.createElement("span"); text.textContent = `${profile.name} · ${profile.target_count} target${profile.target_count === 1 ? "" : "s"}`; option.append(checkbox, text); container.append(option);
+      }
+      if (!container.children.length) container.innerHTML = profilesLoaded ? '<p>No enabled profiles match these filters. <a href="/antidengue/routing">Manage routing</a></p>' : "<p>Loading enabled profiles…</p>";
+    }
+
+    function renderProfileSummary() {
+      const selected = profiles.filter((item) => selectedProfileIds.has(item.id)); const targets = selected.reduce((total, item) => total + Number(item.target_count || 0), 0);
+      el("schedule-profile-summary").textContent = selected.length ? `${selected.length} profile${selected.length === 1 ? "" : "s"} · ${targets} targets` : "Select routing profiles";
+      const chips = el("schedule-profile-chips"); chips.replaceChildren(); for (const id of selectedProfileIds) { const profile = profiles.find((item) => item.id === id); const chip = document.createElement("span"); chip.className = "environment-pill"; chip.textContent = profile?.name || id; chips.append(chip); }
+      updateReview();
+    }
+
+    async function loadAll() {
+      const [scheduleData, scheduler, deadlinePolicy] = await Promise.all([api("/api/v1/antidengue/schedules"), api("/api/v1/antidengue/schedules/status"), api("/api/v1/antidengue/deadline-policy")]); schedules = scheduleData.items; globalDeadlineLabel = deadlinePolicy.submission_deadline_label;
+      el("enabled-count").textContent = String(scheduler.enabled_schedules); el("schedule-total").textContent = `${schedules.length} saved schedule${schedules.length === 1 ? "" : "s"}`; el("active-count").textContent = String(scheduler.active_executions);
+      el("next-run").textContent = scheduler.next_run_at ? new Date(scheduler.next_run_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"; el("next-schedule").textContent = scheduler.next_run_at ? `${scheduler.next_schedule_name} · ${new Date(scheduler.next_run_at).toLocaleDateString()}` : "No enabled schedule";
+      el("scheduler-state").textContent = !scheduler.scheduler_enabled ? "Disabled" : scheduler.direct_live_mode_enabled ? "Unsafe mode" : "Safe and active"; renderSchedules();
+    }
+
+    el<HTMLFormElement>("schedule-form").addEventListener("submit", async (event) => {
+      event.preventDefault(); const scheduleId = el<HTMLInputElement>("schedule-id").value;
+      if (!scheduleTimes.length) { el("form-message").textContent = "Add at least one run time."; return; }
+      if (!selectedProfileIds.size) { el("form-message").textContent = "Select at least one enabled routing profile."; return; }
+      const payload = { name: el<HTMLInputElement>("schedule-name").value, enabled: el<HTMLInputElement>("schedule-enabled").checked, recurrence_type: el<HTMLSelectElement>("recurrence").value, run_date: el<HTMLInputElement>("run-date").value || null, weekdays: checkedWeekdays(), times: scheduleTimes, timezone: "Asia/Karachi", submission_deadline_override: el<HTMLSelectElement>("deadline-mode").value === "override" ? el<HTMLInputElement>("schedule-deadline").value : null, login_mode: el<HTMLSelectElement>("login-mode").value, dispatch_policy: selectedPolicy(), dispatch_profile_ids: [...selectedProfileIds], missed_run_grace_minutes: Number(el<HTMLInputElement>("missed-grace").value), overlap_grace_minutes: Number(el<HTMLInputElement>("overlap-grace").value), created_by: "web-operator" };
+      const save = el<HTMLButtonElement>("save-button"); save.disabled = true; el("form-message").textContent = scheduleId ? "Saving changes…" : "Creating schedule…";
+      try { await api(scheduleId ? `/api/v1/antidengue/schedules/${scheduleId}` : "/api/v1/antidengue/schedules", { method: scheduleId ? "PATCH" : "POST", body: JSON.stringify(payload) }); const message = scheduleId ? "Schedule updated." : "Schedule created."; resetForm(); await loadAll(); el("form-message").textContent = message; }
+      catch (error) { el("form-message").textContent = error instanceof Error ? error.message : "Could not save schedule"; }
+      finally { save.disabled = false; }
+    });
+
+    el("recurrence").addEventListener("change", updateRecurrenceFields); el("run-date").addEventListener("change", updateReview); document.querySelectorAll('#weekday-field input[type="checkbox"]').forEach((box) => box.addEventListener("change", updateReview));
+    el("deadline-mode").addEventListener("change", updateDeadlineFields); el("schedule-deadline").addEventListener("change", updateReview);
+    document.querySelectorAll('input[name="dispatch-policy"]').forEach((radio) => radio.addEventListener("change", updatePolicyCards)); el("add-time").addEventListener("click", addTime);
+    el("reset-form").addEventListener("click", resetForm); el("cancel-edit").addEventListener("click", resetForm); el("new-schedule").addEventListener("click", () => { resetForm(); el<HTMLInputElement>("schedule-name").focus(); }); el("refresh-button").addEventListener("click", () => void loadAll());
+    el("schedule-profile-search").addEventListener("input", renderProfileOptions); el("schedule-profile-filter").addEventListener("change", renderProfileOptions); el("schedule-profile-select-visible").addEventListener("click", () => { visibleProfiles().forEach((item) => selectedProfileIds.add(item.id)); renderProfileOptions(); renderProfileSummary(); }); el("schedule-profile-clear").addEventListener("click", () => { selectedProfileIds.clear(); renderProfileOptions(); renderProfileSummary(); }); el("schedule-profile-refresh").addEventListener("click", () => void loadProfiles(true));
+    void Promise.all([loadProfiles(), loadAll()]).then(resetForm).catch((error) => { el("form-message").textContent = error instanceof Error ? error.message : "Could not load schedules"; });
+  </script>
+</AntiDengueLayout>

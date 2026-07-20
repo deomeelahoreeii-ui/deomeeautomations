@@ -39,3 +39,28 @@ def test_published_rule_and_school_routing_are_frozen(tmp_path: Path, monkeypatc
     routed = frame[frame["School EMIS"] == 35210002].iloc[0]
     assert routed["School Name"] == "School B"
     assert routed["Wing ID"] == "w1"
+
+
+def test_later_correct_timing_activity_closes_issue_using_source_order_fallback(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "simple-correction.xls"
+    path.write_text(
+        """<table><thead><tr><th>ID</th><th>Submitted by</th><th>Tag</th><th>Activity Name</th><th>Picture Time Difference(Sec)</th></tr></thead><tbody>
+        <tr><td>1</td><td>35210001.user</td><td>School</td><td>Larva inspection</td><td>120</td></tr>
+        <tr><td>2</td><td>35210001.user</td><td>School</td><td>Larva inspection</td><td>600</td></tr>
+        </tbody></table>""",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("ANTIDENGUE_RUNTIME_SNAPSHOT", raising=False)
+    destination = tmp_path / "Simple Activity Timing Review.xlsx"
+
+    result = write_simple_activity_review_report(path, destination)
+
+    assert result["historical_candidate_count"] == 1
+    assert result["corrected_candidate_count"] == 1
+    assert result["candidate_count"] == 0
+    corrected = pd.read_excel(destination, sheet_name="Corrected Issues")
+    assert corrected.loc[0, "Correction Activity ID"] == 2
+    assert pd.read_excel(destination, sheet_name="Review Required").empty

@@ -10,7 +10,11 @@ from typing import Any, Iterable
 
 from sqlmodel import Session, select
 
-from antidengue_automation.models import AntiDengueActivityRule, AntiDengueSimpleActivityRule
+from antidengue_automation.models import (
+    AntiDengueActivityRule,
+    AntiDengueScheduleExecution,
+    AntiDengueSimpleActivityRule,
+)
 from automation_core.models import Job
 from master_data.models import (
     Department,
@@ -232,14 +236,30 @@ def _route_rows(session: Session, profile_ids: Iterable[str]) -> list[dict[str, 
     return rows
 
 
-def _previous_portal_runs(session: Session) -> list[dict[str, str]]:
+def _previous_portal_runs(session: Session) -> list[dict[str, Any]]:
     jobs = session.exec(
         select(Job)
         .where(Job.type == "antidengue.report")
         .order_by(Job.created_at.desc())
         .limit(250)
     ).all()
-    rows: list[dict[str, str]] = []
+    job_ids = [job.id for job in jobs]
+    executions = (
+        session.exec(
+            select(AntiDengueScheduleExecution).where(
+                AntiDengueScheduleExecution.source_job_id.in_(job_ids)
+            )
+        ).all()
+        if job_ids
+        else []
+    )
+    execution_by_source_job = {
+        execution.source_job_id: execution
+        for execution in executions
+        if execution.source_job_id is not None
+    }
+
+    rows: list[dict[str, Any]] = []
     for job in jobs:
         summary = dict((job.result or {}).get("summary") or {})
         input_info = dict(summary.get("input") or {})
@@ -247,13 +267,21 @@ def _previous_portal_runs(session: Session) -> list[dict[str, str]]:
         started_at = str(summary.get("run_started_at") or "")
         if not sha or not started_at:
             continue
+        execution = execution_by_source_job.get(job.id)
         rows.append(
             {
                 "started_at": started_at,
-                "status": job.status,
+                # The orchestration execution status distinguishes Test Run
+                # (preview_ready) from a real completed Send Now/schedule run.
+                "status": execution.status if execution is not None else job.status,
                 "raw_file_name": str(input_info.get("name") or ""),
                 "raw_file_sha256": sha,
                 "job_id": str(job.id),
+                "execution_id": str(execution.id) if execution is not None else "",
+                "trigger_type": execution.trigger_type if execution is not None else "",
+                "dispatch_policy": execution.dispatch_policy if execution is not None else "",
+                "dry_run": bool((job.parameters or {}).get("dry_run")),
+                "portal_acquisition": dict(summary.get("portal_acquisition") or {}),
             }
         )
     return rows

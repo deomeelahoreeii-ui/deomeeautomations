@@ -228,7 +228,24 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
         const deadlinePill = document.createElement("span"); deadlinePill.textContent = item.submission_deadline_override ? `Deadline ${item.submission_deadline_override}` : `Deadline ${globalDeadlineLabel}`; routes.append(deadlinePill);
         const actions = card.querySelector(".schedule-card-actions")!;
         const run = document.createElement("button"); run.className = "btn btn-sm btn-primary"; run.type = "button"; run.textContent = item.dispatch_policy === "auto_send_when_clean" ? "Run guarded send now" : "Run preview now";
-        run.addEventListener("click", async () => { if (item.dispatch_policy === "auto_send_when_clean" && !confirm("Run this guarded send schedule now? It sends only after a clean exact plan.")) return; try { const execution = await api(`/api/v1/antidengue/schedules/${item.id}/run-now`, { method: "POST", body: JSON.stringify({ created_by: "web-operator" }) }); location.href = `/?execution_id=${execution.id}`; } catch (error) { el("list-message").textContent = error instanceof Error ? error.message : "Could not run schedule"; } });
+        run.addEventListener("click", async () => {
+          if (item.dispatch_policy === "auto_send_when_clean" && !confirm("Run this guarded send schedule now? It sends only after a clean exact plan.")) return;
+          const originalText = run.textContent || "Run now";
+          run.disabled = true;
+          run.textContent = "Queueing…";
+          el("list-message").textContent = "Creating an idempotent schedule execution…";
+          try {
+            const execution = await api(`/api/v1/antidengue/schedules/${item.id}/run-now`, { method: "POST", body: JSON.stringify({ created_by: "web-operator" }) });
+            el("list-message").textContent = execution.reused_active_execution
+              ? `${execution.execution_code || "The run"} was already active; opening it now.`
+              : `${execution.execution_code || "Run"} queued; opening live details.`;
+            location.href = `/antidengue/run-history?execution_id=${execution.id}`;
+          } catch (error) {
+            el("list-message").textContent = error instanceof Error ? error.message : "Could not run schedule";
+            run.disabled = false;
+            run.textContent = originalText;
+          }
+        });
         const toggle = document.createElement("button"); toggle.className = "btn btn-sm"; toggle.type = "button"; toggle.textContent = item.enabled ? "Pause" : "Enable";
         toggle.addEventListener("click", async () => { try { await api(`/api/v1/antidengue/schedules/${item.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !item.enabled }) }); await loadAll(); } catch (error) { el("list-message").textContent = error instanceof Error ? error.message : "Could not update schedule"; } });
         const edit = document.createElement("button"); edit.className = "btn btn-sm btn-ghost"; edit.type = "button"; edit.textContent = "Edit"; edit.addEventListener("click", () => editSchedule(item));

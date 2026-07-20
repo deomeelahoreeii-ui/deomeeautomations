@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-import os
-import json
 import datetime as dt
+import json
+import os
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
+
+from compliance_reconciliation import reconcile_activities, workbook_frames
 
 SCHEMA_VERSION = "hotspot_distance.v1"
 DISTANCE_COLUMN = "Distance Difference (In meters)"
@@ -34,17 +37,21 @@ def configured_review_threshold() -> float | None:
     return threshold
 
 
-def _runtime_rules() -> list[dict]:
+def _snapshot() -> dict[str, Any]:
     raw_path = os.getenv("ANTIDENGUE_RUNTIME_SNAPSHOT", "").strip()
     if not raw_path:
-        return []
+        return {}
     try:
         snapshot = json.loads(Path(raw_path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Cannot read activity rules from runtime snapshot: {raw_path}") from exc
     if snapshot.get("schema_version") != 1 or snapshot.get("source") != "automation-platform-postgresql":
         raise RuntimeError("Activity rules require a trusted runtime snapshot")
-    rules = snapshot.get("activity_rules") or []
+    return snapshot
+
+
+def _runtime_rules() -> list[dict[str, Any]]:
+    rules = _snapshot().get("activity_rules") or []
     if not isinstance(rules, list):
         raise RuntimeError("Runtime snapshot activity_rules must be a list")
     return [item for item in rules if isinstance(item, dict)]
@@ -61,12 +68,23 @@ def _time_between(values: pd.Series, start: int, end: int) -> pd.Series:
     return values.ge(start) | values.lt(end)
 
 
-def _evaluate_rules(frame: pd.DataFrame, distances: pd.Series) -> tuple[list[dict], pd.Series]:
-    timestamps = pd.to_datetime(
-        frame["Activity Date/Time"].astype(str).str.replace("on ", "", regex=False),
-        format="%m/%d/%Y at %I:%M%p",
-        errors="coerce",
+def _parsed_activity_times(frame: pd.DataFrame) -> pd.Series:
+    values = (
+        frame["Activity Date/Time"]
+        .fillna("")
+        .astype(str)
+        .str.replace(r"^\s*on\s+", "", regex=True, case=False)
+        .str.replace(r"\s+at\s+", " ", regex=True, case=False)
+        .str.strip()
     )
+    try:
+        return pd.to_datetime(values, errors="coerce", format="mixed")
+    except TypeError:
+        return pd.to_datetime(values, errors="coerce")
+
+
+def _evaluate_rules(frame: pd.DataFrame, distances: pd.Series) -> tuple[list[dict], pd.Series]:
+    timestamps = _parsed_activity_times(frame)
     combined = pd.Series(False, index=frame.index)
     results = []
     for rule in _runtime_rules():
@@ -115,7 +133,29 @@ def _evaluate_rules(frame: pd.DataFrame, distances: pd.Series) -> tuple[list[dic
     return results, combined
 
 
-def _candidate_frame(path: Path) -> tuple[pd.DataFrame, list[dict], str]:
+def _valid_correction_mask(
+    frame: pd.DataFrame,
+    distances: pd.Series,
+    *,
+    rule_results: list[dict],
+    issue_mask: pd.Series,
+    threshold: float | None,
+) -> pd.Series:
+    numeric = distances.notna() & distances.ge(0)
+    if not rule_results:
+        if threshold is None:
+            return pd.Series(False, index=frame.index)
+        return (numeric & distances.le(threshold)).fillna(False)
+
+    # A correction must pass every published hotspot rule, including any
+    # combined distance/time condition. Passing distance alone must never clear
+    # an issue that is still review-required for another active condition.
+    return (numeric & ~issue_mask).fillna(False)
+
+
+def _read_classified_frame(
+    path: Path,
+) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series, list[dict], str, float | None]:
     tables = pd.read_html(path)
     if len(tables) != 1:
         raise ValueError(f"Expected one hotspot-distance table, found {len(tables)}")
@@ -125,98 +165,151 @@ def _candidate_frame(path: Path) -> tuple[pd.DataFrame, list[dict], str]:
         raise ValueError(
             "Hotspot-distance report is missing expected columns: " + ", ".join(missing)
         )
+
     distances = pd.to_numeric(frame[DISTANCE_COLUMN], errors="coerce")
     rule_results, rule_candidate_mask = _evaluate_rules(frame, distances)
-    if rule_results:
-        return frame[rule_candidate_mask].copy(), rule_results, "published_rules"
     threshold = configured_review_threshold()
-    if threshold is None:
-        return frame.iloc[0:0].copy(), [], "not_configured"
-    return frame[distances.gt(threshold)].copy(), [], "legacy_threshold"
+    if rule_results:
+        issue_mask = rule_candidate_mask.fillna(False)
+        selection_mode = "published_rules"
+    elif threshold is None:
+        issue_mask = pd.Series(False, index=frame.index)
+        selection_mode = "not_configured"
+    else:
+        issue_mask = distances.gt(threshold).fillna(False)
+        selection_mode = "legacy_threshold"
+    valid_correction_mask = _valid_correction_mask(
+        frame,
+        distances,
+        rule_results=rule_results,
+        issue_mask=issue_mask,
+        threshold=threshold,
+    )
+    return (
+        frame,
+        issue_mask,
+        valid_correction_mask,
+        distances,
+        rule_results,
+        selection_mode,
+        threshold,
+    )
 
 
 def _runtime_school_index() -> dict[str, dict]:
-    raw_path = os.getenv("ANTIDENGUE_RUNTIME_SNAPSHOT", "").strip()
-    if not raw_path:
-        return {}
-    try:
-        snapshot = json.loads(Path(raw_path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Cannot read school routing from runtime snapshot: {raw_path}") from exc
-    if snapshot.get("schema_version") != 1 or snapshot.get("source") != "automation-platform-postgresql":
-        raise RuntimeError("Hotspot routing requires a trusted runtime snapshot")
     return {
         str(item.get("School EMIS") or "").strip(): item
-        for item in snapshot.get("master_schools") or []
+        for item in _snapshot().get("master_schools") or []
         if isinstance(item, dict) and str(item.get("School EMIS") or "").strip()
     }
 
 
-def write_hotspot_review_report(source_path: Path, destination: Path) -> dict[str, object]:
-    """Write the complete frozen set of activities selected by published rules.
+def _emis_series(frame: pd.DataFrame) -> pd.Series:
+    return (
+        frame["Submitted by"]
+        .fillna("")
+        .astype(str)
+        .str.extract(r"^(\d{5,})", expand=False)
+        .fillna("")
+    )
 
-    The generated workbook carries authoritative hierarchy identifiers from the
-    platform runtime snapshot. The WhatsApp compiler can therefore reuse an
-    existing audience safely without trusting portal-provided town labels.
-    """
-    candidates, rule_results, selection_mode = _candidate_frame(source_path)
+
+def _with_authoritative_routing(frame: pd.DataFrame, emis_values: pd.Series) -> pd.DataFrame:
+    routed = frame.copy()
+    for name in (
+        "School EMIS",
+        "School Name",
+        "Tehsil",
+        "Markaz",
+        "Wing ID",
+        "Tehsil ID",
+        "Markaz ID",
+        "Review Classification",
+    ):
+        if name in routed.columns:
+            routed = routed.drop(columns=[name])
+    routed.insert(0, "School EMIS", emis_values.reindex(routed.index).fillna("").astype(str))
     school_index = _runtime_school_index()
-    submitted = candidates["Submitted by"].fillna("").astype(str)
-    candidates.insert(0, "School EMIS", submitted.str.extract(r"^(\d+)", expand=False).fillna(""))
 
     def school_value(emis: object, key: str) -> str:
         return str(school_index.get(str(emis).strip(), {}).get(key) or "")
 
-    candidates.insert(1, "School Name", candidates["School EMIS"].map(lambda value: school_value(value, "School Name")))
-    candidates.insert(2, "Tehsil", candidates["School EMIS"].map(lambda value: school_value(value, "Tehsil")))
-    candidates.insert(3, "Markaz", candidates["School EMIS"].map(lambda value: school_value(value, "Markaz")))
-    candidates.insert(4, "Wing ID", candidates["School EMIS"].map(lambda value: school_value(value, "_wing_id")))
-    candidates.insert(5, "Tehsil ID", candidates["School EMIS"].map(lambda value: school_value(value, "_tehsil_id")))
-    candidates.insert(6, "Markaz ID", candidates["School EMIS"].map(lambda value: school_value(value, "_markaz_id")))
-    candidates.insert(7, "Review Classification", "Review required")
+    routed.insert(1, "School Name", routed["School EMIS"].map(lambda value: school_value(value, "School Name")))
+    routed.insert(2, "Tehsil", routed["School EMIS"].map(lambda value: school_value(value, "Tehsil")))
+    routed.insert(3, "Markaz", routed["School EMIS"].map(lambda value: school_value(value, "Markaz")))
+    routed.insert(4, "Wing ID", routed["School EMIS"].map(lambda value: school_value(value, "_wing_id")))
+    routed.insert(5, "Tehsil ID", routed["School EMIS"].map(lambda value: school_value(value, "_tehsil_id")))
+    routed.insert(6, "Markaz ID", routed["School EMIS"].map(lambda value: school_value(value, "_markaz_id")))
+    return routed
 
+
+def _reconcile(path: Path) -> tuple[dict[str, object], list[dict], str, float | None, pd.Series]:
+    (
+        frame,
+        issue_mask,
+        valid_correction_mask,
+        distances,
+        rule_results,
+        selection_mode,
+        threshold,
+    ) = _read_classified_frame(path)
+    emis = _emis_series(frame)
+    routed = _with_authoritative_routing(frame, emis)
+    result = reconcile_activities(
+        routed,
+        issue_mask=issue_mask,
+        valid_correction_mask=valid_correction_mask,
+        school_emis=routed["School EMIS"],
+        stream="hotspot_distance",
+        match_column_groups=("Tag", "Hotspot Name"),
+        timestamp_candidates=("Activity Date/Time",),
+    )
+    return result, rule_results, selection_mode, threshold, distances
+
+
+def _format_workbook_sheet(sheet) -> None:
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+
+
+def write_hotspot_review_report(source_path: Path, destination: Path) -> dict[str, object]:
+    """Write open, corrected and audit activity sets without deleting history."""
+
+    result, rule_results, selection_mode, _, _ = _reconcile(source_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp.xlsx")
     with pd.ExcelWriter(temporary, engine="openpyxl") as writer:
-        candidates.to_excel(writer, sheet_name="Review Required", index=False)
-        worksheet = writer.book["Review Required"]
-        worksheet.freeze_panes = "A2"
-        worksheet.auto_filter.ref = worksheet.dimensions
+        for sheet_name, sheet_frame in workbook_frames(result):
+            sheet_frame.to_excel(writer, sheet_name=sheet_name, index=False)
+            _format_workbook_sheet(writer.book[sheet_name])
     temporary.replace(destination)
+
+    candidates = result["open_issues"]
     known = candidates["School Name"].fillna("").astype(str).str.strip().ne("")
     return {
         "path": str(destination),
         "name": destination.name,
         "selection_mode": selection_mode,
-        "candidate_count": int(len(candidates)),
-        "unique_school_count": int(candidates.loc[candidates["School EMIS"].ne(""), "School EMIS"].nunique()),
+        "candidate_count": int(result["open_issue_count"]),
+        "historical_candidate_count": int(result["historical_issue_count"]),
+        "corrected_candidate_count": int(result["corrected_issue_count"]),
+        "valid_unused_count": int(result["valid_unused_count"]),
+        "unique_school_count": int(
+            candidates.loc[candidates["School EMIS"].ne(""), "School EMIS"].nunique()
+        ),
         "unmapped_school_count": int((~known).sum()),
         "rule_results": rule_results,
+        "corrective_compliance": result["policy"],
+        "reconciliation_match_columns": result["match_columns"],
     }
 
 
 def analyze_hotspot_distance_report(path: Path) -> dict[str, object]:
-    tables = pd.read_html(path)
-    if len(tables) != 1:
-        raise ValueError(f"Expected one hotspot-distance table, found {len(tables)}")
-    frame = tables[0]
-    missing = sorted(set(REQUIRED_COLUMNS).difference(map(str, frame.columns)))
-    if missing:
-        raise ValueError(
-            "Hotspot-distance report is missing expected columns: " + ", ".join(missing)
-        )
-
-    distances = pd.to_numeric(frame[DISTANCE_COLUMN], errors="coerce")
+    result, rule_results, selection_mode, threshold, distances = _reconcile(path)
+    audit = result["audit"]
     valid_distances = distances.dropna()
-    submitters = frame["Submitted by"].fillna("").astype(str).str.strip()
-    threshold = configured_review_threshold()
-    rule_results, rule_candidate_mask = _evaluate_rules(frame, distances)
-    candidate_mask = (
-        rule_candidate_mask
-        if rule_results
-        else (distances.gt(threshold) if threshold is not None else None)
-    )
-    candidates = frame[candidate_mask] if candidate_mask is not None else frame.iloc[0:0]
+    submitters = audit["Submitted by"].fillna("").astype(str).str.strip()
+    candidates = result["open_issues"]
     candidate_sample = [
         {
             "activity_id": str(row["ID"]),
@@ -232,9 +325,24 @@ def analyze_hotspot_distance_report(path: Path) -> dict[str, object]:
         "schema_version": SCHEMA_VERSION,
         "source_format": "html_table_xls",
         "valid": True,
-        "row_count": int(len(frame)),
-        "column_count": int(len(frame.columns)),
-        "columns": [str(value) for value in frame.columns],
+        "row_count": int(len(audit)),
+        "column_count": int(len(audit.columns) - 9),
+        "columns": [
+            str(value)
+            for value in audit.columns
+            if value
+            not in {
+                "Compliance Stream",
+                "Corrective Policy Version",
+                "Compliance Status",
+                "Correction Activity ID",
+                "Correction Activity Date/Time",
+                "Corrects Activity ID",
+                "Reconciliation Match Key",
+                "Reconciliation Window",
+                "Reconciliation Time Source",
+            }
+        ],
         "valid_distance_count": int(len(valid_distances)),
         "missing_distance_count": int(distances.isna().sum()),
         "unique_submitter_count": int(submitters[submitters.ne("")].nunique()),
@@ -246,8 +354,12 @@ def analyze_hotspot_distance_report(path: Path) -> dict[str, object]:
         },
         "review_threshold_meters": threshold,
         "review_candidate_count": (
-            int(len(candidates)) if rule_results or threshold is not None else None
+            int(result["open_issue_count"])
+            if selection_mode != "not_configured"
+            else None
         ),
+        "historical_review_candidate_count": int(result["historical_issue_count"]),
+        "corrected_review_candidate_count": int(result["corrected_issue_count"]),
         "review_candidate_sample": candidate_sample,
         "classification": (
             "review_required"
@@ -257,11 +369,6 @@ def analyze_hotspot_distance_report(path: Path) -> dict[str, object]:
             else "threshold_not_configured"
         ),
         "rule_results": rule_results,
+        "corrective_compliance": result["policy"],
+        "selection_mode": selection_mode,
     }
-
-
-__all__ = [
-    "analyze_hotspot_distance_report",
-    "configured_review_threshold",
-    "write_hotspot_review_report",
-]
