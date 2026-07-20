@@ -1,0 +1,10 @@
+[
+  "automation-platform/apps/web/src/actions/index.ts",
+  "automation-platform/apps/web/src/pages/master-data/jurisdictions.astro",
+  "automation-platform/apps/web/src/pages/master-data/markazes.astro",
+  "automation-platform/apps/web/src/pages/master-data/officers.astro",
+  "automation-platform/packages/master_data/master_data/api.py",
+  "automation-platform/packages/master_data/master_data/markaz_catalog.py",
+  "automation-platform/packages/master_data/master_data/postgres_repository.py",
+  "automation-platform/packages/master_data/master_data/schemas.py"
+]

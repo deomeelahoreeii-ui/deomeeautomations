@@ -1,0 +1,101 @@
+---
+import CrmLayout from "../../../layouts/CrmLayout.astro";
+---
+<CrmLayout
+  title="AI Complaint & Reply Archive"
+  description="Pull approved Helpdesk replies into PostgreSQL, review category-wise complaint/reply pairs, and export confidential ChatGPT-ready files. Tehsil and officer routing remain optional."
+  page="knowledge"
+>
+  <a class="btn btn-sm" href="/crm/helpdesk/" slot="actions">Helpdesk synchronization</a>
+
+  <section class="knowledge-metrics">
+    <article class="master-card"><span>Approved pairs</span><strong id="metric-approved">—</strong><small>Approved/Issued reply plus complaint text</small></article>
+    <article class="master-card"><span>AI eligible</span><strong id="metric-eligible">—</strong><small>Marked eligible in Helpdesk</small></article>
+    <article class="master-card"><span>Awaiting reply</span><strong id="metric-awaiting">—</strong><small>Published complaints without reply text</small></article>
+    <article class="master-card"><span>Categories</span><strong id="metric-categories">—</strong><small>Across the current filter</small></article>
+  </section>
+
+  <section class="master-card knowledge-sync">
+    <div>
+      <p class="eyebrow">Source of truth</p>
+      <h2>Bring approved Helpdesk replies into the archive</h2>
+      <p>Complaint identity, text and categories remain in PostgreSQL. Helpdesk supplies workflow fields and only <b>Approved</b> or <b>Issued</b> final replies. Paperless remains the document/OCR archive. Routing is not required for this step.</p>
+    </div>
+    <button class="btn btn-primary" id="pull-approved" type="button">Pull Helpdesk workflow & approved replies</button>
+    <div class="alert" id="knowledge-message" hidden></div>
+  </section>
+
+  <section class="master-card knowledge-filters">
+    <div class="knowledge-heading">
+      <div><p class="eyebrow">Dataset builder</p><h2>Filter and preview</h2></div>
+      <button class="btn btn-sm" id="reset-filters" type="button">Reset filters</button>
+    </div>
+    <div class="knowledge-filter-grid">
+      <label><span>Category</span><select class="select select-bordered select-sm" id="filter-category"><option value="">All categories</option></select></label>
+      <label><span>Subcategory</span><select class="select select-bordered select-sm" id="filter-subcategory"><option value="">All subcategories</option></select></label>
+      <label><span>Complaint source</span><select class="select select-bordered select-sm" id="filter-source"><option value="">All sources</option></select></label>
+      <label><span>Reply scope</span><select class="select select-bordered select-sm" id="filter-scope"><option value="approved">Approved / Issued only</option><option value="with_reply">All records with reply text</option><option value="awaiting">Awaiting reply</option><option value="all">All published complaints</option></select></label>
+      <label><span>Date from</span><div class="date-control"><input type="date" id="filter-date-from" /></div></label>
+      <label><span>Date to</span><div class="date-control"><input type="date" id="filter-date-to" /></div></label>
+      <label class="knowledge-search"><span>Search complaint, reply, number or category</span><input class="input input-bordered input-sm" id="filter-search" placeholder="Search text…" /></label>
+      <label class="form-check knowledge-check"><input class="form-check-input" type="checkbox" id="filter-ai-only" /><span class="form-check-label">AI eligible only</span></label>
+    </div>
+    <div class="knowledge-filter-actions">
+      <button class="btn btn-primary" id="apply-filters" type="button">Apply filters</button>
+      <span id="filter-summary">Approved/Issued records only</span>
+    </div>
+  </section>
+
+  <section class="master-card knowledge-export">
+    <div><p class="eyebrow">Confidential exports</p><h2>Download the current filtered dataset</h2><p>The ZIP contains all formats plus separate category folders. Files are unredacted and should be handled like a confidential database export.</p></div>
+    <div class="knowledge-export-buttons">
+      <a class="btn btn-primary" data-format="zip" href="#">Download complete AI bundle (ZIP)</a>
+      <a class="btn btn-sm" data-format="xlsx" href="#">Excel workbook</a>
+      <a class="btn btn-sm" data-format="csv" href="#">CSV</a>
+      <a class="btn btn-sm" data-format="md" href="#">ChatGPT Markdown</a>
+      <a class="btn btn-sm" data-format="txt" href="#">Plain text</a>
+      <a class="btn btn-sm" data-format="json" href="#">JSON</a>
+    </div>
+  </section>
+
+  <section class="master-card knowledge-preview">
+    <div class="knowledge-heading">
+      <div><p class="eyebrow">Preview</p><h2 id="preview-title">Complaint/reply pairs</h2></div>
+      <button class="btn btn-sm" id="refresh-records" type="button">Refresh</button>
+    </div>
+    <div class="knowledge-table-wrap">
+      <table class="table table-sm">
+        <thead><tr><th>Complaint</th><th>Category</th><th>Complaint text</th><th>Approved reply</th><th>Status</th></tr></thead>
+        <tbody id="knowledge-rows"><tr><td colspan="5">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="knowledge-pagination">
+      <button class="btn btn-xs" id="previous-page" type="button">Previous</button>
+      <span id="page-label">Page 1</span>
+      <button class="btn btn-xs" id="next-page" type="button">Next</button>
+    </div>
+  </section>
+
+  <style>
+    .knowledge-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.8rem;margin:1rem 0}.knowledge-metrics article{padding:1rem}.knowledge-metrics span,.knowledge-metrics strong,.knowledge-metrics small{display:block}.knowledge-metrics span{color:#6b7787;font-size:.72rem}.knowledge-metrics strong{margin:.25rem 0;font-size:1.65rem}.knowledge-metrics small{color:#7b8796;font-size:.7rem}.knowledge-sync,.knowledge-filters,.knowledge-export,.knowledge-preview{padding:1.1rem;margin-top:1rem}.knowledge-sync{display:grid;grid-template-columns:1fr auto;gap:1rem;align-items:center}.knowledge-sync h2,.knowledge-filters h2,.knowledge-export h2,.knowledge-preview h2{margin:.1rem 0 .45rem;font-size:1rem}.knowledge-sync p:not(.eyebrow),.knowledge-export p{color:#66758a;font-size:.78rem;max-width:75rem}.knowledge-sync .alert{grid-column:1/-1}.knowledge-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}.knowledge-filter-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.8rem;margin-top:1rem}.knowledge-filter-grid label>span:first-child{display:block;margin-bottom:.3rem;color:#566479;font-size:.72rem}.knowledge-search{grid-column:span 2}.knowledge-check{align-self:end;min-height:2.35rem}.date-control{display:flex;width:100%;min-width:0;border:1px solid var(--fallback-bc,oklch(var(--bc)/.2));border-radius:.5rem;padding:.45rem .65rem}.date-control input{display:block;width:100%;min-width:0;border:0;background:transparent;padding:0;font-size:.875rem}.knowledge-filter-actions{display:flex;align-items:center;gap:.8rem;margin-top:1rem}.knowledge-filter-actions span{color:#6b7787;font-size:.75rem}.knowledge-export{display:grid;grid-template-columns:minmax(0,1fr) minmax(20rem,auto);gap:1rem;align-items:center}.knowledge-export-buttons{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:.45rem}.knowledge-table-wrap{overflow-x:auto;margin-top:1rem}.knowledge-table-wrap td{vertical-align:top}.knowledge-text{display:block;max-width:34rem;white-space:pre-wrap}.knowledge-secondary{display:block;margin-top:.25rem;color:#7b8796;font-size:.7rem}.knowledge-status{display:inline-block}.knowledge-pagination{display:flex;align-items:center;justify-content:center;gap:.8rem;margin-top:1rem}@media(max-width:1000px){.knowledge-metrics{grid-template-columns:repeat(2,1fr)}.knowledge-filter-grid{grid-template-columns:repeat(2,1fr)}.knowledge-export{grid-template-columns:1fr}.knowledge-export-buttons{justify-content:flex-start}}@media(max-width:650px){.knowledge-metrics,.knowledge-filter-grid{grid-template-columns:1fr}.knowledge-search{grid-column:auto}.knowledge-sync{grid-template-columns:1fr}}
+  </style>
+
+  <script>
+    import { actions } from "astro:actions";
+    const API = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+    const el=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T;
+    const esc=(value:unknown)=>String(value??"").replace(/[&<>'"]/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]!));
+    const excerpt=(value:unknown,limit=420)=>{const text=String(value??"").trim();return text.length>limit?`${text.slice(0,limit)}…`:text||"—"};
+    let page=1,pages=1,facets:any={category_subcategories:{}};
+    function input(){return {category:el<HTMLSelectElement>("filter-category").value,subCategory:el<HTMLSelectElement>("filter-subcategory").value,sourceSystem:el<HTMLSelectElement>("filter-source").value,search:el<HTMLInputElement>("filter-search").value.trim(),replyScope:el<HTMLSelectElement>("filter-scope").value as "approved"|"with_reply"|"awaiting"|"all",aiEligibleOnly:el<HTMLInputElement>("filter-ai-only").checked,dateFrom:el<HTMLInputElement>("filter-date-from").value,dateTo:el<HTMLInputElement>("filter-date-to").value}}
+    function params(){const data=input(),query=new URLSearchParams({category:data.category,sub_category:data.subCategory,source_system:data.sourceSystem,search:data.search,reply_scope:data.replyScope,ai_eligible_only:String(data.aiEligibleOnly),date_from:data.dateFrom,date_to:data.dateTo});for(const [key,value] of [...query])if(!value)query.delete(key);return query}
+    function updateExportLinks(){const query=params();document.querySelectorAll<HTMLAnchorElement>("[data-format]").forEach(link=>{link.href=`${API}/api/v1/crm/knowledge/exports/${link.dataset.format}?${query}`})}
+    function showMessage(text:string,error=false){const node=el("knowledge-message");node.hidden=false;node.className=`alert ${error?"alert-error":"alert-success"}`;node.textContent=text}
+    function fillSelect(node:HTMLSelectElement,values:string[],placeholder:string){const current=node.value;node.innerHTML=`<option value="">${esc(placeholder)}</option>`+values.map(value=>`<option value="${esc(value)}">${esc(value)}</option>`).join("");if(values.includes(current))node.value=current}
+    function updateSubcategories(){const category=el<HTMLSelectElement>("filter-category").value;const values=category?(facets.category_subcategories?.[category]||[]):(facets.subcategories||[]);fillSelect(el<HTMLSelectElement>("filter-subcategory"),values,"All subcategories")}
+    async function loadFacets(){const result=await actions.crm.knowledgeFacets({});if(result.error){showMessage(result.error.message,true);return}facets=result.data as any;fillSelect(el<HTMLSelectElement>("filter-category"),facets.categories||[],"All categories");fillSelect(el<HTMLSelectElement>("filter-source"),facets.sources||[],"All sources");updateSubcategories()}
+    async function load(){const filters=input();const [statsResult,recordsResult]=await Promise.all([actions.crm.knowledgeStatistics(filters),actions.crm.knowledgeRecords({...filters,page,pageSize:25})]);if(statsResult.error){showMessage(statsResult.error.message,true);return}if(recordsResult.error){showMessage(recordsResult.error.message,true);return}const stats=statsResult.data as any,records=recordsResult.data as any;el("metric-approved").textContent=String(stats.approved_pairs||0);el("metric-eligible").textContent=String(stats.ai_eligible_pairs||0);el("metric-awaiting").textContent=String(stats.awaiting_reply||0);el("metric-categories").textContent=String(stats.categories||0);pages=records.pages||1;page=Math.min(page,pages);el("page-label").textContent=`Page ${records.page||page} of ${pages}`;el<HTMLButtonElement>("previous-page").disabled=page<=1;el<HTMLButtonElement>("next-page").disabled=page>=pages;el("preview-title").textContent=`Complaint/reply archive · ${records.total||0} record(s)`;const items=records.items||[];el("knowledge-rows").innerHTML=items.length?items.map((row:any)=>`<tr><td><a href="/crm/cases/${esc(row.case_id)}"><strong>${esc(row.complaint_number||row.case_id)}</strong></a><span class="knowledge-secondary">Ticket ${esc(row.helpdesk_ticket_id||"—")} · Paperless ${esc(row.paperless_document_id||"—")}</span></td><td><span>${esc(row.category)}</span><span class="knowledge-secondary">${esc(row.sub_category)}</span></td><td><span class="knowledge-text">${esc(excerpt(row.complaint_text))}</span></td><td><span class="knowledge-text">${esc(excerpt(row.approved_reply))}</span></td><td><span class="badge knowledge-status">${esc(row.reply_approval_status)}</span><span class="knowledge-secondary">AI eligible: ${row.ai_eligible?"Yes":"No"}</span><span class="knowledge-secondary">${(row.quality_issues||[]).length?esc(row.quality_issues.join(", ")):"Ready"}</span></td></tr>`).join(""):`<tr><td colspan="5">No records match the current filter. Pull approved replies from Helpdesk or change the reply scope.</td></tr>`;el("filter-summary").textContent=`${records.total||0} matching record(s) · ${filters.replyScope.replaceAll("_"," ")}`;updateExportLinks()}
+    el("pull-approved").addEventListener("click",async()=>{const preview=await actions.crm.helpdeskWorkflowPreview({limit:500});if(preview.error){showMessage(preview.error.message,true);return}const data=preview.data as any;if(!(data.selected_count||0)){showMessage("No linked Helpdesk tickets are available to pull.",true);return}if(!confirm(`Pull workflow for exactly ${data.selected_count} linked tickets? Only Approved or Issued final replies can enter the AI archive.`))return;const result=await actions.crm.pullHelpdeskWorkflow({caseIds:data.selected_case_ids||[],limit:500});if(result.error){showMessage(result.error.message,true);return}const counts=(result.data as any).counts||{};showMessage(`Workflow pull finished: ${counts.pulled||0} pulled, ${counts.failed||0} failed. Draft and rejected replies were not archived.`);page=1;await load()});
+    el("filter-category").addEventListener("change",()=>{updateSubcategories();updateExportLinks()});el("apply-filters").addEventListener("click",()=>{page=1;void load()});el("refresh-records").addEventListener("click",()=>void load());el("previous-page").addEventListener("click",()=>{if(page>1){page--;void load()}});el("next-page").addEventListener("click",()=>{if(page<pages){page++;void load()}});el("reset-filters").addEventListener("click",()=>{el<HTMLSelectElement>("filter-category").value="";updateSubcategories();el<HTMLSelectElement>("filter-subcategory").value="";el<HTMLSelectElement>("filter-source").value="";el<HTMLSelectElement>("filter-scope").value="approved";el<HTMLInputElement>("filter-search").value="";el<HTMLInputElement>("filter-date-from").value="";el<HTMLInputElement>("filter-date-to").value="";el<HTMLInputElement>("filter-ai-only").checked=false;page=1;void load()});el<HTMLInputElement>("filter-search").addEventListener("keydown",event=>{if(event.key==="Enter"){page=1;void load()}});document.querySelectorAll("select,input").forEach(node=>node.addEventListener("change",updateExportLinks));await loadFacets();await load();
+  </script>
+</CrmLayout>

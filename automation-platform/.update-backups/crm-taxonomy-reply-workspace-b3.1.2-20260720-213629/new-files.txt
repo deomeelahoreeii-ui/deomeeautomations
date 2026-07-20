@@ -1,0 +1,2 @@
+packages/crm_domain/crm_domain/json_safe.py
+tests/test_crm_json_safe_b312.py

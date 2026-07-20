@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
 from automation_core.database import engine, get_session
@@ -28,7 +29,12 @@ from master_data.contacts import (
     set_manual_contact_name,
 )
 from master_data.postgres_repository import PostgresMasterDataRepository
-from master_data.schemas import MasterContactWrite, OfficerWrite, SchoolWrite
+from master_data.schemas import (
+    JurisdictionAssignmentWrite,
+    MasterContactWrite,
+    OfficerWrite,
+    SchoolWrite,
+)
 from master_data.hierarchy import build_hierarchy
 from master_data.markaz_catalog import markaz_catalog
 
@@ -67,6 +73,16 @@ def translate_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=503, detail=str(exc))
     if isinstance(exc, LookupError):
         return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, IntegrityError):
+        return HTTPException(
+            status_code=409,
+            detail=(
+                "The officer or jurisdiction changed concurrently and now conflicts "
+                "with an active assignment. Refresh Master Data and try again."
+            ),
+        )
+    if "currently assigned to" in str(exc) or "cannot be restored" in str(exc):
+        return HTTPException(status_code=409, detail=str(exc))
     return HTTPException(status_code=422, detail=str(exc))
 
 
@@ -555,6 +571,83 @@ def read_areas() -> dict:
     return repository().areas()
 
 
+@router.post("/jurisdictions", status_code=status.HTTP_201_CREATED)
+def assign_jurisdiction(
+    data: JurisdictionAssignmentWrite,
+    session: Session = Depends(get_session),
+) -> dict:
+    try:
+        before, after = repository().assign_jurisdiction(data)
+    except Exception as exc:
+        raise translate_error(exc) from exc
+    assigned = next(
+        (
+            row
+            for row in after.get("jurisdictions", [])
+            if row.get("scope_ref") == data.scope_ref
+        ),
+        {},
+    )
+    audit(
+        session,
+        entity_type=f"{data.role}_jurisdiction",
+        entity_id=data.scope_ref,
+        action="assigned",
+        summary=(
+            f"Assigned {data.role.upper()} {after['name']} to "
+            f"{assigned.get('scope_name') or data.scope_ref}"
+        ),
+        before=before,
+        after=after,
+    )
+    return after
+
+
+@router.delete("/jurisdictions/{jurisdiction_id}")
+def end_jurisdiction(
+    jurisdiction_id: str,
+    session: Session = Depends(get_session),
+) -> dict:
+    try:
+        before, after = repository().end_jurisdiction(jurisdiction_id)
+    except Exception as exc:
+        raise translate_error(exc) from exc
+    audit(
+        session,
+        entity_type=f"{before['role']}_jurisdiction",
+        entity_id=jurisdiction_id,
+        action="ended",
+        summary=(
+            f"Ended {before['role'].upper()} assignment for "
+            f"{before['officer_name']} · {before['scope_name']}"
+        ),
+        before=before,
+        after=after,
+    )
+    return after
+
+
+@router.post("/jurisdictions/{jurisdiction_id}/make-primary")
+def make_primary_jurisdiction(
+    jurisdiction_id: str,
+    session: Session = Depends(get_session),
+) -> dict:
+    try:
+        before, after = repository().make_primary_jurisdiction(jurisdiction_id)
+    except Exception as exc:
+        raise translate_error(exc) from exc
+    audit(
+        session,
+        entity_type=f"{after['role']}_officer",
+        entity_id=after["id"],
+        action="primary_assignment_changed",
+        summary=f"Changed primary assignment for {after['name']}",
+        before=before,
+        after=after,
+    )
+    return after
+
+
 @router.get("/jurisdictions")
 def read_jurisdictions(
     active: bool | None = True,
@@ -684,7 +777,7 @@ async def import_officers(
             existing_id = repo.officer_id_by_mobile(officer.role, officer.mobile)
             action = "update" if existing_id else "create"
             if commit:
-                repo.save_officer(officer, existing_id)
+                repo.save_officer(officer, existing_id, jurisdiction_mode="merge")
             if existing_id:
                 updated += 1
             else:

@@ -1,0 +1,14 @@
+apps/api/automation_api/main.py
+apps/web/src/actions/index.ts
+apps/web/src/layouts/CrmLayout.astro
+apps/web/src/pages/crm/cases/[id].astro
+apps/web/src/pages/crm/helpdesk/index.astro
+apps/web/src/pages/crm/knowledge/index.astro
+apps/web/src/pages/crm/replies/index.astro
+packages/crm_domain/crm_domain/__init__.py
+packages/crm_domain/crm_domain/api.py
+packages/crm_domain/crm_domain/knowledge.py
+packages/crm_domain/crm_domain/models.py
+packages/crm_integrations/crm_integrations/frappe_helpdesk/workflow.py
+tests/test_crm_knowledge_archive_b3.py
+tests/test_preview_partial_approval.py

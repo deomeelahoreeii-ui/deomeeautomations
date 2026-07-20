@@ -1,0 +1,41 @@
+ M apps/api/automation_api/main.py
+ M apps/web/src/actions/index.ts
+ M apps/web/src/layouts/CrmLayout.astro
+ M apps/web/src/pages/crm/cases/[id].astro
+ M apps/web/src/pages/crm/helpdesk/index.astro
+ M apps/web/src/pages/crm/knowledge/index.astro
+ M apps/web/src/pages/crm/replies/index.astro
+ M apps/web/src/pages/master-data/jurisdictions.astro
+ M apps/web/src/pages/master-data/markazes.astro
+ M apps/web/src/pages/master-data/officers.astro
+ M apps/web/src/styles/master-data.css
+ M packages/crm_domain/crm_domain/__init__.py
+ M packages/crm_domain/crm_domain/api.py
+ M packages/crm_domain/crm_domain/knowledge.py
+ M packages/crm_domain/crm_domain/models.py
+ M packages/crm_integrations/crm_integrations/frappe_helpdesk/workflow.py
+ M packages/master_data/master_data/api.py
+ M packages/master_data/master_data/markaz_catalog.py
+ M packages/master_data/master_data/postgres_repository.py
+ M packages/master_data/master_data/schemas.py
+ M tests/test_crm_knowledge_archive_b3.py
+ M tests/test_preview_partial_approval.py
+?? .update-backups/antidengue-corrective-reliability-b4.3-20260720-182023/
+?? .update-backups/antidengue-corrective-reliability-b4.3.1-20260720-182930/
+?? .update-backups/antidengue-corrective-reliability-b4.3.2-20260720-192230/
+?? .update-backups/crm-taxonomy-reply-workspace-b3.1-20260720-204558/
+?? .update-backups/crm-taxonomy-reply-workspace-b3.1.1-20260720-211838/
+?? alembic/versions/d6e9f2a4b705_officer_jurisdiction_scope_ownership.py
+?? alembic/versions/e9b3c5d7f104_crm_taxonomy_and_reply_workspace.py
+?? apps/web/src/pages/crm/replies/[id].astro
+?? apps/web/src/pages/crm/taxonomy/
+?? packages/crm_domain/crm_domain/reply_workspace.py
+?? packages/crm_domain/crm_domain/reply_workspace_api.py
+?? packages/crm_domain/crm_domain/taxonomy.py
+?? packages/crm_domain/crm_domain/taxonomy_api.py
+?? scripts/repair_officer_jurisdictions.py
+?? tests/test_crm_reply_workspace_b31.py
+?? tests/test_crm_taxonomy_b31.py
+?? tests/test_crm_taxonomy_reply_ui_contract_b31.py
+?? tests/test_master_data_officer_assignment_ui_contract.py
+?? tests/test_master_data_officer_jurisdiction_management.py

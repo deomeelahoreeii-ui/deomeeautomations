@@ -31,7 +31,7 @@ import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
 
   <script>
     import { actions } from "astro:actions";
-    import { badge, stack } from "../../scripts/table-cells";
+    import { actionButtons, badge, stack } from "../../scripts/table-cells";
 
     const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
     const table = el<any>("markaz-table");
@@ -90,9 +90,10 @@ import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
         { accessorKey: "name", header: "Markaz", cell: ({ row }: any) => linkedStack(row.original.name, `${row.original.schools} school${row.original.schools === 1 ? "" : "s"}`, row.original.href) },
         { accessorKey: "wing_name", header: "DEO wing", cell: ({ row }: any) => stack(row.original.wing_code || row.original.wing_name) },
         { accessorKey: "tehsil_name", header: "Tehsil", cell: ({ row }: any) => stack(row.original.tehsil_name) },
-        { accessorKey: "aeo_count", header: "AEO coverage", cell: ({ row }: any) => stack(row.original.aeos.map((item: any) => item.name).join(", ") || "Unassigned", row.original.aeos.map((item: any) => item.mobile).filter(Boolean).join(", ")) },
+        { accessorKey: "aeo_count", header: "AEO coverage", cell: ({ row }: any) => { const assigned = row.original.aeos[0]; return stack(assigned?.name || "Unassigned", assigned ? `${assigned.assignment_kind === "primary" ? "Primary" : "Additional charge"} · ${assigned.mobile || "No mobile"}` : "No active routing owner"); } },
         { accessorKey: "schools", header: "Schools", cell: ({ row }: any) => linkedStack(String(row.original.schools), "Open school list", row.original.href) },
         { accessorKey: "assigned", header: "Status", cell: ({ row }: any) => badge(row.original.assigned ? "AEO assigned" : "Needs AEO", row.original.assigned ? "active" : "warning") },
+        { id: "actions", header: "", enableSorting: false, cell: ({ row }: any) => actionButtons([{ label: row.original.assigned ? "Transfer AEO" : "Assign AEO", onClick: () => { window.location.href = `/master-data/jurisdictions?role=aeo&scope_ref=${encodeURIComponent(row.original.id)}&transfer=${row.original.assigned ? "true" : "false"}`; } }]) },
       ],
     });
     const refresh = () => void table.refresh(true);

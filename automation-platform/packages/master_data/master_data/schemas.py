@@ -40,9 +40,23 @@ class OfficerWrite(SQLModel):
     wing_ref: str
     tehsil_ref: str
     markaz_ref: str = ""
+    # None preserves compatibility with older callers. The web form sends the
+    # complete desired active scope list so removals and additional charges are
+    # reconciled transactionally.
+    jurisdiction_refs: list[str] | None = None
+    replace_conflicts: bool = False
     helpdesk_user_email: str = Field(default="", max_length=255)
     helpdesk_enabled: bool = False
     active: bool = True
+
+
+class JurisdictionAssignmentWrite(SQLModel):
+    role: Literal["aeo", "ddeo"]
+    officer_ref: str
+    scope_ref: str
+    make_primary: bool = False
+    replace_conflicts: bool = False
+    notes: str = Field(default="", max_length=2000)
 
 
 class SchoolImportCommit(SQLModel):

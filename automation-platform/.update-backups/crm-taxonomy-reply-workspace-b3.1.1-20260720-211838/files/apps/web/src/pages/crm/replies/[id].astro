@@ -1,0 +1,143 @@
+---
+import CrmLayout from "../../../layouts/CrmLayout.astro";
+const { id } = Astro.params;
+if (!id) return Astro.redirect("/crm/replies/");
+const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+---
+
+<CrmLayout
+  title="Reply Editor"
+  description="Prepare, verify and approve one complaint reply while preserving Frappe workflow and PostgreSQL revision history."
+  page="replies"
+>
+  <a class="btn btn-sm" href="/crm/replies/" slot="actions">← Reply Queue</a>
+  <a class="btn btn-sm" href="/crm/knowledge/" slot="actions">AI Reply Archive</a>
+
+  <main id="reply-editor" data-api-base={apiBase} data-case-id={id} class="editor-shell">
+    <section class="editor-status master-card">
+      <div>
+        <p class="eyebrow">Complaint reply workspace</p>
+        <div class="editor-title-line"><h2 id="editor-title">Loading complaint…</h2><span id="editor-reply-status" class="status-pill">—</span></div>
+        <p id="editor-subtitle">Reading complaint and live Helpdesk fields.</p>
+      </div>
+      <div id="editor-links" class="editor-links"></div>
+    </section>
+
+    <div id="editor-warning" class="editor-warning" hidden></div>
+
+    <section class="editor-grid">
+      <aside class="editor-context">
+        <section class="master-card context-card">
+          <div class="section-heading"><div><p class="eyebrow">Original context</p><h2>Complaint</h2></div><a id="open-case" class="btn btn-sm" href="#">Full case</a></div>
+          <div id="complaint-meta" class="context-meta"></div>
+          <article id="complaint-text" class="complaint-text">Loading complaint text…</article>
+        </section>
+
+        <section class="master-card classification-card">
+          <div class="section-heading"><div><p class="eyebrow">Controlled classification</p><h2>Category</h2></div><span id="classification-state" class="status-pill">—</span></div>
+          <div class="classification-form">
+            <label>Category<select id="editor-category" class="select select-bordered"></select></label>
+            <label>Subcategory<select id="editor-subcategory" class="select select-bordered"><option value="">No subcategory</option></select></label>
+            <button id="save-classification" class="btn btn-primary" type="button">Save and sync classification</button>
+          </div>
+          <div id="classification-guidance" class="guidance-block"></div>
+          <a class="text-link" href="/crm/taxonomy/">Manage categories and guidance →</a>
+        </section>
+
+        <section class="master-card context-card">
+          <div class="section-heading"><div><p class="eyebrow">Evidence</p><h2>Documents</h2></div></div>
+          <div id="document-list" class="document-list"><div class="editor-empty">Loading evidence…</div></div>
+        </section>
+
+        <section class="master-card context-card">
+          <div class="section-heading"><div><p class="eyebrow">Immutable archive</p><h2>Approved revisions</h2></div><span id="revision-count" class="status-pill">0</span></div>
+          <div id="revision-list" class="revision-list"><div class="editor-empty">No approved revisions yet.</div></div>
+        </section>
+      </aside>
+
+      <section class="master-card reply-form-card">
+        <div class="section-heading">
+          <div><p class="eyebrow">Operational reply</p><h2>Findings and final response</h2><p>Saving writes to Frappe Helpdesk, reads the values back, and only then updates the PostgreSQL workflow snapshot.</p></div>
+          <span id="live-source" class="status-pill">—</span>
+        </div>
+
+        <form id="reply-form" class="reply-form" autocomplete="off">
+          <label>Inquiry findings<textarea id="inquiry-findings" class="textarea textarea-bordered" rows="5" placeholder="Record the verified field inquiry or administrative findings."></textarea></label>
+          <label>School / institution version<textarea id="school-version" class="textarea textarea-bordered" rows="5" placeholder="Record the institution's response, denial, admission or supporting position."></textarea></label>
+          <label>Applicable policy / rule<textarea id="applicable-policy" class="textarea textarea-bordered" rows="5" placeholder="Relevant policy, circular, rule or safe administrative basis."></textarea></label>
+          <label class="final-reply-field">Final reply<textarea id="final-reply" class="textarea textarea-bordered" rows="15" placeholder="Draft the citizen-facing final response here."></textarea><small><span id="reply-character-count">0</span> characters</small></label>
+          <label>Disposal outcome<input id="disposal-outcome" class="input input-bordered" maxlength="10000" placeholder="Addressed, disposed, action initiated, clarification provided…" /></label>
+          <div class="reply-state-grid">
+            <label>Reply status<select id="reply-status" class="select select-bordered"><option>Not Prepared</option><option>Draft</option><option>Pending Approval</option><option>Approved</option><option>Issued</option><option>Rejected</option></select></label>
+            <label class="form-check ai-check"><input id="ai-eligible" class="form-check-input" type="checkbox" /><span class="form-check-label">Include latest approved version in AI archive</span></label>
+          </div>
+          <div id="reply-rule-note" class="rule-note">Draft and pending replies never enter the AI archive.</div>
+        </form>
+
+        <footer class="editor-action-bar">
+          <div class="editor-save-state"><span id="save-indicator">No unsaved changes</span><small id="last-pull">—</small></div>
+          <div class="editor-actions">
+            <button id="copy-reply" class="btn" type="button">Copy Reply</button>
+            <button id="save-current" class="btn" type="button">Save Selected Status</button>
+            <button id="save-draft" class="btn" type="button">Save Draft</button>
+            <button id="submit-approval" class="btn" type="button">Submit for Approval</button>
+            <button id="reject-reply" class="btn" type="button">Reject Reply</button>
+            <button id="approve-reply" class="btn btn-primary" type="button">Approve Reply</button>
+            <button id="issue-reply" class="btn btn-primary" type="button">Mark as Issued</button>
+          </div>
+        </footer>
+      </section>
+    </section>
+
+    <details class="master-card editor-audit">
+      <summary><span><b>Complaint workflow activity</b><small>Classification and reply writes, verification and failures</small></span></summary>
+      <div id="editor-audit-list" class="audit-list"><div class="editor-empty">Open to load activity.</div></div>
+    </details>
+
+    <div id="editor-toast" class="editor-toast" role="status" aria-live="polite" hidden></div>
+  </main>
+
+  <style>
+    .editor-shell{display:grid;gap:1rem}.editor-status{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;border-left:4px solid #16879a}.editor-title-line{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}.editor-title-line h2{margin:.1rem 0}.editor-status p{margin:.25rem 0;color:#64748b}.editor-links{display:flex;gap:.45rem;flex-wrap:wrap;justify-content:flex-end}.status-pill{display:inline-flex;align-items:center;border-radius:999px;padding:.27rem .58rem;background:#edf2f7;color:#475569;font-size:.68rem;font-weight:800;text-transform:uppercase}.status-pill.approved,.status-pill.issued,.status-pill.synchronized,.status-pill.live{background:#e7f8f1;color:#176b57}.status-pill.draft,.status-pill.pending-approval,.status-pill.pending{background:#fff3dc;color:#925b05}.status-pill.rejected,.status-pill.failed,.status-pill.offline{background:#fff0f1;color:#a52630}.editor-warning{border-left:4px solid #d59b16;border-radius:.65rem;background:#fff8e8;color:#6f4a00;padding:.8rem 1rem}.editor-grid{display:grid;grid-template-columns:minmax(20rem,.82fr) minmax(0,1.45fr);gap:1rem;align-items:start}.editor-context{display:grid;gap:1rem}.section-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}.section-heading h2{margin:.1rem 0}.section-heading p{margin:.25rem 0;color:#64748b}.context-meta{display:flex;gap:.4rem;flex-wrap:wrap;margin:.7rem 0}.context-meta span{border-radius:999px;background:#f1f5f9;padding:.3rem .55rem;font-size:.7rem}.complaint-text{max-height:24rem;overflow:auto;white-space:pre-wrap;border:1px solid #e1e8ed;border-radius:.7rem;background:#fbfcfd;padding:1rem;line-height:1.6;color:#263445}.classification-form{display:grid;grid-template-columns:1fr 1fr;gap:.7rem;align-items:end}.classification-form label,.reply-form label{display:grid;gap:.35rem;font-weight:700;color:#475569}.classification-form button{grid-column:1/-1}.guidance-block{display:grid;gap:.55rem;margin:.8rem 0}.guidance-block article{border-left:3px solid #16879a;background:#effafb;padding:.65rem .75rem}.guidance-block strong,.guidance-block span{display:block}.guidance-block span{margin-top:.2rem;white-space:pre-wrap;color:#526273}.text-link{font-weight:750;color:#16768a}.document-list,.revision-list{display:grid;gap:.55rem;margin-top:.7rem}.document-row,.revision-row{border:1px solid #e2e8f0;border-radius:.65rem;padding:.7rem}.document-row header,.revision-row header{display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem}.document-row strong,.document-row small,.revision-row strong,.revision-row small{display:block}.document-row small,.revision-row small{color:#64748b}.revision-row details{margin-top:.5rem}.revision-row pre{white-space:pre-wrap;font:inherit;line-height:1.5;background:#f8fafc;border-radius:.5rem;padding:.65rem}.reply-form-card{padding-bottom:0;position:sticky;top:.5rem}.reply-form{display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-top:1rem}.reply-form label textarea,.reply-form label input,.reply-form label select{width:100%}.final-reply-field{grid-column:1/-1}.final-reply-field small{text-align:right;color:#64748b}.reply-state-grid{grid-column:1/-1;display:grid;grid-template-columns:minmax(12rem,.6fr) 1fr;gap:1rem;align-items:end}.ai-check{min-height:3rem}.rule-note{grid-column:1/-1;border-radius:.55rem;background:#f1f5f9;color:#526273;padding:.65rem}.editor-action-bar{position:sticky;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:1rem -1rem 0;border-top:1px solid #dfe7ed;background:rgba(255,255,255,.96);backdrop-filter:blur(8px);padding:.8rem 1rem}.editor-save-state{display:grid}.editor-save-state small{color:#64748b}.editor-actions{display:flex;justify-content:flex-end;gap:.45rem;flex-wrap:wrap}.editor-audit summary{cursor:pointer;list-style:none}.editor-audit summary span{display:grid}.editor-audit summary small{color:#64748b;margin-top:.2rem}.audit-list{display:grid;gap:.5rem;margin-top:1rem}.audit-row{display:grid;grid-template-columns:minmax(10rem,.7fr) minmax(0,1.5fr) auto;gap:.8rem;border-top:1px solid #e5eaf0;padding:.65rem 0}.audit-row small{color:#64748b}.editor-empty{display:grid;place-items:center;min-height:5rem;color:#64748b;text-align:center}.editor-toast{position:fixed;right:1rem;bottom:1rem;z-index:1000;max-width:min(32rem,calc(100vw - 2rem));border-radius:.7rem;background:#183b45;color:#fff;padding:.8rem 1rem;box-shadow:0 12px 30px rgba(15,23,42,.25)}.editor-toast.error{background:#9f2530}@media(max-width:1150px){.editor-grid{grid-template-columns:1fr}.reply-form-card{position:static}}@media(max-width:700px){.editor-status,.section-heading,.editor-action-bar{align-items:flex-start;flex-direction:column}.editor-links,.editor-actions{justify-content:flex-start}.classification-form,.reply-form,.reply-state-grid{grid-template-columns:1fr}.final-reply-field,.rule-note,.reply-state-grid{grid-column:auto}.editor-action-bar{position:static}.audit-row{grid-template-columns:1fr}}
+  </style>
+
+  <script>
+    type Category={id:string;name:string;active:boolean;default_ai_eligible:boolean;reply_guidance:string;policy_notes:string;merged_into_id?:string|null;subcategories:{id:string;name:string;active:boolean;reply_guidance:string;policy_notes:string;merged_into_id?:string|null}[]};
+    const root=document.getElementById("reply-editor") as HTMLElement,API=root.dataset.apiBase||"",caseId=root.dataset.caseId||"";
+    const $=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T;
+    const esc=(value:unknown)=>String(value??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+    const formIds=["inquiry-findings","school-version","applicable-policy","final-reply","disposal-outcome","reply-status","ai-eligible"];
+    let categories:Category[]=[];let data:any=null;let dirty=false;let saving=false;let auditLoaded=false;
+    async function api(path:string,init?:RequestInit){const response=await fetch(`${API}${path}`,{...init,headers:{"Content-Type":"application/json",...(init?.headers||{})}}),body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(typeof body.detail==="string"?body.detail:body.detail?.message||response.statusText);return body}
+    function toast(message:string,error=false){const node=$("editor-toast");node.textContent=message;node.className=`editor-toast${error?" error":""}`;node.hidden=false;window.setTimeout(()=>node.hidden=true,5000)}
+    function statusClass(value:string){return value.toLowerCase().replaceAll(" ","-")}
+    function formatDate(value:unknown){return value?new Date(String(value)).toLocaleString():"—"}
+    function activeCategories(){return categories.filter(item=>item.active&&!item.merged_into_id)}
+    function selectedCategory(){return categories.find(item=>item.id===($("editor-category") as HTMLSelectElement).value)||null}
+    function updateSubcategories(selected=""){
+      const category=selectedCategory(),select=$("editor-subcategory") as HTMLSelectElement,items=(category?.subcategories||[]).filter(item=>item.active&&!item.merged_into_id);select.innerHTML=`<option value="">No subcategory</option>${items.map(item=>`<option value="${item.id}">${esc(item.name)}</option>`).join("")}`;if(items.some(item=>item.id===selected))select.value=selected;renderGuidance();
+    }
+    function renderGuidance(){const category=selectedCategory(),subcategory=category?.subcategories.find(item=>item.id===($("editor-subcategory") as HTMLSelectElement).value);const blocks=[];if(category?.reply_guidance||category?.policy_notes)blocks.push(`<article><strong>${esc(category.name)} guidance</strong><span>${esc([category.reply_guidance,category.policy_notes].filter(Boolean).join("\n\n"))}</span></article>`);if(subcategory?.reply_guidance||subcategory?.policy_notes)blocks.push(`<article><strong>${esc(subcategory.name)} guidance</strong><span>${esc([subcategory.reply_guidance,subcategory.policy_notes].filter(Boolean).join("\n\n"))}</span></article>`);$("classification-guidance").innerHTML=blocks.join("")||`<article><strong>No saved guidance</strong><span>Add reusable wording and policy notes in Taxonomy.</span></article>`}
+    function markDirty(){if(saving)return;dirty=true;$("save-indicator").textContent="Unsaved changes"}
+    function enforceRules(){const status=($("reply-status") as HTMLSelectElement).value,ai=$("ai-eligible") as HTMLInputElement,approved=["Approved","Issued"].includes(status);ai.disabled=!approved;if(!approved)ai.checked=false;$("reply-rule-note").textContent=approved?"This verified version can be included in category-wise AI exports when AI eligibility is checked.":"Draft, pending and rejected replies never enter the AI archive.";const pill=$("editor-reply-status");pill.textContent=status;pill.className=`status-pill ${statusClass(status)}`}
+    function setField(id:string,value:unknown){const node=$(id) as HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement;if(node instanceof HTMLInputElement&&node.type==="checkbox")node.checked=Boolean(value);else node.value=String(value??"")}
+    function replyPayload(statusOverride?:string){const status=statusOverride||($("reply-status") as HTMLSelectElement).value;return{inquiry_findings:($("inquiry-findings") as HTMLTextAreaElement).value,school_version:($("school-version") as HTMLTextAreaElement).value,applicable_policy:($("applicable-policy") as HTMLTextAreaElement).value,final_reply:($("final-reply") as HTMLTextAreaElement).value,reply_status:status,disposal_outcome:($("disposal-outcome") as HTMLInputElement).value,ai_eligible:["Approved","Issued"].includes(status)&&($("ai-eligible") as HTMLInputElement).checked}}
+    function render(){
+      const c=data.case,r=data.reply;$("editor-title").textContent=`Complaint ${c.complaint_number||c.id}`;$("editor-subtitle").textContent=`${c.category||"Unclassified"}${c.subcategory?` · ${c.subcategory}`:""} · ${c.source_system}`;$("open-case").setAttribute("href",`/crm/cases/${c.id}/`);$("complaint-text").textContent=c.complaint_text||"No complaint text is stored.";$("complaint-meta").innerHTML=`<span>${esc(c.state)}</span><span>${esc(c.source_system)}</span><span>Created ${esc(formatDate(c.created_at))}</span>${c.paperless_document_id?`<span>Paperless #${esc(c.paperless_document_id)}</span>`:""}`;
+      const links=[];if(c.helpdesk_ticket_url)links.push(`<a class="btn btn-sm" href="${esc(c.helpdesk_ticket_url)}" target="_blank" rel="noreferrer">Helpdesk #${esc(c.helpdesk_ticket_id)} ↗</a>`);if(c.paperless_url)links.push(`<a class="btn btn-sm" href="${esc(c.paperless_url)}" target="_blank" rel="noreferrer">Paperless ↗</a>`);links.push(`<a class="btn btn-sm" href="/crm/knowledge/?search=${encodeURIComponent(c.complaint_number||"")}">Archive record</a>`);$("editor-links").innerHTML=links.join("");
+      const live=$("live-source");live.textContent=data.live_helpdesk?"Live Helpdesk":"CRM snapshot";live.className=`status-pill ${data.live_helpdesk?"live":"offline"}`;$("editor-warning").hidden=!data.live_helpdesk_error;$("editor-warning").textContent=data.live_helpdesk_error?`Helpdesk could not be read: ${data.live_helpdesk_error}. The last PostgreSQL snapshot is shown. Saving is disabled until Helpdesk is available.`:"";
+      const categorySelect=$("editor-category") as HTMLSelectElement;categorySelect.innerHTML=`<option value="">Choose category</option>${activeCategories().map(item=>`<option value="${item.id}">${esc(item.name)}</option>`).join("")}`;categorySelect.value=c.category_id||"";updateSubcategories(c.subcategory_id||"");const classification=$("classification-state");classification.textContent=c.classification_sync_status||"not_synced";classification.className=`status-pill ${statusClass(c.classification_sync_status||"")}`;
+      setField("inquiry-findings",r.inquiry_findings);setField("school-version",r.school_version);setField("applicable-policy",r.applicable_policy);setField("final-reply",r.final_reply);setField("disposal-outcome",r.disposal_outcome);setField("reply-status",r.reply_status||"Not Prepared");setField("ai-eligible",r.ai_eligible);enforceRules();$("reply-character-count").textContent=String((r.final_reply||"").length);$("last-pull").textContent=`Last verified pull: ${formatDate(r.last_pulled_at)}`;
+      $("document-list").innerHTML=(data.documents||[]).map((item:any)=>`<article class="document-row"><header><div><strong>${esc(item.filename||item.id)}</strong><small>${esc(item.role)} · ${esc(item.review_state)}</small></div>${item.paperless_document_id?`<span class="status-pill">#${esc(item.paperless_document_id)}</span>`:""}</header></article>`).join("")||`<div class="editor-empty">No linked evidence documents.</div>`;
+      $("revision-count").textContent=String((data.revisions||[]).length);$("revision-list").innerHTML=(data.revisions||[]).map((item:any)=>`<article class="revision-row"><header><div><strong>Approved version ${esc(item.version)}</strong><small>${esc(item.approval_status)} · ${esc(formatDate(item.captured_at))}</small></div><span class="status-pill ${statusClass(item.approval_status||"")}">${esc(item.approval_status)}</span></header><details><summary>Read archived reply</summary><pre>${esc(item.reply_text)}</pre></details></article>`).join("")||`<div class="editor-empty">No approved revisions yet. Drafts are intentionally excluded.</div>`;
+      dirty=false;$("save-indicator").textContent="No unsaved changes";const disabled=!data.live_helpdesk;document.querySelectorAll<HTMLButtonElement>("#save-current,#save-draft,#submit-approval,#reject-reply,#approve-reply,#issue-reply").forEach(button=>button.disabled=disabled);
+    }
+    async function load(){try{const[taxonomy,editor]=await Promise.all([api("/api/v1/crm/taxonomy?include_inactive=false"),api(`/api/v1/crm/reply-workspace/cases/${caseId}`)]);categories=taxonomy.categories||[];data=editor;render()}catch(error){$("editor-warning").hidden=false;$("editor-warning").textContent=error instanceof Error?error.message:String(error);toast($("editor-warning").textContent||"Unable to load reply editor",true)}}
+    async function saveClassification(){const categoryId=($("editor-category") as HTMLSelectElement).value;if(!categoryId){toast("Choose a category.",true);return}const button=$("save-classification") as HTMLButtonElement;button.disabled=true;button.textContent="Saving and verifying…";try{const result=await api(`/api/v1/crm/reply-workspace/cases/${caseId}/classification`,{method:"PUT",body:JSON.stringify({category_id:categoryId,subcategory_id:($("editor-subcategory") as HTMLSelectElement).value||null,synchronize:true})});if(result.status==="failed")throw new Error(result.error||"Classification synchronization failed");toast(result.synchronized?"Classification saved and verified in Helpdesk.":"Classification saved in PostgreSQL; Helpdesk ticket is not linked.");await load()}catch(error){toast(error instanceof Error?error.message:String(error),true)}finally{button.disabled=false;button.textContent="Save and sync classification"}}
+    async function saveReply(status:string){if(saving)return;const payload=replyPayload(status);if(["Pending Approval","Approved","Issued"].includes(status)&&!payload.final_reply.trim()){toast("Enter the final reply before using this status.",true);($("final-reply") as HTMLTextAreaElement).focus();return}if(["Approved","Issued"].includes(status)&&!confirm(`${status} this reply? The verified text will create an immutable approved revision in PostgreSQL.`))return;saving=true;document.querySelectorAll<HTMLButtonElement>("#save-current,#save-draft,#submit-approval,#reject-reply,#approve-reply,#issue-reply").forEach(button=>button.disabled=true);$("save-indicator").textContent="Writing to Helpdesk and verifying read-back…";try{const result=await api(`/api/v1/crm/reply-workspace/cases/${caseId}/reply`,{method:"PUT",body:JSON.stringify(payload)});toast(`${status} reply saved and verified.${result.archive?.imported?" Approved revision archived.":""}`);await load()}catch(error){dirty=true;$("save-indicator").textContent="Save failed — your text remains in this browser";toast(error instanceof Error?error.message:String(error),true)}finally{saving=false;if(data?.live_helpdesk)document.querySelectorAll<HTMLButtonElement>("#save-current,#save-draft,#submit-approval,#reject-reply,#approve-reply,#issue-reply").forEach(button=>button.disabled=false)}}
+    async function loadAudit(){if(auditLoaded)return;auditLoaded=true;try{const result=await api(`/api/v1/crm/reply-workspace/audit?case_id=${caseId}&limit=100`);$("editor-audit-list").innerHTML=(result.items||[]).map((item:any)=>`<article class="audit-row"><div><strong>${esc(item.event_type.replaceAll("_"," "))}</strong><small>${esc(item.state)}</small></div><div><span>${esc(item.actor)}</span>${item.error?`<small>${esc(item.error)}</small>`:""}</div><small>${esc(formatDate(item.created_at))}</small></article>`).join("")||`<div class="editor-empty">No workflow activity recorded.</div>`}catch(error){$("editor-audit-list").innerHTML=`<div class="editor-empty">${esc(error instanceof Error?error.message:String(error))}</div>`}}
+
+    formIds.forEach(id=>$(id).addEventListener("input",()=>{markDirty();if(id==="final-reply")$("reply-character-count").textContent=String(($("final-reply") as HTMLTextAreaElement).value.length);if(id==="reply-status")enforceRules()}));$("editor-category").addEventListener("change",()=>{updateSubcategories();const category=selectedCategory(),status=($("reply-status") as HTMLSelectElement).value;if(category&&["Approved","Issued"].includes(status))($("ai-eligible") as HTMLInputElement).checked=Boolean(category.default_ai_eligible);markDirty()});$("editor-subcategory").addEventListener("change",()=>{renderGuidance();markDirty()});$("save-classification").addEventListener("click",saveClassification);$("save-current").addEventListener("click",()=>saveReply(($("reply-status") as HTMLSelectElement).value));$("save-draft").addEventListener("click",()=>saveReply("Draft"));$("submit-approval").addEventListener("click",()=>saveReply("Pending Approval"));$("reject-reply").addEventListener("click",()=>saveReply("Rejected"));$("approve-reply").addEventListener("click",()=>saveReply("Approved"));$("issue-reply").addEventListener("click",()=>saveReply("Issued"));$("copy-reply").addEventListener("click",async()=>{const text=($("final-reply") as HTMLTextAreaElement).value;if(!text){toast("There is no reply text to copy.",true);return}try{await navigator.clipboard.writeText(text);toast("Reply copied.")}catch{($("final-reply") as HTMLTextAreaElement).select();document.execCommand("copy");toast("Reply copied.")}});document.querySelector(".editor-audit")?.addEventListener("toggle",event=>{if((event.currentTarget as HTMLDetailsElement).open)void loadAudit()});window.addEventListener("beforeunload",event=>{if(dirty&&!saving){event.preventDefault();event.returnValue=""}});
+    void load();
+  </script>
+</CrmLayout>

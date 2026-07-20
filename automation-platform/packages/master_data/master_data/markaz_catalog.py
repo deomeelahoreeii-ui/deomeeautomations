@@ -41,9 +41,9 @@ def markaz_catalog(
         if item.officer_id in officers and item.markaz_id
     ]
     schools_by_markaz = Counter(item.markaz_id for item in schools if item.markaz_id)
-    aeos_by_markaz: dict[uuid.UUID, dict[uuid.UUID, Officer]] = defaultdict(dict)
+    aeos_by_markaz: dict[uuid.UUID, dict[uuid.UUID, tuple[Officer, OfficerJurisdiction]]] = defaultdict(dict)
     for item in jurisdictions:
-        aeos_by_markaz[item.markaz_id][item.officer_id] = officers[item.officer_id]
+        aeos_by_markaz[item.markaz_id][item.officer_id] = (officers[item.officer_id], item)
 
     rows: list[dict[str, Any]] = []
     for item in markazes:
@@ -51,7 +51,10 @@ def markaz_catalog(
         tehsil = tehsils.get(item.tehsil_id)
         if wing is None or tehsil is None:
             continue
-        aeos = sorted(aeos_by_markaz[item.id].values(), key=lambda officer: officer.name)
+        aeo_assignments = sorted(
+            aeos_by_markaz[item.id].values(), key=lambda pair: pair[0].name
+        )
+        aeos = [pair[0] for pair in aeo_assignments]
         rows.append({
             "id": str(item.id), "name": item.name, "active": item.active,
             "wing_id": str(wing.id), "wing_name": wing.name, "wing_code": wing.code,
@@ -59,8 +62,16 @@ def markaz_catalog(
             "schools": schools_by_markaz[item.id], "assigned": bool(aeos),
             "aeo_count": len(aeos),
             "aeos": [
-                {"id": str(officer.id), "name": officer.name, "mobile": officer.mobile}
-                for officer in aeos
+                {
+                    "id": str(officer.id),
+                    "jurisdiction_id": str(jurisdiction.id),
+                    "name": officer.name,
+                    "mobile": officer.mobile,
+                    "assignment_kind": (
+                        "primary" if officer.markaz_id == item.id else "additional"
+                    ),
+                }
+                for officer, jurisdiction in aeo_assignments
             ],
             "href": f"/master-data/schools?markaz_ref={item.id}",
         })

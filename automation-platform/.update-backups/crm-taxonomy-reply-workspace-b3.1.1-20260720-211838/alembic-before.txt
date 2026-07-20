@@ -1,0 +1,60 @@
+Traceback (most recent call last):
+  File "/home/ahmad/code/deomeeautomations/automation-platform/.venv/bin/alembic", line 10, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/home/ahmad/code/deomeeautomations/automation-platform/.venv/lib/python3.14/site-packages/alembic/config.py", line 1047, in main
+    CommandLine(prog=prog).main(argv=argv)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/home/ahmad/code/deomeeautomations/automation-platform/.venv/lib/python3.14/site-packages/alembic/config.py", line 1037, in main
+    self.run_cmd(cfg, options)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/ahmad/code/deomeeautomations/automation-platform/.venv/lib/python3.14/site-packages/alembic/config.py", line 971, in run_cmd
+    fn(
+    ~~^
+        config,
+        ^^^^^^^
+        *[getattr(options, k, None) for k in positional],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **{k: getattr(options, k, None) for k in kwarg},
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/ahmad/code/deomeeautomations/automation-platform/.venv/lib/python3.14/site-packages/alembic/command.py", line 729, in current
+    script.run_env()
+    ~~~~~~~~~~~~~~^^
+  File "/home/ahmad/code/deomeeautomations/automation-platform/.venv/lib/python3.14/site-packages/alembic/script/base.py", line 556, in run_env
+    util.load_python_file(self.dir, "env.py")
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/home/ahmad/code/deomeeautomations/automation-platform/.venv/lib/python3.14/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
+    module = load_module_py(module_id, path)
+  File "/home/ahmad/code/deomeeautomations/automation-platform/.venv/lib/python3.14/site-packages/alembic/util/pyfiles.py", line 136, in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "<frozen importlib._bootstrap_external>", line 759, in exec_module
+  File "<frozen importlib._bootstrap>", line 491, in _call_with_frames_removed
+  File "/home/ahmad/code/deomeeautomations/automation-platform/alembic/env.py", line 11, in <module>
+    from crm_domain.models import (
+    ...<7 lines>...
+    )
+  File "/home/ahmad/code/deomeeautomations/automation-platform/packages/crm_domain/crm_domain/__init__.py", line 7, in <module>
+    from crm_domain.models import (
+    ...<12 lines>...
+    )
+  File "/home/ahmad/code/deomeeautomations/automation-platform/packages/crm_domain/crm_domain/models.py", line 96, in <module>
+    class ComplaintCategory(SQLModel, table=True):
+    ...<29 lines>...
+        updated_at: datetime = Field(default_factory=utcnow, index=True)
+  File "/home/ahmad/code/deomeeautomations/automation-platform/packages/crm_domain/crm_domain/models.py", line 111, in ComplaintCategory
+    active: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, default=True), index=True)
+                   ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ahmad/code/deomeeautomations/automation-platform/.venv/lib/python3.14/site-packages/sqlmodel/main.py", line 453, in Field
+    field_info = FieldInfo(
+        default,
+        default_factory=default_factory,
+        **field_info_kwargs,
+    )
+  File "/home/ahmad/code/deomeeautomations/automation-platform/.venv/lib/python3.14/site-packages/sqlmodel/main.py", line 148, in __init__
+    raise RuntimeError(
+        "Passing index is not supported when also passing a sa_column"
+    )
+RuntimeError: Passing index is not supported when also passing a sa_column

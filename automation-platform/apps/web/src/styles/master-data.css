@@ -546,3 +546,334 @@ astro-data-table {
 [data-theme="automation-dark"] .hierarchy-detail-metrics article,
 [data-theme="automation-dark"] .hierarchy-list summary { background: #111827; border-color: #334155; }
 [data-theme="automation-dark"] .hierarchy-contact { background: #0f172a; }
+
+/* Officer assignment picker -------------------------------------------------
+   DaisyUI's single-line .select component is intentionally not used for
+   multi-jurisdiction assignment. This picker remains readable, searchable,
+   keyboard accessible and scrollable when dozens of Markazes are available. */
+.officer-assignment-modal {
+  width: min(920px, calc(100vw - 28px));
+  max-width: 920px;
+  max-height: calc(100dvh - 28px);
+  overflow: hidden;
+}
+
+.officer-assignment-modal .master-form {
+  max-height: calc(100dvh - 96px);
+  overflow-y: auto;
+  align-items: start;
+  overscroll-behavior: contain;
+}
+
+.officer-assignment-modal .form-actions {
+  position: sticky;
+  z-index: 5;
+  bottom: -20px;
+  background: #fff;
+  box-shadow: 0 -8px 18px rgb(27 43 65 / 5%);
+}
+
+.form-field-caption {
+  display: block;
+  margin-bottom: 4px;
+  color: #59667a;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.jurisdiction-picker-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 7px;
+}
+
+.jurisdiction-picker-heading small {
+  display: block;
+  max-width: 650px;
+  color: #7d899a;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.jurisdiction-picker-count {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #e8f4f6;
+  padding: 5px 9px;
+  color: #116f7f;
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.jurisdiction-picker {
+  overflow: hidden;
+  border: 1px solid #d8e1e9;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.jurisdiction-picker-toolbar {
+  border-bottom: 1px solid #e3e9ef;
+  background: #fff;
+  padding: 9px;
+}
+
+.jurisdiction-picker-toolbar .input {
+  width: 100%;
+}
+
+.jurisdiction-picker-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 8px;
+  max-height: 286px;
+  overflow: auto;
+  padding: 10px;
+  scrollbar-gutter: stable;
+}
+
+.jurisdiction-option {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #dce4eb;
+  border-radius: 9px;
+  background: #fff;
+  padding: 9px 10px;
+  color: #344158;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+
+.jurisdiction-option:hover {
+  border-color: #8dbbc3;
+  box-shadow: 0 4px 10px rgb(24 70 83 / 8%);
+  transform: translateY(-1px);
+}
+
+.jurisdiction-option:focus-visible {
+  outline: 3px solid rgb(20 122 140 / 20%);
+  outline-offset: 1px;
+  border-color: #147a8c;
+}
+
+.jurisdiction-option.selected {
+  border-color: #147a8c;
+  background: #edf8fa;
+  box-shadow: inset 0 0 0 1px #147a8c;
+}
+
+.jurisdiction-option.occupied:not(.selected) {
+  border-color: #ead6ad;
+  background: #fffbf2;
+}
+
+.jurisdiction-option-check {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #cad6df;
+  border-radius: 7px;
+  background: #f7fafc;
+  color: #657489;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.jurisdiction-option.selected .jurisdiction-option-check {
+  border-color: #147a8c;
+  background: #147a8c;
+  color: #fff;
+}
+
+.jurisdiction-option-copy {
+  display: block;
+  min-width: 0;
+}
+
+.jurisdiction-option-copy strong,
+.jurisdiction-option-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jurisdiction-option-copy strong {
+  color: #2e3b51;
+  font-size: 10px;
+  font-weight: 780;
+}
+
+.jurisdiction-option-copy small {
+  margin-top: 3px;
+  color: #7e899a;
+  font-size: 8px;
+}
+
+.jurisdiction-option-status {
+  border-radius: 999px;
+  padding: 4px 7px;
+  font-size: 7px;
+  font-weight: 850;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.jurisdiction-option-status.available {
+  background: #e8f5ee;
+  color: #18714e;
+}
+
+.jurisdiction-option-status.occupied {
+  background: #fff0d6;
+  color: #956119;
+}
+
+.jurisdiction-picker-empty {
+  padding: 28px 18px;
+  color: #7f8a9b;
+  font-size: 10px;
+  text-align: center;
+}
+
+.jurisdiction-transfer-warning {
+  border: 1px solid #ead3a4;
+  border-radius: 9px;
+  background: #fff9ec;
+  padding: 11px 12px;
+}
+
+.jurisdiction-transfer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jurisdiction-transfer-title label {
+  color: #6f5323;
+  font-size: 10px;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.jurisdiction-transfer-warning > small {
+  display: block;
+  margin: 6px 0 0 26px;
+  color: #8a6b34;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+@media (max-width: 760px) {
+  .officer-assignment-modal {
+    width: min(100%, calc(100vw - 14px));
+    max-height: calc(100dvh - 14px);
+  }
+
+  .officer-assignment-modal .master-form {
+    max-height: calc(100dvh - 82px);
+  }
+
+  .jurisdiction-picker-heading {
+    align-items: flex-start;
+  }
+
+  .jurisdiction-picker-list {
+    grid-template-columns: 1fr;
+    max-height: 320px;
+  }
+
+  .jurisdiction-option {
+    grid-template-columns: 26px minmax(0, 1fr);
+  }
+
+  .jurisdiction-option-status {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+[data-theme="automation-dark"] .officer-assignment-modal .form-actions,
+[data-theme="automation-dark"] .jurisdiction-picker-toolbar,
+[data-theme="automation-dark"] .jurisdiction-option {
+  background: #111827;
+}
+
+[data-theme="automation-dark"] .jurisdiction-picker {
+  border-color: #334155;
+  background: #0f172a;
+}
+
+[data-theme="automation-dark"] .jurisdiction-picker-toolbar {
+  border-color: #334155;
+}
+
+[data-theme="automation-dark"] .jurisdiction-option {
+  border-color: #334155;
+  color: #dbe5f1;
+}
+
+[data-theme="automation-dark"] .jurisdiction-option:hover {
+  border-color: #4f8792;
+}
+
+[data-theme="automation-dark"] .jurisdiction-option.selected {
+  border-color: #38b8cc;
+  background: #102a34;
+  box-shadow: inset 0 0 0 1px #38b8cc;
+}
+
+[data-theme="automation-dark"] .jurisdiction-option.occupied:not(.selected) {
+  border-color: #72582d;
+  background: #211c12;
+}
+
+[data-theme="automation-dark"] .jurisdiction-option-check {
+  border-color: #475569;
+  background: #182235;
+  color: #b6c2d1;
+}
+
+[data-theme="automation-dark"] .jurisdiction-option.selected .jurisdiction-option-check {
+  border-color: #38b8cc;
+  background: #168297;
+  color: #fff;
+}
+
+[data-theme="automation-dark"] .jurisdiction-option-copy strong {
+  color: #e2e8f0;
+}
+
+[data-theme="automation-dark"] .jurisdiction-option-copy small,
+[data-theme="automation-dark"] .jurisdiction-picker-heading small,
+[data-theme="automation-dark"] .form-field-caption {
+  color: #94a3b8;
+}
+
+[data-theme="automation-dark"] .jurisdiction-picker-count {
+  background: #12313b;
+  color: #9ee6f2;
+}
+
+[data-theme="automation-dark"] .jurisdiction-transfer-warning {
+  border-color: #72582d;
+  background: #211c12;
+}
+
+[data-theme="automation-dark"] .jurisdiction-transfer-title label,
+[data-theme="automation-dark"] .jurisdiction-transfer-warning > small {
+  color: #e8c98d;
+}

@@ -1,0 +1,5 @@
+[
+  "automation-platform/apps/web/src/pages/master-data/officers.astro",
+  "automation-platform/apps/web/src/styles/master-data.css",
+  "automation-platform/tests/test_master_data_officer_assignment_ui_contract.py"
+]

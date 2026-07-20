@@ -1,0 +1,103 @@
+---
+import DataTable from "../../components/DataTable.astro";
+import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
+---
+
+<MasterDataLayout
+  title="Markazes"
+  description="Review every MEE and WEE Markaz, its AEO coverage and active schools."
+  page="markazes"
+>
+  <a class="btn btn-sm" href="/master-data/hierarchy" slot="actions">← Hierarchy</a>
+
+  <section class="hierarchy-summary markaz-summary" id="markaz-summary" aria-label="Markaz totals">
+    {Array.from({ length: 7 }, () => <article class="master-stat"><span>Loading</span><strong>—</strong><small>Markaz records</small></article>)}
+  </section>
+
+  <div class="toolbar markaz-toolbar">
+    <input class="input input-bordered input-sm search-input" id="markaz-search" placeholder="Search Markaz, tehsil, wing or AEO…" />
+    <select class="select select-bordered select-sm" id="markaz-wing"><option value="">All DEO wings</option></select>
+    <select class="select select-bordered select-sm" id="markaz-tehsil"><option value="">All tehsils</option></select>
+    <select class="select select-bordered select-sm" id="markaz-coverage">
+      <option value="all">All coverage</option><option value="assigned">AEO assigned</option><option value="unassigned">Needs AEO</option>
+    </select>
+    <label class="hierarchy-archive-toggle"><input class="checkbox checkbox-sm" id="markaz-inactive" type="checkbox" /> Include archived</label>
+    <span class="toolbar-status" id="markaz-total">Loading…</span>
+  </div>
+
+  <article class="master-card">
+    <DataTable id="markaz-table" pageSize={20} emptyText="No Markazes match these filters." />
+  </article>
+
+  <script>
+    import { actions } from "astro:actions";
+    import { badge, stack } from "../../scripts/table-cells";
+
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const table = el<any>("markaz-table");
+    const initial = new URLSearchParams(window.location.search);
+    let filtersReady = false, searchTimer: number | undefined;
+    const escapeHtml = (value: unknown) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]!));
+    function linkedStack(primary: string, secondary: string, href: string) {
+      const link = document.createElement("a"); link.className = "table-link"; link.href = href;
+      link.append(stack(primary, secondary)); return link;
+    }
+    function fillSelect(id: string, rows: any[], placeholder: string, selected = "") {
+      const node = el<HTMLSelectElement>(id);
+      node.innerHTML = `<option value="">${placeholder}</option>${rows.map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.code || row.name)}</option>`).join("")}`;
+      node.value = selected;
+    }
+    function statHref(values: Record<string, string>) {
+      const params = new URLSearchParams(values); return `/master-data/markazes${params.size ? `?${params}` : ""}`;
+    }
+    function renderStats(stats: any) {
+      const cards = [
+        { label: "All Markazes", value: stats.total, note: "Active administrative scopes", href: statHref({}) },
+        ...(stats.by_wing || []).map((wing: any) => ({ label: wing.code || wing.name, value: wing.total, note: `${wing.assigned} assigned · ${wing.schools} schools`, href: statHref({ wing_id: wing.id }) })),
+        { label: "AEO assigned", value: stats.assigned, note: "Covered Markazes", href: statHref({ coverage: "assigned" }) },
+        { label: "Needs AEO", value: stats.unassigned, note: "Unassigned Markazes", href: statHref({ coverage: "unassigned" }), tone: stats.unassigned ? "warning" : "" },
+        { label: "Schools", value: stats.schools, note: "Across all Markazes", href: "/master-data/schools" },
+        { label: "Empty Markazes", value: stats.empty, note: "No active schools", href: statHref({}) },
+      ];
+      el("markaz-summary").innerHTML = cards.map((card: any) => `<a class="master-stat hierarchy-stat-link ${card.tone || ""}" href="${card.href}"><span>${escapeHtml(card.label)}</span><strong>${Number(card.value || 0).toLocaleString()}</strong><small>${escapeHtml(card.note)}</small><i>Open →</i></a>`).join("");
+    }
+    async function loadPage(pageIndex: number, pageSize: number) {
+      const result = await actions.masterData.markazes({
+        search: el<HTMLInputElement>("markaz-search").value,
+        wingId: el<HTMLSelectElement>("markaz-wing").value || undefined,
+        tehsilId: el<HTMLSelectElement>("markaz-tehsil").value || undefined,
+        coverage: el<HTMLSelectElement>("markaz-coverage").value as "all" | "assigned" | "unassigned",
+        includeInactive: el<HTMLInputElement>("markaz-inactive").checked,
+        page: pageIndex + 1, pageSize,
+      });
+      if (result.error) throw result.error;
+      const data = result.data as any;
+      if (!filtersReady) {
+        fillSelect("markaz-wing", data.filters.wings || [], "All DEO wings", initial.get("wing_id") || "");
+        fillSelect("markaz-tehsil", data.filters.tehsils || [], "All tehsils", initial.get("tehsil_id") || "");
+        el<HTMLSelectElement>("markaz-coverage").value = initial.get("coverage") || "all";
+        filtersReady = true;
+        if (el<HTMLSelectElement>("markaz-wing").value || el<HTMLSelectElement>("markaz-tehsil").value || el<HTMLSelectElement>("markaz-coverage").value !== "all") return loadPage(pageIndex, pageSize);
+      }
+      renderStats(data.stats);
+      el("markaz-total").textContent = `${data.total} Markaz${data.total === 1 ? "" : "es"}`;
+      return { rows: data.items, total: data.total };
+    }
+    await customElements.whenDefined("astro-data-table");
+    await table.configure({
+      manualPagination: true, loadPage,
+      columns: [
+        { accessorKey: "name", header: "Markaz", cell: ({ row }: any) => linkedStack(row.original.name, `${row.original.schools} school${row.original.schools === 1 ? "" : "s"}`, row.original.href) },
+        { accessorKey: "wing_name", header: "DEO wing", cell: ({ row }: any) => stack(row.original.wing_code || row.original.wing_name) },
+        { accessorKey: "tehsil_name", header: "Tehsil", cell: ({ row }: any) => stack(row.original.tehsil_name) },
+        { accessorKey: "aeo_count", header: "AEO coverage", cell: ({ row }: any) => stack(row.original.aeos.map((item: any) => item.name).join(", ") || "Unassigned", row.original.aeos.map((item: any) => item.mobile).filter(Boolean).join(", ")) },
+        { accessorKey: "schools", header: "Schools", cell: ({ row }: any) => linkedStack(String(row.original.schools), "Open school list", row.original.href) },
+        { accessorKey: "assigned", header: "Status", cell: ({ row }: any) => badge(row.original.assigned ? "AEO assigned" : "Needs AEO", row.original.assigned ? "active" : "warning") },
+      ],
+    });
+    const refresh = () => void table.refresh(true);
+    el("markaz-wing").addEventListener("change", refresh); el("markaz-tehsil").addEventListener("change", refresh);
+    el("markaz-coverage").addEventListener("change", refresh); el("markaz-inactive").addEventListener("change", refresh);
+    el("markaz-search").addEventListener("input", () => { if (searchTimer) clearTimeout(searchTimer); searchTimer = window.setTimeout(refresh, 180); });
+  </script>
+</MasterDataLayout>

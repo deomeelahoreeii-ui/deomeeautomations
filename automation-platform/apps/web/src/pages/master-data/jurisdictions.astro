@@ -3,69 +3,238 @@ import DataTable from "../../components/DataTable.astro";
 import MasterDataLayout from "../../layouts/MasterDataLayout.astro";
 ---
 
-<MasterDataLayout title="Jurisdictions" description="Review current MEE officer coverage. Inactive assignments remain in history." page="jurisdictions">
-  <div class="notice">Only active MEE assignments appear in current coverage. Archived assignments are preserved for audit history.</div>
+<MasterDataLayout title="Jurisdictions" description="Assign, transfer and end AEO Markaz or DDEO Tehsil responsibility." page="jurisdictions">
+  <button class="btn btn-sm btn-primary" id="add-jurisdiction" slot="actions">＋ Assign jurisdiction</button>
+
+  <div class="notice">
+    Each active Markaz has one responsible AEO and each active Tehsil/wing scope has one responsible DDEO. An officer may hold additional charges; transferring a scope archives the previous assignment and immediately updates AntiDengue routing.
+  </div>
   <div class="toolbar" style="margin-top:12px">
     <div class="join">
-      <button class="btn btn-sm join-item btn-primary" type="button" data-jurisdiction-role="aeo">AEO markazes</button>
-      <button class="btn btn-sm join-item" type="button" data-jurisdiction-role="ddeo">DDEO tehsils</button>
+      <button class="btn btn-sm join-item btn-primary" type="button" data-jurisdiction-role="aeo">AEO Markazes</button>
+      <button class="btn btn-sm join-item" type="button" data-jurisdiction-role="ddeo">DDEO Tehsils</button>
     </div>
+    <select class="select select-bordered select-sm" id="jurisdiction-status"><option value="true">Active assignments</option><option value="false">Ended assignments</option></select>
     <span class="toolbar-status" id="jurisdiction-total">Loading…</span>
   </div>
   <article class="master-card">
-    <DataTable id="jurisdiction-table" pageSize={10} emptyText="No active assignments found." />
+    <DataTable id="jurisdiction-table" pageSize={10} emptyText="No assignments found." />
   </article>
+
+  <dialog class="modal" id="jurisdiction-dialog">
+    <div class="modal-box master-modal">
+      <div class="modal-title"><h2 id="jurisdiction-dialog-title">Assign jurisdiction</h2><button type="button" id="close-jurisdiction">×</button></div>
+      <form class="master-form" id="jurisdiction-form">
+        <label><span>Role *</span><select class="select select-bordered select-sm" id="jurisdiction-role"><option value="aeo">AEO</option><option value="ddeo">DDEO</option></select></label>
+        <label><span>Officer *</span><select required class="select select-bordered select-sm" id="jurisdiction-officer"></select></label>
+        <label><span>Wing *</span><select required class="select select-bordered select-sm" id="jurisdiction-wing"></select></label>
+        <label><span>Tehsil *</span><select required class="select select-bordered select-sm" id="jurisdiction-tehsil"></select></label>
+        <label id="jurisdiction-markaz-label"><span>Markaz *</span><select class="select select-bordered select-sm" id="jurisdiction-markaz"></select></label>
+        <label class="full"><input class="checkbox checkbox-sm" type="checkbox" id="jurisdiction-primary" /> <span style="display:inline;margin-left:6px">Make this the officer's primary posting</span></label>
+        <label class="full jurisdiction-transfer-warning"><input class="checkbox checkbox-sm" type="checkbox" id="jurisdiction-transfer" /> <span style="display:inline;margin-left:6px">Transfer from the current responsible officer</span><small>The old assignment is ended, retained in history and excluded from future AntiDengue sends.</small></label>
+        <label class="full"><span>Administrative note</span><textarea class="textarea textarea-bordered" id="jurisdiction-note" rows="3" placeholder="Appointment/transfer order reference or reason"></textarea></label>
+        <div class="form-actions"><span class="form-error" id="jurisdiction-form-error"></span><button class="btn btn-sm" type="button" id="cancel-jurisdiction">Cancel</button><button class="btn btn-sm btn-primary" type="submit" id="save-jurisdiction">Save assignment</button></div>
+      </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
 
   <script>
     import { actions } from "astro:actions";
-    import { badge, stack } from "../../scripts/table-cells";
+    import { actionButtons, badge, stack } from "../../scripts/table-cells";
+    import { confirmAction, showError, showSuccess } from "../../scripts/alerts";
 
     await customElements.whenDefined("astro-data-table");
     const table = document.getElementById("jurisdiction-table") as any;
-    const total = document.getElementById("jurisdiction-total")!;
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const dialog = el<HTMLDialogElement>("jurisdiction-dialog");
     let role: "aeo" | "ddeo" = "aeo";
+    let options: any = { districts: [], departments: [], wings: [], tehsils: [], markazes: [] };
+    let officers: Record<string, any[]> = { aeo: [], ddeo: [] };
+    let jurisdictions: Record<string, any[]> = { aeo: [], ddeo: [] };
+    let activeJurisdictions: Record<string, any[]> = { aeo: [], ddeo: [] };
+    const initial = new URLSearchParams(window.location.search);
+    const escapeHtml = (value: unknown) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]!));
+
+    function fillSelect(id: string, rows: any[], placeholder: string, selected = "", label?: (row: any) => string) {
+      const node = el<HTMLSelectElement>(id);
+      node.innerHTML = `<option value="">${escapeHtml(placeholder)}</option>${rows.map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(label ? label(row) : row.code || row.name)}</option>`).join("")}`;
+      if (selected && rows.some((row) => row.id === selected)) node.value = selected;
+    }
+
+    function roleOfficers() {
+      const wing = el<HTMLSelectElement>("jurisdiction-wing").value;
+      return (officers[role] || []).filter((officer: any) => !wing || officer.wing_ref === wing);
+    }
+
+    function refreshOfficers(selected = "") {
+      fillSelect("jurisdiction-officer", roleOfficers(), `Select ${role.toUpperCase()}`, selected, (officer) => `${officer.name} · ${officer.assignment_summary}`);
+    }
+
+    function refreshTehsils(selected = "") {
+      const wingRef = el<HTMLSelectElement>("jurisdiction-wing").value;
+      const wing = options.wings.find((item: any) => item.id === wingRef);
+      const rows = options.tehsils.filter((item: any) => !wing || item.district_ref === wing.district_ref);
+      fillSelect("jurisdiction-tehsil", rows, "Select Tehsil", selected, (tehsil) => {
+        if (role !== "ddeo") return tehsil.name;
+        const owner = (activeJurisdictions.ddeo || []).find(
+          (row: any) => row.tehsil_ref === tehsil.id && (!wingRef || row.wing_ref === wingRef),
+        );
+        return owner ? `${tehsil.name} — ${owner.officer_name}` : `${tehsil.name} — available`;
+      });
+    }
+
+    function refreshMarkazes(selected = "") {
+      const wing = el<HTMLSelectElement>("jurisdiction-wing").value;
+      const tehsil = el<HTMLSelectElement>("jurisdiction-tehsil").value;
+      const rows = options.markazes.filter((item: any) => item.wing_ref === wing && item.tehsil_ref === tehsil);
+      fillSelect("jurisdiction-markaz", rows, "Select Markaz", selected, (markaz) => {
+        const owner = (activeJurisdictions.aeo || []).find((row: any) => row.markaz_ref === markaz.id);
+        return owner ? `${markaz.name} — ${owner.officer_name}` : `${markaz.name} — available`;
+      });
+    }
+
+    function updateRoleFields(selectedOfficer = "", selectedWing = "", selectedTehsil = "", selectedMarkaz = "") {
+      role = el<HTMLSelectElement>("jurisdiction-role").value as "aeo" | "ddeo";
+      el("jurisdiction-markaz-label").toggleAttribute("hidden", role !== "aeo");
+      el<HTMLSelectElement>("jurisdiction-markaz").required = role === "aeo";
+      fillSelect("jurisdiction-wing", options.wings, "Select wing", selectedWing, (wing) => wing.code || wing.name);
+      refreshTehsils(selectedTehsil);
+      refreshMarkazes(selectedMarkaz);
+      refreshOfficers(selectedOfficer);
+    }
+
+    async function loadData() {
+      const active = el<HTMLSelectElement>("jurisdiction-status").value === "true";
+      const [optionsResult, aeoResult, ddeoResult, jurisdictionResult, activeResult] = await Promise.all([
+        actions.masterData.options(),
+        actions.masterData.officers({ role: "aeo", search: "", active: true }),
+        actions.masterData.officers({ role: "ddeo", search: "", active: true }),
+        actions.masterData.jurisdictions({ active, wingRef: "" }),
+        actions.masterData.jurisdictions({ active: true, wingRef: "" }),
+      ]);
+      if (optionsResult.error) throw optionsResult.error;
+      if (aeoResult.error) throw aeoResult.error;
+      if (ddeoResult.error) throw ddeoResult.error;
+      if (jurisdictionResult.error) throw jurisdictionResult.error;
+      if (activeResult.error) throw activeResult.error;
+      options = optionsResult.data as any;
+      officers = { aeo: aeoResult.data as any[], ddeo: ddeoResult.data as any[] };
+      jurisdictions = jurisdictionResult.data as any;
+      activeJurisdictions = activeResult.data as any;
+      await showRole();
+    }
 
     function schoolLink(row: any) {
       const link = document.createElement("a");
       link.className = "table-link";
-      link.textContent = row.markaz_name || "Missing markaz";
+      link.textContent = row.markaz_name || "Missing Markaz";
       link.href = `/master-data/schools?markaz_ref=${encodeURIComponent(row.markaz_ref)}`;
       link.title = `View schools in ${link.textContent}`;
       return link;
     }
 
-    const optionsResult = await actions.masterData.options();
-    if (optionsResult.error) throw optionsResult.error;
-    const meeWing = (optionsResult.data as any).wings.find((wing: any) => wing.code === "DEO MEE" || wing.name === "DEO MEE");
-    const result = await actions.masterData.jurisdictions({ active: true, wingRef: meeWing?.id || "" });
-    if (result.error) throw result.error;
-    const jurisdictions = result.data as any;
+    async function makePrimary(row: any) {
+      const result = await actions.masterData.makePrimaryJurisdiction({ id: row.id });
+      if (result.error) { await showError(result.error); return; }
+      await loadData();
+      await showSuccess("Primary posting updated", `${row.scope_name} is now ${row.officer_name}'s primary assignment.`);
+    }
+
+    async function endAssignment(row: any) {
+      if (!await confirmAction("End this assignment?", `${row.officer_name} will stop receiving AntiDengue messages for ${row.scope_name}. The record remains in history.`, "End assignment")) return;
+      const result = await actions.masterData.endJurisdiction({ id: row.id });
+      if (result.error) { await showError(result.error); return; }
+      await loadData();
+      await showSuccess("Assignment ended", `${row.scope_name} is no longer routed to ${row.officer_name}.`);
+    }
 
     async function showRole() {
       const rows = jurisdictions[role] || [];
-      total.textContent = `${rows.length} active ${role.toUpperCase()} assignment${rows.length === 1 ? "" : "s"}`;
+      el("jurisdiction-total").textContent = `${rows.length} ${el<HTMLSelectElement>("jurisdiction-status").value === "true" ? "active" : "ended"} ${role.toUpperCase()} assignment${rows.length === 1 ? "" : "s"}`;
       document.querySelectorAll<HTMLButtonElement>("[data-jurisdiction-role]").forEach((button) =>
         button.classList.toggle("btn-primary", button.dataset.jurisdictionRole === role),
       );
-      const columns: any[] = [
-        { accessorKey: "officer_name", header: "Officer", cell: ({ row }: any) => stack(row.original.officer_name || "Missing officer", row.original.mobile || "") },
-        { accessorKey: "tehsil_name", header: "Tehsil" },
-      ];
-      if (role === "aeo") columns.push({
-        accessorKey: "markaz_name",
-        header: "Markaz",
-        cell: ({ row }: any) => row.original.markaz_ref ? schoolLink(row.original) : "Missing markaz",
+      await table.configure({
+        data: rows,
+        columns: [
+          { accessorKey: "officer_name", header: "Officer", cell: ({ row }: any) => stack(row.original.officer_name || "Missing officer", row.original.mobile || "") },
+          { accessorKey: "assignment_kind", header: "Charge", cell: ({ row }: any) => badge(row.original.assignment_kind === "primary" ? "Primary" : "Additional", row.original.assignment_kind === "primary" ? "active" : "") },
+          { accessorKey: "tehsil_name", header: "Tehsil" },
+          ...(role === "aeo" ? [{ accessorKey: "markaz_name", header: "Markaz", cell: ({ row }: any) => row.original.markaz_ref ? schoolLink(row.original) : "Missing Markaz" }] : []),
+          { accessorKey: "wing_name", header: "Wing" },
+          { accessorKey: "active", header: "Status", cell: ({ row }: any) => badge(row.original.active ? "Active" : "Ended", row.original.active ? "active" : "inactive") },
+          { id: "actions", header: "", enableSorting: false, cell: ({ row }: any) => actionButtons(row.original.active ? [
+            ...(row.original.is_primary ? [] : [{ label: "Make primary", onClick: () => void makePrimary(row.original) }]),
+            { label: "End assignment", tone: "danger", onClick: () => void endAssignment(row.original) },
+          ] : []) },
+        ],
       });
-      columns.push({ id: "status", header: "Status", enableSorting: false, cell: () => badge("Active") });
-      await table.configure({ columns, data: rows });
     }
 
-    document.querySelectorAll<HTMLButtonElement>("[data-jurisdiction-role]").forEach((button) =>
-      button.addEventListener("click", () => {
-        role = button.dataset.jurisdictionRole as "aeo" | "ddeo";
-        void showRole();
-      }),
-    );
-    await showRole();
+    function openForm(prefill?: any) {
+      (el("jurisdiction-form") as HTMLFormElement).reset();
+      el("jurisdiction-form-error").textContent = "";
+      const selectedRole = (prefill?.role || role) as "aeo" | "ddeo";
+      el<HTMLSelectElement>("jurisdiction-role").value = selectedRole;
+      const wing = prefill?.wing_ref || options.wings.find((item: any) => item.code === "DEO MEE")?.id || options.wings[0]?.id || "";
+      updateRoleFields(prefill?.officer_ref || "", wing, prefill?.tehsil_ref || "", prefill?.markaz_ref || "");
+      el<HTMLInputElement>("jurisdiction-primary").checked = Boolean(prefill?.make_primary);
+      el<HTMLInputElement>("jurisdiction-transfer").checked = Boolean(prefill?.transfer);
+      el("jurisdiction-dialog-title").textContent = selectedRole === "aeo" ? "Assign or transfer AEO Markaz" : "Assign or transfer DDEO Tehsil";
+      dialog.showModal();
+    }
+
+    el<HTMLFormElement>("jurisdiction-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const selectedRole = el<HTMLSelectElement>("jurisdiction-role").value as "aeo" | "ddeo";
+      const scopeRef = selectedRole === "aeo" ? el<HTMLSelectElement>("jurisdiction-markaz").value : el<HTMLSelectElement>("jurisdiction-tehsil").value;
+      try {
+        el<HTMLButtonElement>("save-jurisdiction").disabled = true;
+        const result = await actions.masterData.assignJurisdiction({
+          role: selectedRole,
+          officer_ref: el<HTMLSelectElement>("jurisdiction-officer").value,
+          scope_ref: scopeRef,
+          make_primary: el<HTMLInputElement>("jurisdiction-primary").checked,
+          replace_conflicts: el<HTMLInputElement>("jurisdiction-transfer").checked,
+          notes: el<HTMLTextAreaElement>("jurisdiction-note").value.trim(),
+        });
+        if (result.error) throw result.error;
+        dialog.close();
+        await loadData();
+        await showSuccess("Jurisdiction saved", "AntiDengue routing now uses the updated responsible officer.");
+      } catch (error) {
+        el("jurisdiction-form-error").textContent = error instanceof Error ? error.message : "Could not save assignment";
+      } finally {
+        el<HTMLButtonElement>("save-jurisdiction").disabled = false;
+      }
+    });
+
+    document.querySelectorAll<HTMLButtonElement>("[data-jurisdiction-role]").forEach((button) => button.addEventListener("click", () => {
+      role = button.dataset.jurisdictionRole as "aeo" | "ddeo";
+      void showRole();
+    }));
+    el("add-jurisdiction").addEventListener("click", () => openForm());
+    el("close-jurisdiction").addEventListener("click", () => dialog.close());
+    el("cancel-jurisdiction").addEventListener("click", () => dialog.close());
+    el("jurisdiction-status").addEventListener("change", () => void loadData());
+    el("jurisdiction-role").addEventListener("change", () => updateRoleFields());
+    el("jurisdiction-wing").addEventListener("change", () => { refreshTehsils(); refreshMarkazes(); refreshOfficers(); });
+    el("jurisdiction-tehsil").addEventListener("change", () => refreshMarkazes());
+
+    await loadData();
+    if (initial.get("scope_ref")) {
+      const initialRole = initial.get("role") === "ddeo" ? "ddeo" : "aeo";
+      const scopeRef = initial.get("scope_ref")!;
+      const markaz = initialRole === "aeo" ? options.markazes.find((item: any) => item.id === scopeRef) : null;
+      const tehsil = initialRole === "ddeo" ? options.tehsils.find((item: any) => item.id === scopeRef) : options.tehsils.find((item: any) => item.id === markaz?.tehsil_ref);
+      openForm({
+        role: initialRole,
+        wing_ref: markaz?.wing_ref || options.wings.find((item: any) => item.district_ref === tehsil?.district_ref)?.id,
+        tehsil_ref: tehsil?.id || "",
+        markaz_ref: markaz?.id || "",
+        transfer: initial.get("transfer") === "true",
+      });
+    }
   </script>
 </MasterDataLayout>
