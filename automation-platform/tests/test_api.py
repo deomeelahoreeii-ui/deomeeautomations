@@ -237,6 +237,11 @@ def test_openapi_contains_filter_job_endpoints() -> None:
     assert "/api/v1/crm/pdf-batches/{source_file_id}/hard" in paths
     assert "/api/v1/crm/filters/sheets/jobs" in paths
     assert "/api/v1/crm/filters/pdfs/jobs" in paths
+    assert "/api/v1/crm/bulk-operations/statistics" in paths
+    assert "/api/v1/crm/bulk-operations/export-batches" in paths
+    assert "/api/v1/crm/bulk-operations/import-batches/validate" in paths
+    assert "/api/v1/crm/bulk-operations/import-batches/{batch_id}/commit" in paths
+    assert "/api/v1/crm/bulk-operations/letter-batches" in paths
     assert "/api/v1/antidengue/runs" in paths
     assert "/api/v1/antidengue/overview" in paths
     assert "/api/v1/antidengue/manual-reports/{source_file_id}/hard" in paths

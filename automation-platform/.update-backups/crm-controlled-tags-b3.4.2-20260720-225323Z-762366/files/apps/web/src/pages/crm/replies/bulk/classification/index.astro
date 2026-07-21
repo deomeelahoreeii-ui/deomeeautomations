@@ -1,0 +1,108 @@
+---
+import CrmLayout from "../../../../../layouts/CrmLayout.astro";
+import DataTable from "../../../../../components/DataTable.astro";
+
+const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+---
+
+<CrmLayout title="Classification Review" description="Review only low-confidence matches and proposed taxonomy changes before they become authoritative." page="replies">
+  <a class="btn btn-sm" href="/crm/replies/bulk/" slot="actions">← Bulk Operations</a>
+  <a class="btn btn-sm" href="/crm/taxonomy/" slot="actions">Manage Taxonomy</a>
+
+  <main id="classification-review" data-api-base={apiBase} class="crm32-page classification-review-page">
+    <nav class="reply-mode-tabs" aria-label="Reply workspace modes">
+      <a href="/crm/replies/">Reply Queue</a>
+      <a href="/crm/replies/bulk/">Bulk Operations</a>
+      <a class="active" href="/crm/replies/bulk/classification/">Classification Review</a>
+      <a href="/crm/replies/bulk/prompt-profiles/">Reply SOP</a>
+    </nav>
+
+    <section class="master-card classification-review-hero">
+      <div><p class="eyebrow">Exception queue</p><h2>Human review is required only when confidence is low or taxonomy is uncertain</h2><p>Approve the suggested category, choose another controlled option, attach approved tags, or reject the proposal. ChatGPT never creates categories, subcategories or tags directly.</p></div>
+      <div class="classification-review-summary"><span>Awaiting review</span><strong id="review-count">—</strong></div>
+    </section>
+
+    <section class="master-card classification-review-table-card">
+      <header class="crm-card-heading">
+        <div><p class="eyebrow">Pending decisions</p><h2>Classification exceptions</h2><p>High-confidence existing matches are handled automatically and do not appear here.</p></div>
+        <div class="classification-review-tools"><input id="review-search" class="input input-bordered" type="search" placeholder="Search complaint number or text…" /><button id="refresh-review" class="btn" type="button">↻ Refresh</button></div>
+      </header>
+      <DataTable id="classification-review-table" pageSize={25} pageSizeOptions={[10,25,50,100]} emptyText="No classifications require manual review." ariaLabel="Complaint classification review queue" class="classification-review-table" />
+    </section>
+
+    <section class="master-card taxonomy-suggestions-card">
+      <header class="crm-card-heading">
+        <div><p class="eyebrow">Controlled taxonomy proposals</p><h2>New category, subcategory and tag suggestions</h2><p>Suggestions are never created automatically. Map them during complaint review, defer them, reject them, or open Taxonomy to create an approved controlled option.</p></div>
+        <a class="btn" href="/crm/taxonomy/">Manage Taxonomy</a>
+      </header>
+      <DataTable id="taxonomy-suggestions-table" pageSize={10} pageSizeOptions={[10,25,50]} emptyText="No taxonomy suggestions are awaiting review." ariaLabel="AI taxonomy suggestions" class="taxonomy-suggestions-table" />
+    </section>
+
+    <dialog id="classification-dialog" class="modal crm-modal">
+      <div class="modal-box crm-modal-box classification-review-dialog">
+        <header class="crm-modal-header"><div><p class="eyebrow">Review classification</p><h2 id="review-dialog-number">Complaint</h2><p id="review-dialog-meta">—</p></div><button class="btn btn-sm" type="button" data-close-dialog aria-label="Close">×</button></header>
+        <div class="crm-modal-body">
+          <section class="classification-review-complaint"><h3>Complaint</h3><p id="review-dialog-complaint">Loading…</p></section>
+          <div class="form-grid-two">
+            <label class="crm-field" for="review-category"><span>Category</span><select id="review-category" class="select select-bordered"></select></label>
+            <label class="crm-field" for="review-subcategory"><span>Subcategory</span><select id="review-subcategory" class="select select-bordered"><option value="">No subcategory</option></select></label>
+          </div>
+          <label class="crm-field" for="review-tags"><span>Controlled tags</span><select id="review-tags" class="select select-bordered classification-tags-select" multiple size="9"></select><small>Use Ctrl/Cmd to select multiple tags. Unknown AI-proposed tags remain suggestions until approved in taxonomy management.</small></label>
+          <section class="classification-ai-explanation"><div><span>AI confidence</span><strong id="review-confidence">—</strong></div><div><span>Reason</span><p id="review-reason">—</p></div></section>
+        </div>
+        <footer class="crm-modal-footer"><button id="reject-classification" class="btn btn-error" type="button">Reject suggestion</button><span class="modal-footer-spacer"></span><button class="btn" type="button" data-close-dialog>Cancel</button><button id="approve-classification" class="btn btn-primary" type="button">Approve classification</button></footer>
+      </div>
+      <form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
+    </dialog>
+
+    <div id="review-toast" class="crm-toast" role="status" aria-live="polite" hidden></div>
+  </main>
+
+  <script>
+    import { badge, stack } from "../../../../../scripts/table-cells";
+    type Review={id:string;case_id:string;complaint_number:string;complaint_preview:string;suggested_category_id?:string|null;suggested_subcategory_id?:string|null;suggested_category:string;suggested_subcategory:string;confidence:number;reason:string;tags:string[];status:string;created_at:string};
+    type Category={id:string;name:string;subcategories:{id:string;name:string}[]};
+    type Tag={id:string;name:string;group:string;description:string};
+    type Suggestion={id:string;classification_id:string;complaint_number:string;proposal_type:string;proposed_name:string;reason:string;supporting_count:number;status:string;parent_category_id?:string|null;created_at:string};
+    const root=document.getElementById("classification-review") as HTMLElement;
+    const API=root.dataset.apiBase||"";
+    const $=<T extends HTMLElement=HTMLElement>(id:string)=>document.getElementById(id) as T;
+    const table=$("classification-review-table") as HTMLElement & {configure:(config:any)=>Promise<void>;refresh:(reset?:boolean)=>Promise<void>};
+    const suggestionsTable=$("taxonomy-suggestions-table") as HTMLElement & {configure:(config:any)=>Promise<void>;refresh:(reset?:boolean)=>Promise<void>};
+    const dialog=$("classification-dialog") as HTMLDialogElement;
+    let options:{categories:Category[];tags:Tag[]}={categories:[],tags:[]};
+    let current:Review|null=null;
+    function toast(message:string,error=false){const node=$("review-toast");node.textContent=message;node.classList.toggle("error",error);node.hidden=false;setTimeout(()=>node.hidden=true,4500)}
+    async function api(path:string,options?:RequestInit){const response=await fetch(`${API}${path}`,options);let body:any={};try{body=await response.json()}catch{}if(!response.ok)throw new Error(body.detail||`Request failed (${response.status})`);return body}
+    function dt(value:string){return value?new Intl.DateTimeFormat(undefined,{dateStyle:"medium",timeStyle:"short"}).format(new Date(value)):"—"}
+    function close(){if(dialog.open)dialog.close()}
+    document.querySelectorAll<HTMLElement>("[data-close-dialog]").forEach(button=>button.addEventListener("click",close));
+    dialog.addEventListener("cancel",()=>{current=null});
+    function populateCategories(selectedCategory?:string|null,selectedSubcategory?:string|null){const category=$("review-category") as HTMLSelectElement;category.replaceChildren();for(const item of options.categories){const option=document.createElement("option");option.value=item.id;option.textContent=item.name;category.append(option)}if(selectedCategory)category.value=selectedCategory;populateSubcategories(selectedSubcategory)}
+    function populateSubcategories(selected?:string|null){const categoryId=($("review-category") as HTMLSelectElement).value;const sub=$("review-subcategory") as HTMLSelectElement;sub.replaceChildren();const empty=document.createElement("option");empty.value="";empty.textContent="No subcategory";sub.append(empty);const category=options.categories.find(row=>row.id===categoryId);for(const item of category?.subcategories||[]){const option=document.createElement("option");option.value=item.id;option.textContent=item.name;sub.append(option)}if(selected)sub.value=selected}
+    $("review-category").addEventListener("change",()=>populateSubcategories());
+    function populateTags(selected:string[]){const select=$("review-tags") as HTMLSelectElement;select.replaceChildren();let group="";for(const tag of options.tags){if(tag.group!==group){group=tag.group;const heading=document.createElement("optgroup");heading.label=group.replaceAll("_"," ");for(const item of options.tags.filter(row=>row.group===group)){const option=document.createElement("option");option.value=item.id;option.textContent=item.name;option.title=item.description;if(selected.includes(item.name))option.selected=true;heading.append(option)}select.append(heading)}}}
+    async function openReview(row:Review){current=row;$("review-dialog-number").textContent=`Complaint ${row.complaint_number}`;$("review-dialog-meta").textContent=`Suggested: ${row.suggested_category}${row.suggested_subcategory?` · ${row.suggested_subcategory}`:""}`;$("review-dialog-complaint").textContent=row.complaint_preview||"Loading complete complaint…";$("review-confidence").textContent=`${Math.round(row.confidence*100)}%`;$("review-reason").textContent=row.reason||"No reason supplied.";populateCategories(row.suggested_category_id,row.suggested_subcategory_id);populateTags(row.tags||[]);dialog.showModal();try{const detail=await api(`/api/v1/crm/reply-workspace/cases/${row.case_id}`);$("review-dialog-complaint").textContent=detail.case.complaint_text||row.complaint_preview||"No complaint text is stored."}catch(error){toast(error instanceof Error?error.message:String(error),true)}}
+    async function resolve(decision:"approve"|"reject"){if(!current)return;const category=($("review-category") as HTMLSelectElement).value;if(decision==="approve"&&!category){toast("Select a category.",true);return}const tags=Array.from(($("review-tags") as HTMLSelectElement).selectedOptions).map(option=>option.value);try{await api(`/api/v1/crm/ai-pipeline/classification-review/${current.id}/resolve`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({category_id:decision==="approve"?category:null,subcategory_id:decision==="approve"?(($("review-subcategory") as HTMLSelectElement).value||null):null,tag_ids:decision==="approve"?tags:[],decision})});close();toast(decision==="approve"?"Classification approved.":"Classification suggestion rejected.");await Promise.all([table.refresh(false),suggestionsTable.refresh(false)])}catch(error){toast(error instanceof Error?error.message:String(error),true)}}
+    $("approve-classification").addEventListener("click",()=>void resolve("approve"));
+    $("reject-classification").addEventListener("click",()=>void resolve("reject"));
+    async function resolveSuggestion(row:Suggestion,status:"rejected"|"deferred"){try{await api(`/api/v1/crm/ai-pipeline/taxonomy-suggestions/${row.id}/resolve`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});toast(status==="rejected"?"Taxonomy suggestion rejected.":"Taxonomy suggestion deferred.");await suggestionsTable.refresh(false)}catch(error){toast(error instanceof Error?error.message:String(error),true)}}
+    async function configure(){options=await api("/api/v1/crm/ai-pipeline/taxonomy-options");await table.configure({columns:[
+      {accessorKey:"complaint_number",header:"Complaint No.",meta:{minWidth:"145px"},cell:(c:any)=>{const row=c.row.original as Review;const a=document.createElement("a");a.className="table-primary-link";a.href=`/crm/replies/${row.case_id}/?return_to=${encodeURIComponent(location.pathname)}`;a.textContent=row.complaint_number;return a}},
+      {accessorKey:"complaint_preview",header:"Complaint",meta:{minWidth:"280px",maxWidth:"520px"},cell:(c:any)=>{const row=c.row.original as Review;const wrap=document.createElement("div");wrap.className="table-preview-cell";const span=document.createElement("span");span.textContent=row.complaint_preview;const button=document.createElement("button");button.className="btn btn-xs";button.type="button";button.textContent="Review";button.addEventListener("click",()=>void openReview(row));wrap.append(span,button);return wrap}},
+      {id:"suggestion",header:"Suggested classification",meta:{minWidth:"220px"},cell:(c:any)=>{const row=c.row.original as Review;return stack(row.suggested_category||"New taxonomy proposed",row.suggested_subcategory||row.tags.join(" · "))}},
+      {accessorKey:"confidence",header:"Confidence",meta:{width:"110px",align:"right"},cell:(c:any)=>badge(`${Math.round(Number(c.getValue())*100)}%`,Number(c.getValue())>=.65?"warning":"danger")},
+      {accessorKey:"reason",header:"Reason",meta:{minWidth:"220px"}},
+      {accessorKey:"created_at",header:"Created",meta:{minWidth:"160px"},cell:(c:any)=>dt(c.getValue())}
+    ],manualPagination:true,getRowId:(row:Review)=>row.id,loadPage:async(pageIndex:number,pageSize:number)=>{const p=new URLSearchParams({page:String(pageIndex+1),page_size:String(pageSize)});const search=($("review-search") as HTMLInputElement).value.trim();if(search)p.set("search",search);const data=await api(`/api/v1/crm/ai-pipeline/classification-review?${p}`);$("review-count").textContent=String(data.total||0);return{rows:data.items||[],total:data.total||0}}});
+    await suggestionsTable.configure({columns:[
+      {accessorKey:"proposed_name",header:"Proposed option",meta:{minWidth:"210px"},cell:(c:any)=>{const row=c.row.original as Suggestion;return stack(row.proposed_name,row.proposal_type.replaceAll("_"," "))}},
+      {accessorKey:"complaint_number",header:"Complaint No.",meta:{minWidth:"145px"}},
+      {accessorKey:"reason",header:"Reason",meta:{minWidth:"260px"}},
+      {accessorKey:"created_at",header:"Created",meta:{minWidth:"155px"},cell:(c:any)=>dt(c.getValue())},
+      {id:"actions",header:"Actions",meta:{minWidth:"190px"},cell:(c:any)=>{const row=c.row.original as Suggestion;const wrap=document.createElement("div");wrap.className="table-action-row";const defer=document.createElement("button");defer.type="button";defer.className="btn btn-xs";defer.textContent="Defer";defer.addEventListener("click",()=>void resolveSuggestion(row,"deferred"));const reject=document.createElement("button");reject.type="button";reject.className="btn btn-xs btn-error";reject.textContent="Reject";reject.addEventListener("click",()=>void resolveSuggestion(row,"rejected"));wrap.append(defer,reject);return wrap}}
+    ],manualPagination:true,getRowId:(row:Suggestion)=>row.id,loadPage:async(pageIndex:number,pageSize:number)=>{const p=new URLSearchParams({status:"pending",page:String(pageIndex+1),page_size:String(pageSize)});const data=await api(`/api/v1/crm/ai-pipeline/taxonomy-suggestions?${p}`);return{rows:data.items||[],total:data.total||0}}})}
+    let timer:number|undefined;$("review-search").addEventListener("input",()=>{clearTimeout(timer);timer=window.setTimeout(()=>void table.refresh(true),250)});$("refresh-review").addEventListener("click",()=>void Promise.all([table.refresh(false),suggestionsTable.refresh(false)]));
+    void configure().catch(error=>toast(error instanceof Error?error.message:String(error),true));
+  </script>
+</CrmLayout>

@@ -1,0 +1,17 @@
+---
+interface Props {
+  id?: string;
+  label?: string;
+  tone?: "neutral" | "success" | "warning" | "danger" | "info";
+  class?: string;
+}
+
+const {
+  id,
+  label = "—",
+  tone = "neutral",
+  class: className = "",
+} = Astro.props;
+---
+
+<span id={id} class:list={["crm-status-badge", tone, className]}>{label}</span>

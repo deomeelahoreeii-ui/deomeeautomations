@@ -1160,3 +1160,210 @@ input {
   .schedule-save-actions { flex-direction: column-reverse; }
   .schedule-save-actions .btn { width: 100%; }
 }
+
+/* B3.2: responsive, collapsible application shell. */
+.app-shell {
+  --platform-sidebar-width: 238px;
+  grid-template-columns: var(--platform-sidebar-width) minmax(0, 1fr);
+  transition: grid-template-columns .2s ease;
+}
+
+[data-sidebar="collapsed"] .app-shell {
+  --platform-sidebar-width: 76px;
+}
+
+.sidebar {
+  z-index: 40;
+  overflow: hidden;
+  transition: width .2s ease, padding .2s ease, transform .2s ease;
+}
+
+.sidebar-brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sidebar-brand-row .brand {
+  min-width: 0;
+}
+
+.brand-copy,
+.nav-copy,
+.sidebar-status-copy {
+  min-width: 0;
+}
+
+.sidebar-collapse-toggle,
+.mobile-nav-toggle {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #d9e1ec;
+  border-radius: 8px;
+  background: #fff;
+  color: #536177;
+  cursor: pointer;
+}
+
+.sidebar-collapse-toggle:hover,
+.mobile-nav-toggle:hover {
+  border-color: #75aeb8;
+  color: #116f7f;
+}
+
+.mobile-nav-toggle,
+.sidebar-scrim {
+  display: none;
+}
+
+.topbar-title-group {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+[data-sidebar="collapsed"] .sidebar {
+  padding-right: 10px;
+  padding-left: 10px;
+}
+
+[data-sidebar="collapsed"] .sidebar-brand-row {
+  justify-content: center;
+  flex-direction: column;
+}
+
+[data-sidebar="collapsed"] .brand-copy,
+[data-sidebar="collapsed"] .nav-copy,
+[data-sidebar="collapsed"] .nav-label,
+[data-sidebar="collapsed"] .sidebar-status-copy {
+  display: none;
+}
+
+[data-sidebar="collapsed"] .primary-nav {
+  margin-top: 22px;
+}
+
+[data-sidebar="collapsed"] .nav-item {
+  justify-content: center;
+  padding: 0;
+}
+
+[data-sidebar="collapsed"] .nav-icon {
+  width: auto;
+  font-size: 15px;
+}
+
+[data-sidebar="collapsed"] .sidebar-status {
+  justify-content: center;
+  padding: 12px 8px;
+}
+
+[data-sidebar="collapsed"] .sidebar-collapse-toggle {
+  width: 30px;
+  height: 30px;
+}
+
+[data-theme="automation-dark"] .sidebar-collapse-toggle,
+[data-theme="automation-dark"] .mobile-nav-toggle {
+  border-color: #334155;
+  background: #111827;
+  color: #cbd5e1;
+}
+
+@media (max-width: 720px) {
+  .app-shell,
+  [data-sidebar="collapsed"] .app-shell {
+    display: block;
+  }
+
+  .sidebar,
+  [data-sidebar="collapsed"] .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(280px, calc(100vw - 48px));
+    height: 100dvh;
+    overflow-y: auto;
+    padding: 20px 16px 18px;
+    transform: translateX(-105%);
+    box-shadow: 20px 0 45px rgb(15 23 42 / 18%);
+  }
+
+  .app-shell.sidebar-mobile-open .sidebar {
+    transform: translateX(0);
+  }
+
+  .sidebar-brand-row,
+  [data-sidebar="collapsed"] .sidebar-brand-row {
+    justify-content: space-between;
+    flex-direction: row;
+  }
+
+  [data-sidebar="collapsed"] .brand-copy,
+  [data-sidebar="collapsed"] .nav-copy,
+  [data-sidebar="collapsed"] .nav-label,
+  [data-sidebar="collapsed"] .sidebar-status-copy {
+    display: block;
+  }
+
+  .sidebar-collapse-toggle {
+    display: none;
+  }
+
+  .primary-nav,
+  [data-sidebar="collapsed"] .primary-nav {
+    display: block;
+    margin-top: 28px;
+    overflow: visible;
+  }
+
+  .nav-label {
+    display: block;
+  }
+
+  .nav-item,
+  [data-sidebar="collapsed"] .nav-item {
+    justify-content: flex-start;
+    padding: 0 11px;
+    white-space: normal;
+  }
+
+  .nav-item.muted,
+  .sidebar-status {
+    display: flex;
+  }
+
+  .sidebar-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 35;
+    border: 0;
+    background: rgb(15 23 42 / 48%);
+  }
+
+  .app-shell.sidebar-mobile-open .sidebar-scrim {
+    display: block;
+  }
+
+  .mobile-nav-toggle {
+    display: inline-grid;
+    margin-top: 1px;
+  }
+
+  .topbar-title-group {
+    align-items: flex-start;
+  }
+
+  .topbar {
+    align-items: flex-start;
+  }
+
+  .topbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}

@@ -17,8 +17,11 @@ from automation_core.storage_api import router as storage_router
 from crm_filters.api import router as crm_filters_router
 from crm_domain.api import router as crm_domain_router
 from crm_domain.reply_api import router as crm_reply_router
+from crm_domain.bulk_operations_api import router as crm_bulk_operations_router
+from crm_domain.ai_pipeline_api import router as crm_ai_pipeline_router
 from crm_domain.knowledge_api import router as crm_knowledge_router
 from crm_domain.reply_workspace_api import router as crm_reply_workspace_router
+from crm_domain.official_letters_api import router as crm_official_letters_router
 from crm_domain.taxonomy_api import router as crm_taxonomy_router
 from crm_integrations.frappe_helpdesk.api import router as crm_helpdesk_router
 from master_data.api import router as master_data_router
@@ -65,9 +68,12 @@ app.include_router(antidengue_routing_profile_router)
 app.include_router(crm_filters_router)
 app.include_router(crm_domain_router)
 app.include_router(crm_reply_router)
+app.include_router(crm_bulk_operations_router)
+app.include_router(crm_ai_pipeline_router)
 app.include_router(crm_knowledge_router)
 app.include_router(crm_taxonomy_router)
 app.include_router(crm_reply_workspace_router)
+app.include_router(crm_official_letters_router)
 app.include_router(crm_helpdesk_router)
 app.include_router(master_data_router)
 app.include_router(whatsapp_router)

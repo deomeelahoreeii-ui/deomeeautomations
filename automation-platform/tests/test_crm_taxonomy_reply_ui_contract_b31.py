@@ -49,20 +49,19 @@ def test_taxonomy_page_exposes_full_safe_management_flow() -> None:
     assert "hard delete" not in source.lower()
 
 
-def test_reply_queue_preserves_legacy_tools_and_adds_bulk_classification() -> None:
+def test_reply_queue_links_to_batch_controlled_bulk_operations() -> None:
     source = REPLIES.read_text(encoding="utf-8")
     for token in (
         "Reply Queue",
-        "Bulk CSV",
-        "Formal Letters",
+        "Bulk Operations",
+        "/crm/replies/bulk/",
         "Apply classification",
         "/api/v1/crm/reply-workspace/cases",
         "/api/v1/crm/reply-workspace/classifications/bulk",
-        "/api/v1/crm/replies/complaints.csv",
-        "/api/v1/crm/replies/imports",
-        "/api/v1/crm/replies/letter-packages",
     ):
         assert token in source
+    assert "Legacy register" not in source
+    assert "CSV reply coverage" not in source
 
 
 def test_reply_editor_supports_every_status_and_verified_archive_rules() -> None:

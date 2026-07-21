@@ -1,0 +1,394 @@
+---
+import CrmLayout from "../../../../layouts/CrmLayout.astro";
+import DataTable from "../../../../components/DataTable.astro";
+import CheckboxField from "../../../../components/ui/CheckboxField.astro";
+
+const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+---
+
+<CrmLayout
+  title="Bulk Reply Operations"
+  description="Create traceable complaint exports, validate ChatGPT reply files and generate formal letters as linked batches."
+  page="replies"
+>
+  <a class="btn btn-sm" href="/crm/replies/" slot="actions">← Reply Queue</a>
+  <a class="btn btn-sm" href="/crm/replies/bulk/batches/" slot="actions">All Batches</a>
+
+  <main id="bulk-operations" data-api-base={apiBase} class="crm32-page bulk-operations-page">
+    <nav class="reply-mode-tabs" aria-label="Reply workspace modes">
+      <a href="/crm/replies/">Reply Queue</a>
+      <a class="active" href="/crm/replies/bulk/">Bulk Operations</a>
+    </nav>
+
+    <section class="bulk-operations-hero master-card">
+      <div>
+        <p class="eyebrow">Batch-controlled workflow</p>
+        <h2>One traceable path from complaint export to formal letters</h2>
+        <p>Every export, imported CSV and generated letter package receives a batch number, item-level results, downloadable artifacts and parent/child lineage.</p>
+      </div>
+      <a class="btn" href="/crm/replies/bulk/batches/">Browse batch history</a>
+    </section>
+
+    <section class="bulk-workflow-grid" aria-label="Bulk reply workflow">
+      <article class="master-card bulk-operation-card">
+        <span class="step-number">1</span>
+        <div class="bulk-operation-copy">
+          <p class="eyebrow">Export batch</p>
+          <h2>Prepare complaints for ChatGPT</h2>
+          <p>Creates a ZIP containing complaint remarks, a matching blank reply template, instructions, a completed sample and a manifest.</p>
+          <div class="button-row">
+            <button id="create-awaiting-export" class="btn btn-primary" type="button">Export awaiting replies</button>
+            <button id="create-all-export" class="btn" type="button">Export all published</button>
+          </div>
+          <div id="export-result" class="reply-message" hidden></div>
+        </div>
+      </article>
+
+      <article class="master-card bulk-operation-card">
+        <span class="step-number">2</span>
+        <div class="bulk-operation-copy">
+          <p class="eyebrow">ChatGPT reference files</p>
+          <h2>Use the exact expected format</h2>
+          <p>Download these files separately when you need to give ChatGPT a format reference without creating a new complaint export.</p>
+          <div class="reference-downloads">
+            <a class="btn" href={`${apiBase}/api/v1/crm/bulk-operations/reference/reply-template`}>Reply template</a>
+            <a class="btn" href={`${apiBase}/api/v1/crm/bulk-operations/reference/example-completed`}>Completed sample</a>
+            <a class="btn" href={`${apiBase}/api/v1/crm/bulk-operations/reference/chatgpt-instructions`}>Instructions</a>
+            <button id="copy-chatgpt-prompt" class="btn" type="button">Copy ChatGPT prompt</button>
+          </div>
+          <div id="prompt-result" class="reply-message" hidden></div>
+        </div>
+      </article>
+
+      <article class="master-card bulk-operation-card bulk-import-card">
+        <span class="step-number">3</span>
+        <div class="bulk-operation-copy">
+          <p class="eyebrow">Import batch</p>
+          <h2>Validate before changing replies</h2>
+          <p>The CSV is first stored and validated as a batch. No complaint reply is changed until you review the validation result and commit it.</p>
+          <form id="import-validation-form" class="bulk-operation-form">
+            <label class="crm-field" for="parent-export-batch">
+              <span>Related export batch</span>
+              <select id="parent-export-batch" class="select select-bordered" name="parent_batch_id">
+                <option value="">No related export batch</option>
+              </select>
+            </label>
+            <label class="crm-field" for="reply-batch-file">
+              <span>Completed reply CSV</span>
+              <input id="reply-batch-file" class="file-input file-input-bordered" type="file" accept=".csv,text/csv" required />
+            </label>
+            <button id="validate-import" class="btn btn-primary" type="submit">Validate reply CSV</button>
+          </form>
+          <section id="import-validation-result" class="batch-validation-result" hidden>
+            <header>
+              <div><p class="eyebrow">Validation result</p><h3 id="validation-batch-number">—</h3></div>
+              <a id="validation-open-batch" class="btn btn-sm" href="#">Open batch</a>
+            </header>
+            <div class="batch-validation-metrics">
+              <article><span>Total</span><strong id="validation-total">0</strong></article>
+              <article><span>Valid</span><strong id="validation-valid">0</strong></article>
+              <article><span>Errors / missing</span><strong id="validation-failed">0</strong></article>
+              <article><span>Duplicates</span><strong id="validation-duplicates">0</strong></article>
+            </div>
+            <p id="validation-summary"></p>
+            <div id="validation-artifacts" class="button-row"></div>
+            <div class="batch-commit-row">
+              <CheckboxField id="allow-partial-import" label="Import valid rows only" description="Leave invalid and missing rows in the batch as errors." compact />
+              <button id="commit-import" class="btn btn-primary" type="button">Commit import batch</button>
+            </div>
+            <div id="commit-result" class="reply-message" hidden></div>
+          </section>
+        </div>
+      </article>
+
+      <article class="master-card bulk-operation-card bulk-letter-card">
+        <span class="step-number">4</span>
+        <div class="bulk-operation-copy">
+          <p class="eyebrow">Formal-letter batch</p>
+          <h2>Generate letters from a controlled source</h2>
+          <p>Generate from one completed import batch or from all imported replies that have not yet been included in a letter package.</p>
+          <div class="bulk-operation-form">
+            <label class="crm-field" for="letter-source-batch">
+              <span>Source import batch</span>
+              <select id="letter-source-batch" class="select select-bordered">
+                <option value="">All replies ready for letters</option>
+              </select>
+            </label>
+            <button id="create-letter-batch" class="btn btn-primary" type="button">Generate formal-letter batch</button>
+          </div>
+          <div id="letter-batch-result" class="reply-message" hidden></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="bulk-record-metrics" aria-label="Complaint reply records">
+      <a class="crm-metric-card metric-link" href="/crm/replies/bulk/records/?view=published"><span>Published complaints</span><strong id="bulk-published">—</strong><small>View complete record table</small></a>
+      <a class="crm-metric-card metric-link" href="/crm/replies/bulk/records/?view=awaiting"><span>Awaiting reply</span><strong id="bulk-awaiting">—</strong><small>Available for a new export batch</small></a>
+      <a class="crm-metric-card metric-link" href="/crm/replies/bulk/records/?view=imported"><span>Replies imported</span><strong id="bulk-imported">—</strong><small>View reply versions and sources</small></a>
+      <a class="crm-metric-card metric-link" href="/crm/replies/bulk/records/?view=generated"><span>Letters generated</span><strong id="bulk-generated">—</strong><small>View generated complaint records</small></a>
+    </section>
+
+    <section class="bulk-batch-metrics" aria-label="Batch history">
+      <a class="batch-count-link" href="/crm/replies/bulk/batches/?type=reply_export"><span>Export batches</span><strong id="bulk-export-batches">—</strong></a>
+      <a class="batch-count-link" href="/crm/replies/bulk/batches/?type=reply_import"><span>Import batches</span><strong id="bulk-import-batches">—</strong></a>
+      <a class="batch-count-link" href="/crm/replies/bulk/batches/?type=formal_letters"><span>Letter batches</span><strong id="bulk-letter-batches">—</strong></a>
+    </section>
+
+    <section class="master-card bulk-recent-card">
+      <header class="crm-card-heading">
+        <div><p class="eyebrow">Recent activity</p><h2>Recent bulk-operation batches</h2><p>Open a batch to inspect every complaint, validation error, artifact and linked parent or child operation.</p></div>
+        <button id="refresh-batches" class="btn btn-sm" type="button">↻ Refresh</button>
+      </header>
+      <DataTable id="recent-batches-table" pageSize={10} pageSizeOptions={[10, 25, 50]} emptyText="No bulk-operation batches have been created." ariaLabel="Recent CRM bulk-operation batches" class="bulk-batches-table" />
+    </section>
+
+    <div id="bulk-toast" class="crm-toast" role="status" aria-live="polite" hidden></div>
+  </main>
+
+  <script>
+    import { badge, stack } from "../../../../scripts/table-cells";
+
+    type Batch = {
+      id: string;
+      batch_number: string;
+      operation_type: string;
+      status: string;
+      parent_batch_id?: string | null;
+      source_filename?: string | null;
+      total_items: number;
+      successful_items: number;
+      failed_items: number;
+      skipped_items: number;
+      created_by: string;
+      created_at: string;
+      completed_at?: string | null;
+      artifacts?: { id: string; kind: string; name: string; download_url: string }[];
+      error_summary?: string | null;
+      valid_items: number;
+      duplicate_items: number;
+      commit_summary?: { imported: number; updated: number; unchanged: number; letters_ready: number };
+    };
+
+    const root = document.getElementById("bulk-operations") as HTMLElement;
+    const API = root.dataset.apiBase || "";
+    const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const table = $("recent-batches-table") as any;
+    let validationBatch: Batch | null = null;
+
+    const operationLabel = (value: string) => ({ reply_export: "Complaint export", reply_import: "Reply import", formal_letters: "Formal letters" }[value] || value);
+    const statusTone = (value: string) => value === "completed" ? "success" : value === "completed_with_errors" || value === "ready" ? "warning" : value === "failed" || value === "cancelled" ? "danger" : "info";
+    const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString() : "—";
+
+    async function api(path: string, init: RequestInit = {}) {
+      const response = await fetch(`${API}${path}`, init);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.detail?.message || body.detail || response.statusText);
+      return body;
+    }
+
+    function toast(message: string, error = false) {
+      const node = $("bulk-toast");
+      node.textContent = message;
+      node.className = `crm-toast${error ? " error" : ""}`;
+      node.hidden = false;
+      window.setTimeout(() => node.hidden = true, 5000);
+    }
+
+    function artifactButton(batch: Batch, kind: string, label: string) {
+      const artifact = batch.artifacts?.find((item) => item.kind === kind);
+      if (!artifact) return null;
+      const anchor = document.createElement("a");
+      anchor.className = "btn btn-sm";
+      anchor.href = `${API}${artifact.download_url}`;
+      anchor.textContent = label;
+      return anchor;
+    }
+
+    function showOperationResult(targetId: string, batch: Batch, message: string, artifactKind: string) {
+      const target = $(targetId);
+      target.className = "reply-message";
+      target.replaceChildren(document.createTextNode(`${message} `));
+      const link = document.createElement("a");
+      link.href = `/crm/replies/bulk/batches/${batch.id}/`;
+      link.textContent = batch.batch_number;
+      target.append(link);
+      const artifact = artifactButton(batch, artifactKind, "Download package");
+      if (artifact) target.append(document.createTextNode(" "), artifact);
+      target.hidden = false;
+    }
+
+    async function loadStatistics() {
+      const stats = await api("/api/v1/crm/bulk-operations/statistics");
+      $("bulk-published").textContent = String(stats.published_cases || 0);
+      $("bulk-awaiting").textContent = String(stats.awaiting_reply || 0);
+      $("bulk-imported").textContent = String(stats.replies_imported || 0);
+      $("bulk-generated").textContent = String(stats.letters_generated || 0);
+      $("bulk-export-batches").textContent = String(stats.export_batches || 0);
+      $("bulk-import-batches").textContent = String(stats.import_batches || 0);
+      $("bulk-letter-batches").textContent = String(stats.letter_batches || 0);
+    }
+
+    async function loadBatchOptions() {
+      const [exports, imports] = await Promise.all([
+        api("/api/v1/crm/bulk-operations/batches?operation_type=reply_export&status=completed&page_size=100"),
+        api("/api/v1/crm/bulk-operations/batches?operation_type=reply_import&page_size=100"),
+      ]);
+      const exportSelect = $("parent-export-batch") as HTMLSelectElement;
+      const importSelect = $("letter-source-batch") as HTMLSelectElement;
+      const exportValue = exportSelect.value;
+      const importValue = importSelect.value;
+      exportSelect.replaceChildren(new Option("No related export batch", ""), ...(exports.items || []).map((item: Batch) => new Option(`${item.batch_number} · ${item.total_items} complaints`, item.id)));
+      importSelect.replaceChildren(new Option("All replies ready for letters", ""), ...(imports.items || []).filter((item: Batch) => ["completed", "completed_with_errors"].includes(item.status)).map((item: Batch) => new Option(`${item.batch_number} · ${item.successful_items + item.skipped_items} replies`, item.id)));
+      exportSelect.value = exportValue;
+      importSelect.value = importValue;
+    }
+
+    async function configureTable() {
+      await table.configure({
+        columns: [
+          { accessorKey: "batch_number", header: "Batch", meta: { minWidth: "190px" }, cell: (context: any) => { const row = context.row.original as Batch; const link = document.createElement("a"); link.className = "table-primary-link"; link.href = `/crm/replies/bulk/batches/${row.id}/`; link.textContent = row.batch_number; return link; } },
+          { accessorKey: "operation_type", header: "Operation", meta: { minWidth: "150px" }, cell: (context: any) => stack(operationLabel(context.getValue()), context.row.original.source_filename || "") },
+          { accessorKey: "status", header: "Status", meta: { minWidth: "150px" }, cell: (context: any) => badge(String(context.getValue()).replaceAll("_", " "), statusTone(String(context.getValue()))) },
+          { id: "progress", header: "Items", meta: { minWidth: "150px" }, cell: (context: any) => { const row = context.row.original as Batch; return stack(`${row.successful_items} successful`, `${row.failed_items} failed · ${row.skipped_items} skipped · ${row.total_items} total`); } },
+          { accessorKey: "created_at", header: "Created", meta: { minWidth: "165px" }, cell: (context: any) => stack(formatDate(context.getValue()), context.row.original.created_by || "web-operator") },
+          { id: "actions", header: "", meta: { width: "90px", align: "right" }, cell: (context: any) => { const link = document.createElement("a"); link.className = "btn btn-xs"; link.href = `/crm/replies/bulk/batches/${context.row.original.id}/`; link.textContent = "Open"; return link; } },
+        ],
+        manualPagination: true,
+        getRowId: (row: Batch) => row.id,
+        loadPage: async (pageIndex: number, pageSize: number) => {
+          const data = await api(`/api/v1/crm/bulk-operations/batches?page=${pageIndex + 1}&page_size=${pageSize}`);
+          return { rows: data.items || [], total: data.total || 0 };
+        },
+      });
+    }
+
+    async function createExport(scope: "awaiting" | "all", button: HTMLButtonElement) {
+      const original = button.textContent || "Create export";
+      button.disabled = true;
+      button.textContent = "Creating batch…";
+      try {
+        const batch = await api("/api/v1/crm/bulk-operations/export-batches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scope }) });
+        showOperationResult("export-result", batch, "Export batch created:", "export_package");
+        await Promise.all([loadStatistics(), loadBatchOptions(), table.refresh(true)]);
+      } catch (error) {
+        toast(error instanceof Error ? error.message : String(error), true);
+      } finally {
+        button.disabled = false;
+        button.textContent = original;
+      }
+    }
+
+    function renderValidation(batch: Batch) {
+      validationBatch = batch;
+      $("validation-batch-number").textContent = batch.batch_number;
+      $("validation-total").textContent = String(batch.total_items || 0);
+      $("validation-valid").textContent = String(batch.valid_items || 0);
+      $("validation-failed").textContent = String(batch.failed_items || 0);
+      $("validation-duplicates").textContent = String(batch.duplicate_items || 0);
+      $("validation-summary").textContent = batch.error_summary || (batch.status === "ready" ? "The batch is ready to commit." : "Validation completed.");
+      $("validation-open-batch").setAttribute("href", `/crm/replies/bulk/batches/${batch.id}/`);
+      const artifacts = $("validation-artifacts");
+      artifacts.replaceChildren();
+      const source = artifactButton(batch, "source_csv", "Download uploaded CSV");
+      const errors = artifactButton(batch, "validation_errors", "Download error report");
+      if (source) artifacts.append(source);
+      if (errors) artifacts.append(errors);
+      const commit = $("commit-import") as HTMLButtonElement;
+      commit.disabled = batch.status !== "ready";
+      $("import-validation-result").hidden = false;
+    }
+
+    $("create-awaiting-export").addEventListener("click", () => void createExport("awaiting", $("create-awaiting-export") as HTMLButtonElement));
+    $("create-all-export").addEventListener("click", () => void createExport("all", $("create-all-export") as HTMLButtonElement));
+    $("copy-chatgpt-prompt").addEventListener("click", async () => {
+      const message = $("prompt-result");
+      try {
+        const response = await fetch(`${API}/api/v1/crm/bulk-operations/reference/chatgpt-instructions`);
+        const text = await response.text();
+        await navigator.clipboard.writeText(text);
+        message.className = "reply-message";
+        message.textContent = "ChatGPT instructions copied.";
+      } catch {
+        message.className = "reply-message error";
+        message.textContent = "The browser could not copy automatically. Download the instruction file instead.";
+      }
+      message.hidden = false;
+    });
+
+    $("import-validation-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const input = $("reply-batch-file") as HTMLInputElement;
+      const button = $("validate-import") as HTMLButtonElement;
+      const file = input.files?.[0];
+      if (!file) return;
+      const form = new FormData();
+      form.append("file", file);
+      const parent = ($("parent-export-batch") as HTMLSelectElement).value;
+      if (parent) form.append("parent_batch_id", parent);
+      button.disabled = true;
+      button.textContent = "Validating…";
+      try {
+        const batch = await api("/api/v1/crm/bulk-operations/import-batches/validate", { method: "POST", body: form });
+        renderValidation(batch);
+        await Promise.all([loadStatistics(), loadBatchOptions(), table.refresh(true)]);
+      } catch (error) {
+        toast(error instanceof Error ? error.message : String(error), true);
+      } finally {
+        button.disabled = false;
+        button.textContent = "Validate reply CSV";
+      }
+    });
+
+    $("commit-import").addEventListener("click", async () => {
+      if (!validationBatch) return;
+      const button = $("commit-import") as HTMLButtonElement;
+      const result = $("commit-result");
+      button.disabled = true;
+      button.textContent = "Committing…";
+      try {
+        const batch = await api(`/api/v1/crm/bulk-operations/import-batches/${validationBatch.id}/commit`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ allow_partial: ($("allow-partial-import") as HTMLInputElement).checked }) });
+        validationBatch = batch;
+        const summary = batch.commit_summary || { imported: 0, updated: 0, unchanged: 0, letters_ready: 0 };
+        result.className = "reply-message";
+        result.innerHTML = `Committed <b>${summary.imported}</b> new, <b>${summary.updated}</b> updated and <b>${summary.unchanged}</b> unchanged replies. <a href="/crm/replies/bulk/batches/${batch.id}/">Open batch</a>`;
+        result.hidden = false;
+        button.disabled = true;
+        await Promise.all([loadStatistics(), loadBatchOptions(), table.refresh(true)]);
+      } catch (error) {
+        result.className = "reply-message error";
+        result.textContent = error instanceof Error ? error.message : String(error);
+        result.hidden = false;
+        button.disabled = false;
+      } finally {
+        button.textContent = "Commit import batch";
+      }
+    });
+
+    $("create-letter-batch").addEventListener("click", async () => {
+      const button = $("create-letter-batch") as HTMLButtonElement;
+      const result = $("letter-batch-result");
+      const parent = ($("letter-source-batch") as HTMLSelectElement).value;
+      button.disabled = true;
+      button.textContent = "Generating letters…";
+      try {
+        const batch = await api("/api/v1/crm/bulk-operations/letter-batches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(parent ? { parent_batch_id: parent, scope: "import_batch" } : { scope: "ready" }) });
+        showOperationResult("letter-batch-result", batch, "Formal-letter batch created:", "letter_package");
+        await Promise.all([loadStatistics(), loadBatchOptions(), table.refresh(true)]);
+      } catch (error) {
+        result.className = "reply-message error";
+        result.textContent = error instanceof Error ? error.message : String(error);
+        result.hidden = false;
+      } finally {
+        button.disabled = false;
+        button.textContent = "Generate formal-letter batch";
+      }
+    });
+
+    $("refresh-batches").addEventListener("click", () => void Promise.all([table.refresh(true), loadStatistics(), loadBatchOptions()]));
+
+    void (async () => {
+      await Promise.all([loadStatistics(), loadBatchOptions()]);
+      await configureTable();
+    })().catch((error) => toast(error instanceof Error ? error.message : String(error), true));
+  </script>
+</CrmLayout>

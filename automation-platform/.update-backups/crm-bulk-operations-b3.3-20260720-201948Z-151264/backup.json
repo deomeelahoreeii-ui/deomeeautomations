@@ -1,0 +1,124 @@
+{
+  "schema_version": 2,
+  "bundle_id": "crm-bulk-operations-b3.3",
+  "bundle_version": "B3.3",
+  "target_root": "/home/ahmad/code/deomeeautomations/automation-platform",
+  "created_at_utc": "2026-07-20T20:19:48.066440Z",
+  "status": "applied",
+  "database_revision_before": "e9b3c5d7f104",
+  "entries": [
+    {
+      "path": "alembic/versions/f1a5c7e9b306_crm_bulk_operation_batches.py",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "apps/api/automation_api/main.py",
+      "existed": true,
+      "sha256_before": "f23d5705e21dc1eb0672125b128a8d6ca979a5e8b7548fe0ad260d490798a176",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/bulk/batches/[id].astro",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/bulk/batches/index.astro",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/bulk/index.astro",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/bulk/records/index.astro",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/index.astro",
+      "existed": true,
+      "sha256_before": "d178ab79a38a4836325ac1ff010a05d812ce9e071bbc99a08945f9199c739b95",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/styles/crm.css",
+      "existed": true,
+      "sha256_before": "b80c78b2f77b3f0defaf2cd8a8d8b7fea5ac46ace4cbccadd913edeb927e1f01",
+      "mode_before": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/__init__.py",
+      "existed": true,
+      "sha256_before": "fbfe55fb1b4c990b48b6c4cee90f264ed4f0bb08bfe9b77304b2c6db8a0a8a69",
+      "mode_before": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/bulk_operations.py",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/bulk_operations_api.py",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/models.py",
+      "existed": true,
+      "sha256_before": "44bfe07182d9b0fa99308f785b53ffecbea94ec0d8c676ed34a214c85d82dab0",
+      "mode_before": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/reply_api.py",
+      "existed": true,
+      "sha256_before": "92e7feafa08151f056947193c951510dc83b4bee2c37829be10918ac00dea5f1",
+      "mode_before": "0644"
+    },
+    {
+      "path": "tests/test_api.py",
+      "existed": true,
+      "sha256_before": "a074b9ef931e6283cb6b9821052842d54f6c8e9a4e897025c747d1735d094db5",
+      "mode_before": "0644"
+    },
+    {
+      "path": "tests/test_crm_bulk_operations_b33.py",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "tests/test_crm_taxonomy_reply_ui_contract_b31.py",
+      "existed": true,
+      "sha256_before": "50f22fe196d333fe9526c7a1d5a34f70e746e793be9c0c33a9d4bf13574f2dea",
+      "mode_before": "0644"
+    },
+    {
+      "path": "tests/test_preview_partial_approval.py",
+      "existed": true,
+      "sha256_before": "8c4395bc994d2911610e5395769508df449875114389a7f3f16121403780e10f",
+      "mode_before": "0644"
+    },
+    {
+      "path": "tests/test_whatsapp_inbound_processing_ui_contract.py",
+      "existed": true,
+      "sha256_before": "8ac2b900011d5b88aa911929b1167fd6f58cf4cd6a6fcb14682c1c88f8f0bced",
+      "mode_before": "0644"
+    }
+  ],
+  "installed_at_utc": "2026-07-20T20:19:48.096582Z",
+  "database_revision_after": "f1a5c7e9b306",
+  "verified_at_utc": "2026-07-20T20:20:52.842979Z",
+  "test_mode": "complete",
+  "frontend_build_ran": true
+}

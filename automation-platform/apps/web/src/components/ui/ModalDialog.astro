@@ -1,0 +1,58 @@
+---
+interface Props {
+  id: string;
+  title: string;
+  eyebrow?: string;
+  description?: string;
+  formId?: string;
+  size?: "sm" | "md" | "lg" | "xl";
+  closeLabel?: string;
+}
+
+const {
+  id,
+  title,
+  eyebrow = "",
+  description = "",
+  formId = `${id}-form`,
+  size = "lg",
+  closeLabel = "Close dialog",
+} = Astro.props;
+const titleId = `${id}-title`;
+const descriptionId = description ? `${id}-description` : undefined;
+const hasFooter = Astro.slots.has("footer");
+---
+
+<dialog
+  id={id}
+  class:list={["crm-modal", `crm-modal-${size}`]}
+  aria-labelledby={titleId}
+  aria-describedby={descriptionId}
+>
+  <form id={formId} class="crm-modal-card" autocomplete="off">
+    <header class="crm-modal-header">
+      <div>
+        {eyebrow && <p class="eyebrow">{eyebrow}</p>}
+        <h2 id={titleId}>{title}</h2>
+        {description && <p id={descriptionId}>{description}</p>}
+      </div>
+      <button
+        class="crm-modal-close"
+        type="button"
+        data-dialog-close
+        aria-label={closeLabel}
+        title={closeLabel}
+      >
+        <span aria-hidden="true">×</span>
+      </button>
+    </header>
+    <div class="crm-modal-body">
+      <slot />
+    </div>
+    {hasFooter && (
+      <footer class="crm-modal-footer">
+        <slot name="footer" />
+      </footer>
+    )}
+  </form>
+</dialog>

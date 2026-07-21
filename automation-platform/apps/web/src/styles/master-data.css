@@ -877,3 +877,47 @@ astro-data-table {
 [data-theme="automation-dark"] .jurisdiction-transfer-warning > small {
   color: #e8c98d;
 }
+
+/* B3.2 data-table controls and reusable alignment helpers. */
+.data-table-pagination-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.data-table-page-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #718095;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.data-table-page-size .select {
+  min-height: 28px;
+  height: 28px;
+  padding-right: 24px;
+  font-size: 10px;
+}
+
+.data-table .numeric-cell { font-variant-numeric: tabular-nums; text-align: right; }
+.data-table .selection-cell { width: 44px; text-align: center; }
+.data-table .table-error-copy { color: #a93d3d; }
+
+@media (max-width: 620px) {
+  .pagination {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .data-table-pagination-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+[data-theme="automation-dark"] .data-table-page-size { color: #94a3b8; }
+[data-theme="automation-dark"] .data-table .table-error-copy { color: #fca5a5; }

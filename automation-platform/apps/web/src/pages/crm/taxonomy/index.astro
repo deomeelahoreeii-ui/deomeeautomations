@@ -1,5 +1,10 @@
 ---
 import CrmLayout from "../../../layouts/CrmLayout.astro";
+import DataTable from "../../../components/DataTable.astro";
+import CheckboxField from "../../../components/ui/CheckboxField.astro";
+import ModalDialog from "../../../components/ui/ModalDialog.astro";
+import StatusBadge from "../../../components/ui/StatusBadge.astro";
+
 const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
 ---
 
@@ -8,231 +13,752 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
   description="Manage the authoritative category and subcategory structure used by complaints, Helpdesk and AI exports."
   page="taxonomy"
 >
+  <a class="btn btn-sm" href="/crm/taxonomy/tags/" slot="actions">Controlled Tags</a>
   <a class="btn btn-sm" href="/crm/replies/" slot="actions">Open Reply Workspace</a>
 
-  <main id="taxonomy-root" data-api-base={apiBase} class="taxonomy-shell">
-    <section class="taxonomy-summary" aria-label="Taxonomy summary">
-      <article class="metric-card"><span>Categories</span><strong id="metric-categories">—</strong><small id="metric-active-categories">— active</small></article>
-      <article class="metric-card"><span>Subcategories</span><strong id="metric-subcategories">—</strong><small id="metric-active-subcategories">— active</small></article>
-      <article class="metric-card"><span>Classified complaints</span><strong id="metric-classified">—</strong><small id="metric-unclassified">— unclassified</small></article>
-      <article class="metric-card"><span>Helpdesk sync</span><strong id="metric-synced">—</strong><small id="metric-sync-errors">— errors</small></article>
+  <main id="taxonomy-root" data-api-base={apiBase} class="crm32-page taxonomy-page">
+    <nav class="taxonomy-mode-tabs" aria-label="Taxonomy management modes">
+      <a class="active" href="/crm/taxonomy/">Categories &amp; Subcategories</a>
+      <a href="/crm/taxonomy/tags/">Controlled Tags</a>
+      <a href="/crm/replies/bulk/classification/#taxonomy-suggestions">Suggestions</a>
+    </nav>
+    <section class="crm-metric-grid taxonomy-summary" aria-label="Taxonomy summary">
+      <article class="crm-metric-card"><span>Categories</span><strong id="metric-categories">—</strong><small id="metric-active-categories">— active</small></article>
+      <article class="crm-metric-card"><span>Subcategories</span><strong id="metric-subcategories">—</strong><small id="metric-active-subcategories">— active</small></article>
+      <article class="crm-metric-card"><span>Classified complaints</span><strong id="metric-classified">—</strong><small id="metric-unclassified">— unclassified</small></article>
+      <article class="crm-metric-card"><span>Helpdesk sync</span><strong id="metric-synced">—</strong><small id="metric-sync-errors">— errors</small></article>
     </section>
 
-    <section class="taxonomy-toolbar master-card">
-      <div>
+    <section class="master-card crm-page-toolbar taxonomy-toolbar">
+      <div class="crm-page-toolbar-copy">
         <p class="eyebrow">Authoritative classification</p>
         <h2>Categories and subcategories</h2>
-        <p>Changes are saved in PostgreSQL first. Category names are then mirrored to Frappe Ticket Types, and affected linked complaints are verified after synchronization.</p>
+        <p>PostgreSQL remains authoritative. Category names are mirrored to Frappe Ticket Types, then linked complaints are verified after synchronization.</p>
       </div>
-      <div class="taxonomy-toolbar-actions">
-        <label class="taxonomy-search"><span class="sr-only">Search taxonomy</span><input id="taxonomy-search" class="input input-bordered" placeholder="Search categories or guidance…" /></label>
-        <label class="form-check"><input id="show-inactive" class="form-check-input" type="checkbox" checked /><span class="form-check-label">Show inactive</span></label>
+      <div class="crm-page-toolbar-actions taxonomy-toolbar-actions">
+        <label class="crm-field crm-search-field" for="taxonomy-search">
+          <span class="sr-only">Search taxonomy</span>
+          <input id="taxonomy-search" class="input input-bordered" placeholder="Search names, guidance or policy…" />
+        </label>
+        <CheckboxField id="show-inactive" label="Show inactive" checked compact />
+        <button id="refresh-taxonomy" class="btn btn-sm" type="button">↻ Refresh</button>
         <button id="new-category" class="btn btn-primary" type="button">+ New category</button>
       </div>
     </section>
 
     <section class="taxonomy-workspace">
-      <aside class="master-card taxonomy-categories" aria-label="Complaint categories">
-        <div class="taxonomy-panel-heading">
-          <div><p class="eyebrow">Categories</p><h2>Classification tree</h2></div>
-          <button id="refresh-taxonomy" class="btn btn-sm" type="button">↻ Refresh</button>
-        </div>
-        <div id="category-list" class="category-list" aria-live="polite">
-          <div class="taxonomy-empty">Loading taxonomy…</div>
+      <aside class="master-card taxonomy-tree-card" aria-label="Complaint categories">
+        <header class="crm-card-heading taxonomy-tree-heading">
+          <div>
+            <p class="eyebrow">Categories</p>
+            <h2>Classification tree</h2>
+            <p>Choose a category to manage its guidance and controlled options.</p>
+          </div>
+          <span id="category-visible-count" class="crm-count-badge">0</span>
+        </header>
+        <div id="category-list" class="taxonomy-tree-list" aria-live="polite">
+          <div class="crm-empty-state">Loading taxonomy…</div>
         </div>
       </aside>
 
-      <section class="master-card taxonomy-detail" aria-live="polite">
-        <div id="category-empty" class="taxonomy-empty taxonomy-empty-large">
+      <section class="master-card taxonomy-detail-card" aria-live="polite">
+        <div id="category-empty" class="crm-empty-state taxonomy-detail-empty">
+          <span class="crm-empty-icon" aria-hidden="true">◇</span>
           <h2>Select a category</h2>
-          <p>Choose a category to manage its details, subcategories, guidance and synchronization.</p>
+          <p>Choose a category from the classification tree to manage details, subcategories, guidance and Helpdesk synchronization.</p>
         </div>
+
         <div id="category-detail" hidden>
-          <header class="category-detail-header">
-            <div>
-              <div class="category-title-line"><h2 id="detail-name">—</h2><span id="detail-status" class="status-pill">—</span></div>
+          <header class="taxonomy-detail-header">
+            <div class="taxonomy-detail-copy">
+              <div class="taxonomy-title-line">
+                <h2 id="detail-name">—</h2>
+                <StatusBadge id="detail-status" label="—" />
+              </div>
               <p id="detail-description">—</p>
-              <div id="detail-meta" class="taxonomy-meta"></div>
+              <div id="detail-meta" class="crm-chip-row"></div>
             </div>
-            <div class="category-detail-actions">
-              <button id="edit-category" class="btn btn-sm" type="button">Edit</button>
-              <button id="sync-category" class="btn btn-sm" type="button">Sync to Helpdesk</button>
-              <button id="toggle-category" class="btn btn-sm" type="button">Deactivate</button>
-              <button id="merge-category" class="btn btn-sm" type="button">Merge</button>
+            <div class="taxonomy-detail-actions">
+              <button id="edit-category" class="btn btn-primary btn-sm" type="button">Edit category</button>
+              <details id="category-action-menu" class="crm-action-menu">
+                <summary class="btn btn-sm">More actions</summary>
+                <div class="crm-action-menu-popover">
+                  <button id="sync-category" type="button">Sync to Helpdesk</button>
+                  <button id="toggle-category" type="button">Deactivate</button>
+                  <button id="merge-category" type="button">Merge category</button>
+                </div>
+              </details>
             </div>
           </header>
 
-          <div class="guidance-grid">
-            <article><span>Reply guidance</span><p id="detail-guidance">No category-level reply guidance.</p></article>
-            <article><span>Policy notes</span><p id="detail-policy">No category-level policy notes.</p></article>
+          <div class="taxonomy-guidance-grid">
+            <article>
+              <span>Reply guidance</span>
+              <p id="detail-guidance">No category-level reply guidance.</p>
+            </article>
+            <article>
+              <span>Policy notes</span>
+              <p id="detail-policy">No category-level policy notes.</p>
+            </article>
           </div>
 
-          <section class="subcategory-section">
-            <div class="taxonomy-panel-heading">
-              <div><p class="eyebrow">Controlled options</p><h3>Subcategories</h3></div>
+          <section class="taxonomy-subcategory-section">
+            <header class="crm-card-heading taxonomy-subcategory-heading">
+              <div>
+                <p class="eyebrow">Controlled options</p>
+                <h3>Subcategories</h3>
+                <p>Complaint count, order, status and actions are separated into predictable columns.</p>
+              </div>
               <button id="new-subcategory" class="btn btn-primary btn-sm" type="button">+ New subcategory</button>
-            </div>
-            <div id="subcategory-list" class="subcategory-list"></div>
+            </header>
+            <DataTable
+              id="subcategory-table"
+              pageSize={10}
+              pageSizeOptions={[10, 25, 50]}
+              emptyText="No subcategories yet. Create the first controlled option for this category."
+              ariaLabel="Subcategories"
+              class="taxonomy-subcategory-table"
+            />
           </section>
         </div>
       </section>
     </section>
 
-    <details class="master-card taxonomy-audit">
-      <summary><span><b>Recent taxonomy activity</b><small>Creates, edits, merges, activation changes and synchronization outcomes</small></span></summary>
-      <div id="taxonomy-audit-list" class="audit-list"><div class="taxonomy-empty">Open to load recent activity.</div></div>
+    <details class="master-card crm-audit-panel taxonomy-audit">
+      <summary>
+        <span><b>Recent taxonomy activity</b><small>Creates, edits, merges, activation changes and synchronization outcomes</small></span>
+        <span aria-hidden="true">⌄</span>
+      </summary>
+      <div id="taxonomy-audit-list" class="crm-audit-list"><div class="crm-empty-state compact">Open to load recent activity.</div></div>
     </details>
 
-    <div id="taxonomy-toast" class="taxonomy-toast" role="status" aria-live="polite" hidden></div>
+    <div id="taxonomy-toast" class="crm-toast" role="status" aria-live="polite" hidden></div>
   </main>
 
-  <dialog id="category-dialog" class="taxonomy-dialog">
-    <form method="dialog" class="taxonomy-dialog-card" id="category-form">
-      <header><div><p class="eyebrow">Complaint taxonomy</p><h2 id="category-dialog-title">New category</h2></div><button class="btn btn-sm" value="cancel" aria-label="Close">×</button></header>
-      <input id="category-id" type="hidden" />
-      <div class="form-grid">
-        <label class="wide">Category name<input id="category-name" class="input input-bordered" maxlength="140" required /></label>
-        <label>Description<textarea id="category-description" class="textarea textarea-bordered" rows="3"></textarea></label>
-        <label>Display order<input id="category-order" class="input input-bordered" type="number" min="0" max="100000" value="100" /></label>
-        <label class="wide">Reply guidance<textarea id="category-guidance" class="textarea textarea-bordered" rows="5" placeholder="Reusable instructions for drafting replies in this category"></textarea></label>
-        <label class="wide">Policy notes<textarea id="category-policy" class="textarea textarea-bordered" rows="5" placeholder="Rules, circulars, constraints and safe wording"></textarea></label>
-        <label class="form-check"><input id="category-active" class="form-check-input" type="checkbox" checked /><span class="form-check-label">Active</span></label>
-        <label class="form-check"><input id="category-ai" class="form-check-input" type="checkbox" /><span class="form-check-label">AI eligible by default after approval</span></label>
-        <label class="form-check wide"><input id="category-sync-cases" class="form-check-input" type="checkbox" checked /><span class="form-check-label">Synchronize affected linked complaints to Helpdesk now</span></label>
+  <ModalDialog
+    id="category-dialog"
+    formId="category-form"
+    title="New category"
+    eyebrow="Complaint taxonomy"
+    description="Define the category identity, reusable reply knowledge and synchronization behaviour."
+    size="lg"
+  >
+    <input id="category-id" type="hidden" />
+    <section class="crm-form-section">
+      <div class="crm-form-section-heading"><h3>Identity</h3><p>Name, description and display order used across CRM and Helpdesk.</p></div>
+      <div class="crm-form-grid two-columns">
+        <label class="crm-field wide" for="category-name"><span>Category name</span><input id="category-name" class="input input-bordered" maxlength="140" required /></label>
+        <label class="crm-field" for="category-description"><span>Description</span><textarea id="category-description" class="textarea textarea-bordered" rows="4"></textarea></label>
+        <label class="crm-field" for="category-order"><span>Display order</span><input id="category-order" class="input input-bordered" type="number" min="0" max="100000" value="100" /></label>
       </div>
-      <footer><button class="btn" value="cancel">Cancel</button><button id="save-category" class="btn btn-primary" type="button">Save category</button></footer>
-    </form>
-  </dialog>
+    </section>
 
-  <dialog id="subcategory-dialog" class="taxonomy-dialog">
-    <form method="dialog" class="taxonomy-dialog-card" id="subcategory-form">
-      <header><div><p class="eyebrow">Controlled option</p><h2 id="subcategory-dialog-title">New subcategory</h2></div><button class="btn btn-sm" value="cancel" aria-label="Close">×</button></header>
-      <input id="subcategory-id" type="hidden" />
-      <div class="form-grid">
-        <label class="wide">Parent category<select id="subcategory-category" class="select select-bordered" required></select></label>
-        <label class="wide">Subcategory name<input id="subcategory-name" class="input input-bordered" maxlength="140" required /></label>
-        <label>Description<textarea id="subcategory-description" class="textarea textarea-bordered" rows="3"></textarea></label>
-        <label>Display order<input id="subcategory-order" class="input input-bordered" type="number" min="0" max="100000" value="100" /></label>
-        <label class="wide">Reply guidance<textarea id="subcategory-guidance" class="textarea textarea-bordered" rows="5"></textarea></label>
-        <label class="wide">Policy notes<textarea id="subcategory-policy" class="textarea textarea-bordered" rows="5"></textarea></label>
-        <label class="form-check"><input id="subcategory-active" class="form-check-input" type="checkbox" checked /><span class="form-check-label">Active</span></label>
-        <label class="form-check wide"><input id="subcategory-sync-cases" class="form-check-input" type="checkbox" checked /><span class="form-check-label">Synchronize affected linked complaints to Helpdesk now</span></label>
+    <section class="crm-form-section">
+      <div class="crm-form-section-heading"><h3>Reply knowledge</h3><p>Reusable instructions shown to staff while preparing replies.</p></div>
+      <div class="crm-form-grid two-columns">
+        <label class="crm-field" for="category-guidance"><span>Reply guidance</span><textarea id="category-guidance" class="textarea textarea-bordered" rows="6" placeholder="Reusable instructions for drafting replies in this category"></textarea></label>
+        <label class="crm-field" for="category-policy"><span>Policy notes</span><textarea id="category-policy" class="textarea textarea-bordered" rows="6" placeholder="Rules, circulars, constraints and safe wording"></textarea></label>
       </div>
-      <footer><button class="btn" value="cancel">Cancel</button><button id="save-subcategory" class="btn btn-primary" type="button">Save subcategory</button></footer>
-    </form>
-  </dialog>
+    </section>
 
-  <dialog id="merge-dialog" class="taxonomy-dialog">
-    <form method="dialog" class="taxonomy-dialog-card compact" id="merge-form">
-      <header><div><p class="eyebrow">Safe consolidation</p><h2 id="merge-dialog-title">Merge category</h2></div><button class="btn btn-sm" value="cancel" aria-label="Close">×</button></header>
-      <p id="merge-explanation" class="merge-warning"></p>
-      <input id="merge-source-id" type="hidden" />
-      <input id="merge-kind" type="hidden" />
-      <label>Merge into<select id="merge-target" class="select select-bordered" required></select></label>
-      <label class="form-check"><input id="merge-sync-cases" class="form-check-input" type="checkbox" checked /><span class="form-check-label">Synchronize affected linked complaints to Helpdesk now</span></label>
-      <footer><button class="btn" value="cancel">Cancel</button><button id="confirm-merge" class="btn btn-primary" type="button">Merge records</button></footer>
-    </form>
-  </dialog>
+    <section class="crm-form-section">
+      <div class="crm-form-section-heading"><h3>Behaviour</h3><p>Control availability, AI eligibility and immediate synchronization.</p></div>
+      <div class="crm-setting-grid">
+        <CheckboxField id="category-active" label="Active" description="Available for new and updated complaint classifications." checked />
+        <CheckboxField id="category-ai" label="AI eligible by default after approval" description="Approved replies can enter the AI archive unless staff opt out." />
+        <CheckboxField id="category-sync-cases" label="Synchronize affected linked complaints to Helpdesk now" description="Write and verify the category on linked Helpdesk tickets immediately." checked wide />
+      </div>
+    </section>
 
-  <style>
-    .taxonomy-shell{display:grid;gap:1rem}.taxonomy-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.8rem}.metric-card{display:grid;gap:.2rem;border:1px solid #dbe5ec;border-radius:.85rem;background:#fff;padding:1rem}.metric-card span,.metric-card small{color:#64748b}.metric-card strong{font-size:1.65rem;color:#172033}.taxonomy-toolbar{display:flex;align-items:center;justify-content:space-between;gap:1.5rem}.taxonomy-toolbar h2,.taxonomy-panel-heading h2,.taxonomy-panel-heading h3{margin:.1rem 0}.taxonomy-toolbar p{max-width:55rem;margin:.25rem 0;color:#64748b}.taxonomy-toolbar-actions{display:flex;align-items:center;justify-content:flex-end;gap:.65rem;flex-wrap:wrap}.taxonomy-search input{min-width:18rem}.taxonomy-workspace{display:grid;grid-template-columns:minmax(17rem,.72fr) minmax(0,1.55fr);gap:1rem;align-items:start}.taxonomy-categories,.taxonomy-detail{min-height:37rem}.taxonomy-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:1rem}.category-list{display:grid;gap:.5rem;margin-top:1rem}.category-button{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.6rem;text-align:left;border:1px solid #dfe7ed;border-radius:.7rem;background:#fff;padding:.75rem;cursor:pointer}.category-button:hover,.category-button.active{border-color:#16879a;background:#effafb}.category-button.inactive{opacity:.65}.category-button strong,.category-button small{display:block}.category-button small{margin-top:.25rem;color:#64748b}.category-count{align-self:center;border-radius:999px;background:#edf2f7;padding:.25rem .5rem;font-size:.7rem;font-weight:750}.category-detail-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;border-bottom:1px solid #e3eaf0;padding-bottom:1rem}.category-title-line{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}.category-title-line h2{margin:0}.category-detail-header p{max-width:48rem;margin:.4rem 0;color:#64748b}.category-detail-actions{display:flex;justify-content:flex-end;gap:.45rem;flex-wrap:wrap}.status-pill{display:inline-flex;align-items:center;border-radius:999px;padding:.26rem .55rem;background:#edf2f7;color:#475569;font-size:.68rem;font-weight:800;text-transform:uppercase}.status-pill.synchronized,.status-pill.active{background:#e7f8f1;color:#176b57}.status-pill.failed,.status-pill.inactive{background:#fff0f1;color:#a52630}.status-pill.pending{background:#fff3dc;color:#925b05}.taxonomy-meta{display:flex;gap:.45rem;flex-wrap:wrap}.taxonomy-meta span{border-radius:999px;background:#f1f5f9;padding:.3rem .55rem;font-size:.7rem}.guidance-grid{display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin:1rem 0}.guidance-grid article{border:1px solid #e2e8f0;border-radius:.7rem;background:#f8fafc;padding:.85rem}.guidance-grid span{font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#16879a}.guidance-grid p{white-space:pre-wrap;margin:.45rem 0 0;color:#475569}.subcategory-section{margin-top:1rem}.subcategory-list{display:grid;gap:.55rem;margin-top:.8rem}.subcategory-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.7rem;align-items:center;border:1px solid #e2e8f0;border-radius:.7rem;padding:.75rem}.subcategory-row.inactive{opacity:.65}.subcategory-row strong,.subcategory-row small{display:block}.subcategory-row small{margin-top:.2rem;color:#64748b}.subcategory-actions{display:flex;gap:.35rem;flex-wrap:wrap;justify-content:flex-end}.taxonomy-empty{display:grid;place-items:center;min-height:7rem;color:#64748b;text-align:center}.taxonomy-empty-large{min-height:32rem}.taxonomy-audit summary{display:flex;cursor:pointer;list-style:none}.taxonomy-audit summary span{display:grid}.taxonomy-audit summary small{margin-top:.2rem;color:#64748b}.audit-list{display:grid;gap:.5rem;margin-top:1rem}.audit-row{display:grid;grid-template-columns:minmax(10rem,.75fr) minmax(0,1.6fr) auto;gap:.8rem;border-top:1px solid #e5eaf0;padding:.65rem 0}.audit-row small{color:#64748b}.taxonomy-dialog{width:min(52rem,calc(100vw - 2rem));border:0;border-radius:1rem;padding:0;box-shadow:0 25px 70px rgba(15,23,42,.25)}.taxonomy-dialog::backdrop{background:rgba(15,23,42,.5)}.taxonomy-dialog-card{display:grid;gap:1rem;padding:1.25rem}.taxonomy-dialog-card.compact{max-width:36rem}.taxonomy-dialog-card header,.taxonomy-dialog-card footer{display:flex;align-items:center;justify-content:space-between;gap:1rem}.taxonomy-dialog-card h2{margin:.1rem 0}.taxonomy-dialog-card footer{justify-content:flex-end;border-top:1px solid #e5eaf0;padding-top:1rem}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}.form-grid label{display:grid;gap:.35rem;font-weight:650}.form-grid .wide{grid-column:1/-1}.form-grid input,.form-grid textarea,.form-grid select{width:100%}.merge-warning{border-left:4px solid #d59b16;background:#fff8e8;padding:.8rem;color:#6f4a00}.taxonomy-toast{position:fixed;right:1rem;bottom:1rem;z-index:1000;max-width:min(28rem,calc(100vw - 2rem));border-radius:.7rem;background:#183b45;color:#fff;padding:.8rem 1rem;box-shadow:0 12px 30px rgba(15,23,42,.25)}.taxonomy-toast.error{background:#9f2530}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}@media(max-width:1050px){.taxonomy-summary{grid-template-columns:repeat(2,1fr)}.taxonomy-toolbar{align-items:flex-start;flex-direction:column}.taxonomy-toolbar-actions{justify-content:flex-start}.taxonomy-workspace{grid-template-columns:1fr}.taxonomy-categories,.taxonomy-detail{min-height:auto}.taxonomy-empty-large{min-height:12rem}}@media(max-width:650px){.taxonomy-summary,.guidance-grid,.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}.taxonomy-search,.taxonomy-search input{width:100%;min-width:0}.taxonomy-toolbar-actions{width:100%}.category-detail-header{flex-direction:column}.category-detail-actions{justify-content:flex-start}.subcategory-row,.audit-row{grid-template-columns:1fr}.subcategory-actions{justify-content:flex-start}}
-  </style>
+    <Fragment slot="footer">
+      <button class="btn" type="button" data-dialog-close>Cancel</button>
+      <button id="save-category" class="btn btn-primary" type="submit">Save category</button>
+    </Fragment>
+  </ModalDialog>
+
+  <ModalDialog
+    id="subcategory-dialog"
+    formId="subcategory-form"
+    title="New subcategory"
+    eyebrow="Controlled option"
+    description="Add a precise controlled option under an active parent category."
+    size="lg"
+  >
+    <input id="subcategory-id" type="hidden" />
+    <section class="crm-form-section">
+      <div class="crm-form-section-heading"><h3>Identity</h3><p>Parent category, name, description and display order.</p></div>
+      <div class="crm-form-grid two-columns">
+        <label class="crm-field wide" for="subcategory-category"><span>Parent category</span><select id="subcategory-category" class="select select-bordered" required></select></label>
+        <label class="crm-field wide" for="subcategory-name"><span>Subcategory name</span><input id="subcategory-name" class="input input-bordered" maxlength="140" required /></label>
+        <label class="crm-field" for="subcategory-description"><span>Description</span><textarea id="subcategory-description" class="textarea textarea-bordered" rows="4"></textarea></label>
+        <label class="crm-field" for="subcategory-order"><span>Display order</span><input id="subcategory-order" class="input input-bordered" type="number" min="0" max="100000" value="100" /></label>
+      </div>
+    </section>
+
+    <section class="crm-form-section">
+      <div class="crm-form-section-heading"><h3>Reply knowledge</h3><p>Optional wording that supplements the parent category guidance.</p></div>
+      <div class="crm-form-grid two-columns">
+        <label class="crm-field" for="subcategory-guidance"><span>Reply guidance</span><textarea id="subcategory-guidance" class="textarea textarea-bordered" rows="6"></textarea></label>
+        <label class="crm-field" for="subcategory-policy"><span>Policy notes</span><textarea id="subcategory-policy" class="textarea textarea-bordered" rows="6"></textarea></label>
+      </div>
+    </section>
+
+    <section class="crm-form-section">
+      <div class="crm-form-section-heading"><h3>Behaviour</h3><p>Control availability and linked-ticket synchronization.</p></div>
+      <div class="crm-setting-grid">
+        <CheckboxField id="subcategory-active" label="Active" description="Available under the selected parent category." checked />
+        <CheckboxField id="subcategory-sync-cases" label="Synchronize affected linked complaints to Helpdesk now" description="Write and verify the new classification immediately." checked wide />
+      </div>
+    </section>
+
+    <Fragment slot="footer">
+      <button class="btn" type="button" data-dialog-close>Cancel</button>
+      <button id="save-subcategory" class="btn btn-primary" type="submit">Save subcategory</button>
+    </Fragment>
+  </ModalDialog>
+
+  <ModalDialog
+    id="merge-dialog"
+    formId="merge-form"
+    title="Merge category"
+    eyebrow="Safe consolidation"
+    description="Move complaint references to another active record while preserving the source in audit history."
+    size="sm"
+  >
+    <input id="merge-source-id" type="hidden" />
+    <input id="merge-kind" type="hidden" />
+    <p id="merge-explanation" class="crm-warning-box"></p>
+    <label class="crm-field" for="merge-target"><span>Merge into</span><select id="merge-target" class="select select-bordered" required></select></label>
+    <CheckboxField id="merge-sync-cases" label="Synchronize affected linked complaints to Helpdesk now" checked />
+
+    <Fragment slot="footer">
+      <button class="btn" type="button" data-dialog-close>Cancel</button>
+      <button id="confirm-merge" class="btn btn-primary" type="submit">Merge records</button>
+    </Fragment>
+  </ModalDialog>
 
   <script>
-    type Category = {id:string;name:string;description:string;display_order:number;active:boolean;default_ai_eligible:boolean;reply_guidance:string;policy_notes:string;frappe_sync_status:string;frappe_last_error?:string;complaint_count:number;merged_into_id?:string|null;subcategories:Subcategory[]};
-    type Subcategory = {id:string;category_id:string;name:string;description:string;display_order:number;active:boolean;reply_guidance:string;policy_notes:string;complaint_count:number;merged_into_id?:string|null};
-    const root=document.getElementById("taxonomy-root") as HTMLElement;
-    const API=root.dataset.apiBase||"";
-    const $=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T;
-    const esc=(value:unknown)=>String(value??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
-    let categories:Category[]=[];
-    let selectedId="";
-    let auditLoaded=false;
+    import { confirmAction } from "../../../scripts/alerts";
+    import { closeDialog, openDialog, setDialogBusy, wireDialogs } from "../../../scripts/dialogs";
+    import { badge, stack } from "../../../scripts/table-cells";
 
-    async function api(path:string,init?:RequestInit){
-      const response=await fetch(`${API}${path}`,{...init,headers:{"Content-Type":"application/json",...(init?.headers||{})}});
-      const body=await response.json().catch(()=>({}));
-      if(!response.ok)throw new Error(typeof body.detail==="string"?body.detail:body.detail?.message||response.statusText);
+    type Subcategory = {
+      id: string;
+      category_id: string;
+      name: string;
+      description: string;
+      display_order: number;
+      active: boolean;
+      reply_guidance: string;
+      policy_notes: string;
+      complaint_count: number;
+      merged_into_id?: string | null;
+    };
+    type Category = {
+      id: string;
+      name: string;
+      description: string;
+      display_order: number;
+      active: boolean;
+      default_ai_eligible: boolean;
+      reply_guidance: string;
+      policy_notes: string;
+      frappe_sync_status: string;
+      frappe_last_error?: string;
+      complaint_count: number;
+      merged_into_id?: string | null;
+      subcategories: Subcategory[];
+    };
+
+    const root = document.getElementById("taxonomy-root") as HTMLElement;
+    const API = root.dataset.apiBase || "";
+    const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const esc = (value: unknown) => String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+    const subcategoryTable = $("subcategory-table") as any;
+    let categories: Category[] = [];
+    let selectedId = "";
+    let auditLoaded = false;
+
+    async function api(path: string, init?: RequestInit) {
+      const response = await fetch(`${API}${path}`, {
+        ...init,
+        headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : body.detail?.message || response.statusText);
       return body;
     }
-    function toast(message:string,error=false){const node=$("taxonomy-toast");node.textContent=message;node.className=`taxonomy-toast${error?" error":""}`;node.hidden=false;window.setTimeout(()=>node.hidden=true,4500)}
-    function selected(){return categories.find(item=>item.id===selectedId)||null}
-    function activeCategories(){return categories.filter(item=>item.active&&!item.merged_into_id)}
-    function statusClass(value:string){return ["synchronized","failed","pending"].includes(value)?value:""}
-    function filteredCategories(){
-      const query=$("taxonomy-search") as HTMLInputElement;
-      const showInactive=($("show-inactive") as HTMLInputElement).checked;
-      const term=query.value.trim().toLowerCase();
-      return categories.filter(category=>{
-        if(!showInactive&&(!category.active||category.merged_into_id))return false;
-        if(!term)return true;
-        return [category.name,category.description,category.reply_guidance,category.policy_notes,...category.subcategories.flatMap(item=>[item.name,item.description,item.reply_guidance,item.policy_notes])].join(" ").toLowerCase().includes(term);
+
+    function toast(message: string, error = false) {
+      const node = $("taxonomy-toast");
+      node.textContent = message;
+      node.className = `crm-toast${error ? " error" : ""}`;
+      node.hidden = false;
+      window.setTimeout(() => node.hidden = true, 4500);
+    }
+
+    function selected() {
+      return categories.find((item) => item.id === selectedId) || null;
+    }
+
+    function activeCategories() {
+      return categories.filter((item) => item.active && !item.merged_into_id);
+    }
+
+    function statusTone(value: string) {
+      if (["synchronized", "active"].includes(value)) return "success";
+      if (["failed", "inactive"].includes(value)) return "danger";
+      if (["pending", "not_synced"].includes(value)) return "warning";
+      return "neutral";
+    }
+
+    function filteredCategories() {
+      const term = ($("taxonomy-search") as HTMLInputElement).value.trim().toLowerCase();
+      const showInactive = ($("show-inactive") as HTMLInputElement).checked;
+      return categories.filter((category) => {
+        if (!showInactive && (!category.active || category.merged_into_id)) return false;
+        if (!term) return true;
+        return [
+          category.name,
+          category.description,
+          category.reply_guidance,
+          category.policy_notes,
+          ...category.subcategories.flatMap((item) => [item.name, item.description, item.reply_guidance, item.policy_notes]),
+        ].join(" ").toLowerCase().includes(term);
       });
     }
-    function renderMetrics(stats:any){
-      $("metric-categories").textContent=String(stats.categories??0);$("metric-active-categories").textContent=`${stats.active_categories??0} active`;
-      $("metric-subcategories").textContent=String(stats.subcategories??0);$("metric-active-subcategories").textContent=`${stats.active_subcategories??0} active`;
-      $("metric-classified").textContent=String(stats.classified_cases??0);$("metric-unclassified").textContent=`${stats.unclassified_cases??0} unclassified`;
-      const sync=stats.sync_statuses||{};$("metric-synced").textContent=String(sync.synchronized??0);$("metric-sync-errors").textContent=`${sync.failed??0} errors`;
-    }
-    function renderCategories(){
-      const items=filteredCategories();
-      $("category-list").innerHTML=items.length?items.map(category=>`<button type="button" class="category-button ${category.id===selectedId?"active":""} ${!category.active||category.merged_into_id?"inactive":""}" data-category-id="${category.id}"><span><strong>${esc(category.name)}</strong><small>${category.subcategories.length} subcategories · ${category.complaint_count} complaints</small></span><span class="category-count">${category.frappe_sync_status==="failed"?"Sync error":category.active?"Active":"Inactive"}</span></button>`).join(""):`<div class="taxonomy-empty">No categories match the current filters.</div>`;
-      document.querySelectorAll<HTMLElement>("[data-category-id]").forEach(button=>button.addEventListener("click",()=>{selectedId=button.dataset.categoryId||"";renderCategories();renderDetail()}));
-    }
-    function renderDetail(){
-      const category=selected();
-      $("category-empty").hidden=Boolean(category);$("category-detail").hidden=!category;
-      if(!category)return;
-      $("detail-name").textContent=category.name;
-      const status=$("detail-status");status.textContent=category.active?(category.frappe_sync_status==="synchronized"?"Synchronized":category.frappe_sync_status):"Inactive";status.className=`status-pill ${category.active?statusClass(category.frappe_sync_status):"inactive"}`;
-      $("detail-description").textContent=category.description||"No description provided.";
-      $("detail-meta").innerHTML=`<span>Order ${category.display_order}</span><span>${category.complaint_count} complaints</span><span>${category.subcategories.length} subcategories</span><span>AI default: ${category.default_ai_eligible?"Yes":"No"}</span>${category.frappe_last_error?`<span>Sync error: ${esc(category.frappe_last_error)}</span>`:""}`;
-      $("detail-guidance").textContent=category.reply_guidance||"No category-level reply guidance.";$("detail-policy").textContent=category.policy_notes||"No category-level policy notes.";
-      $("toggle-category").textContent=category.active?"Deactivate":"Reactivate";($("toggle-category") as HTMLButtonElement).disabled=Boolean(category.merged_into_id);
-      ($("edit-category") as HTMLButtonElement).disabled=Boolean(category.merged_into_id);($("merge-category") as HTMLButtonElement).disabled=Boolean(category.merged_into_id||!category.active);($("new-subcategory") as HTMLButtonElement).disabled=!category.active||Boolean(category.merged_into_id);
-      const showInactive=($("show-inactive") as HTMLInputElement).checked;
-      const subcategories=category.subcategories.filter(item=>showInactive||item.active);
-      $("subcategory-list").innerHTML=subcategories.length?subcategories.map(item=>`<article class="subcategory-row ${!item.active||item.merged_into_id?"inactive":""}"><div><strong>${esc(item.name)}</strong><small>${esc(item.description||"No description")} · ${item.complaint_count} complaints · order ${item.display_order}</small></div><div class="subcategory-actions"><button class="btn btn-xs" data-sub-edit="${item.id}" ${item.merged_into_id?"disabled":""}>Edit</button><button class="btn btn-xs" data-sub-toggle="${item.id}" ${item.merged_into_id?"disabled":""}>${item.active?"Deactivate":"Reactivate"}</button><button class="btn btn-xs" data-sub-merge="${item.id}" ${item.merged_into_id||!item.active?"disabled":""}>Merge</button></div></article>`).join(""):`<div class="taxonomy-empty">No subcategories yet. Create the first controlled option for this category.</div>`;
-      document.querySelectorAll<HTMLElement>("[data-sub-edit]").forEach(button=>button.addEventListener("click",()=>openSubcategory(button.dataset.subEdit||"")));
-      document.querySelectorAll<HTMLElement>("[data-sub-toggle]").forEach(button=>button.addEventListener("click",()=>toggleSubcategory(button.dataset.subToggle||"")));
-      document.querySelectorAll<HTMLElement>("[data-sub-merge]").forEach(button=>button.addEventListener("click",()=>openMerge("subcategory",button.dataset.subMerge||"")));
-    }
-    function populateCategoryOptions(select:HTMLSelectElement,selectedValue=""){select.innerHTML=activeCategories().map(item=>`<option value="${item.id}" ${item.id===selectedValue?"selected":""}>${esc(item.name)}</option>`).join("")}
-    async function load(preserve=true){
-      try{const data=await api("/api/v1/crm/taxonomy?include_inactive=true");categories=data.categories||[];renderMetrics(data.statistics||{});if(!preserve||!categories.some(item=>item.id===selectedId))selectedId=categories.find(item=>item.active&&!item.merged_into_id)?.id||categories[0]?.id||"";renderCategories();renderDetail()}catch(error){toast(error instanceof Error?error.message:String(error),true)}
-    }
-    function categoryPayload(){return{name:($("category-name") as HTMLInputElement).value.trim(),description:($("category-description") as HTMLTextAreaElement).value,display_order:Number(($("category-order") as HTMLInputElement).value||100),active:($("category-active") as HTMLInputElement).checked,default_ai_eligible:($("category-ai") as HTMLInputElement).checked,reply_guidance:($("category-guidance") as HTMLTextAreaElement).value,policy_notes:($("category-policy") as HTMLTextAreaElement).value,synchronize_cases:($("category-sync-cases") as HTMLInputElement).checked}}
-    function openCategory(id=""){
-      const category=categories.find(item=>item.id===id);$("category-dialog-title").textContent=category?"Edit category":"New category";($("category-id") as HTMLInputElement).value=category?.id||"";($("category-name") as HTMLInputElement).value=category?.name||"";($("category-description") as HTMLTextAreaElement).value=category?.description||"";($("category-order") as HTMLInputElement).value=String(category?.display_order??100);($("category-active") as HTMLInputElement).checked=category?.active??true;($("category-ai") as HTMLInputElement).checked=category?.default_ai_eligible??false;($("category-guidance") as HTMLTextAreaElement).value=category?.reply_guidance||"";($("category-policy") as HTMLTextAreaElement).value=category?.policy_notes||"";($("category-sync-cases") as HTMLInputElement).checked=true;($("category-dialog") as HTMLDialogElement).showModal();
-    }
-    async function saveCategory(){
-      const button=$("save-category") as HTMLButtonElement,id=($("category-id") as HTMLInputElement).value;button.disabled=true;button.textContent="Saving…";
-      try{const data=await api(id?`/api/v1/crm/taxonomy/categories/${id}`:"/api/v1/crm/taxonomy/categories",{method:id?"PUT":"POST",body:JSON.stringify(categoryPayload())});selectedId=data.entity?.id||id;($("category-dialog") as HTMLDialogElement).close();toast(`Category ${id?"updated":"created"}. ${data.frappe_category_sync?.status==="failed"?"Helpdesk synchronization needs attention.":"Helpdesk synchronization checked."}`);await load()}catch(error){toast(error instanceof Error?error.message:String(error),true)}finally{button.disabled=false;button.textContent="Save category"}
-    }
-    function findSubcategory(id:string){for(const category of categories){const item=category.subcategories.find(row=>row.id===id);if(item)return{category,item}}return null}
-    function openSubcategory(id=""){
-      const found=findSubcategory(id),category=found?.category||selected();if(!category)return;$("subcategory-dialog-title").textContent=found?"Edit subcategory":"New subcategory";($("subcategory-id") as HTMLInputElement).value=found?.item.id||"";populateCategoryOptions($("subcategory-category") as HTMLSelectElement,found?.item.category_id||category.id);($("subcategory-name") as HTMLInputElement).value=found?.item.name||"";($("subcategory-description") as HTMLTextAreaElement).value=found?.item.description||"";($("subcategory-order") as HTMLInputElement).value=String(found?.item.display_order??100);($("subcategory-active") as HTMLInputElement).checked=found?.item.active??true;($("subcategory-guidance") as HTMLTextAreaElement).value=found?.item.reply_guidance||"";($("subcategory-policy") as HTMLTextAreaElement).value=found?.item.policy_notes||"";($("subcategory-sync-cases") as HTMLInputElement).checked=true;($("subcategory-dialog") as HTMLDialogElement).showModal();
-    }
-    function subcategoryPayload(){return{category_id:($("subcategory-category") as HTMLSelectElement).value,name:($("subcategory-name") as HTMLInputElement).value.trim(),description:($("subcategory-description") as HTMLTextAreaElement).value,display_order:Number(($("subcategory-order") as HTMLInputElement).value||100),active:($("subcategory-active") as HTMLInputElement).checked,reply_guidance:($("subcategory-guidance") as HTMLTextAreaElement).value,policy_notes:($("subcategory-policy") as HTMLTextAreaElement).value,synchronize_cases:($("subcategory-sync-cases") as HTMLInputElement).checked}}
-    async function saveSubcategory(){const button=$("save-subcategory") as HTMLButtonElement,id=($("subcategory-id") as HTMLInputElement).value;button.disabled=true;button.textContent="Saving…";try{await api(id?`/api/v1/crm/taxonomy/subcategories/${id}`:"/api/v1/crm/taxonomy/subcategories",{method:id?"PUT":"POST",body:JSON.stringify(subcategoryPayload())});($("subcategory-dialog") as HTMLDialogElement).close();toast(`Subcategory ${id?"updated":"created"}.`);await load()}catch(error){toast(error instanceof Error?error.message:String(error),true)}finally{button.disabled=false;button.textContent="Save subcategory"}}
-    async function toggleCategory(){const category=selected();if(!category)return;if(!confirm(`${category.active?"Deactivate":"Reactivate"} ${category.name}? Existing complaint history will be preserved.`))return;try{await api(`/api/v1/crm/taxonomy/categories/${category.id}/active`,{method:"PATCH",body:JSON.stringify({active:!category.active,synchronize_cases:true})});toast(`Category ${category.active?"deactivated":"reactivated"}.`);await load()}catch(error){toast(error instanceof Error?error.message:String(error),true)}}
-    async function toggleSubcategory(id:string){const found=findSubcategory(id);if(!found)return;if(!confirm(`${found.item.active?"Deactivate":"Reactivate"} ${found.item.name}?`))return;try{await api(`/api/v1/crm/taxonomy/subcategories/${id}/active`,{method:"PATCH",body:JSON.stringify({active:!found.item.active,synchronize_cases:true})});toast(`Subcategory ${found.item.active?"deactivated":"reactivated"}.`);await load()}catch(error){toast(error instanceof Error?error.message:String(error),true)}}
-    async function syncCategory(){const category=selected();if(!category)return;const button=$("sync-category") as HTMLButtonElement;button.disabled=true;button.textContent="Synchronizing…";try{const result=await api(`/api/v1/crm/taxonomy/categories/${category.id}/sync`,{method:"POST"});toast(result.status==="failed"?result.error:`${category.name} synchronized with Helpdesk.`,result.status==="failed");await load()}catch(error){toast(error instanceof Error?error.message:String(error),true)}finally{button.disabled=false;button.textContent="Sync to Helpdesk"}}
-    function openMerge(kind:"category"|"subcategory",sourceId:string){
-      const category=selected();if(!category)return;($("merge-kind") as HTMLInputElement).value=kind;($("merge-source-id") as HTMLInputElement).value=sourceId;($("merge-sync-cases") as HTMLInputElement).checked=true;
-      const select=$("merge-target") as HTMLSelectElement;
-      if(kind==="category"){
-        const source=categories.find(item=>item.id===sourceId);$("merge-dialog-title").textContent="Merge category";$("merge-explanation").textContent=`All complaints and compatible subcategories from “${source?.name}” will move to the selected active category. The source remains in audit history as inactive.`;select.innerHTML=activeCategories().filter(item=>item.id!==sourceId).map(item=>`<option value="${item.id}">${esc(item.name)}</option>`).join("");
-      }else{
-        const found=findSubcategory(sourceId);$("merge-dialog-title").textContent="Merge subcategory";$("merge-explanation").textContent=`All complaints using “${found?.item.name}” will move to the selected active subcategory. Cross-category merging is supported and will update the parent category.`;select.innerHTML=categories.flatMap(item=>item.subcategories.filter(sub=>sub.active&&!sub.merged_into_id&&sub.id!==sourceId).map(sub=>`<option value="${sub.id}">${esc(item.name)} → ${esc(sub.name)}</option>`)).join("");
-      }
-      if(!select.options.length){toast("Create another active target before merging.",true);return}($("merge-dialog") as HTMLDialogElement).showModal();
-    }
-    async function confirmMerge(){const kind=($("merge-kind") as HTMLInputElement).value,source=($("merge-source-id") as HTMLInputElement).value,target=($("merge-target") as HTMLSelectElement).value,button=$("confirm-merge") as HTMLButtonElement;if(!source||!target)return;button.disabled=true;button.textContent="Merging…";try{await api(`/api/v1/crm/taxonomy/${kind==="category"?"categories":"subcategories"}/${source}/merge`,{method:"POST",body:JSON.stringify({target_id:target,synchronize_cases:($("merge-sync-cases") as HTMLInputElement).checked})});selectedId=kind==="category"?target:selectedId;($("merge-dialog") as HTMLDialogElement).close();toast("Merge completed and complaint references were preserved.");await load()}catch(error){toast(error instanceof Error?error.message:String(error),true)}finally{button.disabled=false;button.textContent="Merge records"}}
-    async function loadAudit(){if(auditLoaded)return;auditLoaded=true;try{const data=await api("/api/v1/crm/taxonomy/audit?limit=100");$("taxonomy-audit-list").innerHTML=(data.items||[]).map((item:any)=>`<article class="audit-row"><div><strong>${esc(item.event_type.replaceAll("_"," "))}</strong><small>${esc(item.entity_type)}</small></div><div><span>${esc(item.actor)}</span>${item.error?`<small>${esc(item.error)}</small>`:""}</div><small>${new Date(item.created_at).toLocaleString()}</small></article>`).join("")||`<div class="taxonomy-empty">No taxonomy activity yet.</div>`}catch(error){$("taxonomy-audit-list").innerHTML=`<div class="taxonomy-empty">${esc(error instanceof Error?error.message:String(error))}</div>`}}
 
-    $("new-category").addEventListener("click",()=>openCategory());$("edit-category").addEventListener("click",()=>openCategory(selectedId));$("save-category").addEventListener("click",saveCategory);$("new-subcategory").addEventListener("click",()=>openSubcategory());$("save-subcategory").addEventListener("click",saveSubcategory);$("refresh-taxonomy").addEventListener("click",()=>load());$("toggle-category").addEventListener("click",toggleCategory);$("sync-category").addEventListener("click",syncCategory);$("merge-category").addEventListener("click",()=>openMerge("category",selectedId));$("confirm-merge").addEventListener("click",confirmMerge);$("taxonomy-search").addEventListener("input",()=>{renderCategories();renderDetail()});$("show-inactive").addEventListener("change",()=>{renderCategories();renderDetail()});document.querySelector(".taxonomy-audit")?.addEventListener("toggle",event=>{if((event.currentTarget as HTMLDetailsElement).open)void loadAudit()});
-    void load(false);
+    function renderMetrics(stats: any) {
+      $("metric-categories").textContent = String(stats.categories ?? 0);
+      $("metric-active-categories").textContent = `${stats.active_categories ?? 0} active`;
+      $("metric-subcategories").textContent = String(stats.subcategories ?? 0);
+      $("metric-active-subcategories").textContent = `${stats.active_subcategories ?? 0} active`;
+      $("metric-classified").textContent = String(stats.classified_cases ?? 0);
+      $("metric-unclassified").textContent = `${stats.unclassified_cases ?? 0} unclassified`;
+      const sync = stats.sync_statuses || {};
+      $("metric-synced").textContent = String(sync.synchronized ?? 0);
+      $("metric-sync-errors").textContent = `${sync.failed ?? 0} errors`;
+    }
+
+    function renderCategories() {
+      const items = filteredCategories();
+      $("category-visible-count").textContent = String(items.length);
+      $("category-list").innerHTML = items.length
+        ? items.map((category) => {
+          const inactive = !category.active || Boolean(category.merged_into_id);
+          const label = category.merged_into_id ? "Merged" : category.active ? "Active" : "Inactive";
+          return `<button type="button" class="taxonomy-tree-item ${category.id === selectedId ? "active" : ""} ${inactive ? "inactive" : ""}" data-category-id="${category.id}">
+            <span class="taxonomy-tree-copy">
+              <strong>${esc(category.name)}</strong>
+              <span>${category.subcategories.length} subcategories · ${category.complaint_count} complaints</span>
+            </span>
+            <span class="taxonomy-tree-state">
+              <span class="crm-status-badge ${statusTone(inactive ? "inactive" : category.frappe_sync_status)}">${esc(label)}</span>
+              ${category.frappe_sync_status === "failed" ? '<span class="taxonomy-sync-warning">Sync issue</span>' : ""}
+            </span>
+          </button>`;
+        }).join("")
+        : '<div class="crm-empty-state compact">No categories match the current filters.</div>';
+      document.querySelectorAll<HTMLElement>("[data-category-id]").forEach((button) => button.addEventListener("click", () => {
+        selectedId = button.dataset.categoryId || "";
+        renderCategories();
+        renderDetail();
+      }));
+    }
+
+    function rowActionMenu(item: Subcategory): HTMLElement {
+      const container = document.createElement("div");
+      container.className = "taxonomy-row-actions";
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "table-action";
+      edit.textContent = "Edit";
+      edit.disabled = Boolean(item.merged_into_id);
+      edit.addEventListener("click", () => openSubcategory(item.id));
+      container.append(edit);
+
+      const details = document.createElement("details");
+      details.className = "crm-inline-menu";
+      const summary = document.createElement("summary");
+      summary.className = "table-action";
+      summary.textContent = "More";
+      const menu = document.createElement("div");
+      menu.className = "crm-inline-menu-popover";
+
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.textContent = item.active ? "Deactivate" : "Reactivate";
+      toggle.disabled = Boolean(item.merged_into_id);
+      toggle.addEventListener("click", () => void toggleSubcategory(item.id));
+
+      const merge = document.createElement("button");
+      merge.type = "button";
+      merge.textContent = "Merge";
+      merge.disabled = Boolean(item.merged_into_id || !item.active);
+      merge.addEventListener("click", () => openMerge("subcategory", item.id));
+
+      menu.append(toggle, merge);
+      details.append(summary, menu);
+      container.append(details);
+      return container;
+    }
+
+    async function configureSubcategoryTable() {
+      await subcategoryTable.configure({
+        data: [],
+        getRowId: (row: Subcategory) => row.id,
+        rowClassName: (row: Subcategory) => !row.active || row.merged_into_id ? "is-inactive" : "",
+        columns: [
+          {
+            accessorKey: "name",
+            header: "Subcategory",
+            enableSorting: true,
+            meta: { minWidth: "250px" },
+            cell: ({ row }: any) => stack(row.original.name, row.original.description || "No description"),
+          },
+          {
+            accessorKey: "complaint_count",
+            header: "Complaints",
+            meta: { width: "100px", align: "right", className: "numeric-cell", headerClassName: "numeric-cell" },
+          },
+          {
+            accessorKey: "display_order",
+            header: "Order",
+            meta: { width: "80px", align: "right", className: "numeric-cell", headerClassName: "numeric-cell" },
+          },
+          {
+            id: "status",
+            header: "Status",
+            enableSorting: false,
+            meta: { width: "115px" },
+            cell: ({ row }: any) => badge(row.original.merged_into_id ? "Merged" : row.original.active ? "Active" : "Inactive", row.original.active && !row.original.merged_into_id ? "" : "inactive"),
+          },
+          {
+            id: "actions",
+            header: "",
+            enableSorting: false,
+            meta: { width: "130px", align: "right" },
+            cell: ({ row }: any) => rowActionMenu(row.original),
+          },
+        ],
+      });
+    }
+
+    function renderDetail() {
+      const category = selected();
+      $("category-empty").hidden = Boolean(category);
+      $("category-detail").hidden = !category;
+      if (!category) {
+        void subcategoryTable.setData([]);
+        return;
+      }
+
+      $("detail-name").textContent = category.name;
+      const status = $("detail-status");
+      const statusValue = category.active
+        ? category.frappe_sync_status === "synchronized" ? "Synchronized" : category.frappe_sync_status || "Active"
+        : "Inactive";
+      status.textContent = statusValue;
+      status.className = `crm-status-badge ${statusTone(category.active ? category.frappe_sync_status : "inactive")}`;
+      $("detail-description").textContent = category.description || "No description provided.";
+      $("detail-meta").innerHTML = `
+        <span>Order ${category.display_order}</span>
+        <span>${category.complaint_count} complaints</span>
+        <span>${category.subcategories.length} subcategories</span>
+        <span>AI default: ${category.default_ai_eligible ? "Yes" : "No"}</span>
+        ${category.frappe_last_error ? `<span class="danger">Sync error: ${esc(category.frappe_last_error)}</span>` : ""}`;
+      $("detail-guidance").textContent = category.reply_guidance || "No category-level reply guidance.";
+      $("detail-policy").textContent = category.policy_notes || "No category-level policy notes.";
+
+      $("toggle-category").textContent = category.active ? "Deactivate" : "Reactivate";
+      ($("toggle-category") as HTMLButtonElement).disabled = Boolean(category.merged_into_id);
+      ($("edit-category") as HTMLButtonElement).disabled = Boolean(category.merged_into_id);
+      ($("merge-category") as HTMLButtonElement).disabled = Boolean(category.merged_into_id || !category.active);
+      ($("new-subcategory") as HTMLButtonElement).disabled = !category.active || Boolean(category.merged_into_id);
+      ($("sync-category") as HTMLButtonElement).disabled = Boolean(category.merged_into_id);
+
+      const showInactive = ($("show-inactive") as HTMLInputElement).checked;
+      const subcategories = category.subcategories.filter((item) => showInactive || item.active);
+      void subcategoryTable.setData(subcategories);
+    }
+
+    function populateCategoryOptions(select: HTMLSelectElement, selectedValue = "") {
+      select.innerHTML = activeCategories().map((item) => `<option value="${item.id}" ${item.id === selectedValue ? "selected" : ""}>${esc(item.name)}</option>`).join("");
+    }
+
+    async function load(preserve = true) {
+      try {
+        const data = await api("/api/v1/crm/taxonomy?include_inactive=true");
+        categories = data.categories || [];
+        renderMetrics(data.statistics || {});
+        if (!preserve || !categories.some((item) => item.id === selectedId)) {
+          selectedId = categories.find((item) => item.active && !item.merged_into_id)?.id || categories[0]?.id || "";
+        }
+        renderCategories();
+        renderDetail();
+      } catch (error) {
+        toast(error instanceof Error ? error.message : String(error), true);
+      }
+    }
+
+    function categoryPayload() {
+      return {
+        name: ($("category-name") as HTMLInputElement).value.trim(),
+        description: ($("category-description") as HTMLTextAreaElement).value,
+        display_order: Number(($("category-order") as HTMLInputElement).value || 100),
+        active: ($("category-active") as HTMLInputElement).checked,
+        default_ai_eligible: ($("category-ai") as HTMLInputElement).checked,
+        reply_guidance: ($("category-guidance") as HTMLTextAreaElement).value,
+        policy_notes: ($("category-policy") as HTMLTextAreaElement).value,
+        synchronize_cases: ($("category-sync-cases") as HTMLInputElement).checked,
+      };
+    }
+
+    function openCategory(id = "") {
+      const category = categories.find((item) => item.id === id);
+      $("category-dialog-title").textContent = category ? "Edit category" : "New category";
+      ($("category-id") as HTMLInputElement).value = category?.id || "";
+      ($("category-name") as HTMLInputElement).value = category?.name || "";
+      ($("category-description") as HTMLTextAreaElement).value = category?.description || "";
+      ($("category-order") as HTMLInputElement).value = String(category?.display_order ?? 100);
+      ($("category-active") as HTMLInputElement).checked = category?.active ?? true;
+      ($("category-ai") as HTMLInputElement).checked = category?.default_ai_eligible ?? false;
+      ($("category-guidance") as HTMLTextAreaElement).value = category?.reply_guidance || "";
+      ($("category-policy") as HTMLTextAreaElement).value = category?.policy_notes || "";
+      ($("category-sync-cases") as HTMLInputElement).checked = true;
+      openDialog("category-dialog");
+    }
+
+    async function saveCategory() {
+      const button = $("save-category") as HTMLButtonElement;
+      const id = ($("category-id") as HTMLInputElement).value;
+      button.disabled = true;
+      button.textContent = "Saving…";
+      setDialogBusy("category-dialog", true);
+      try {
+        const result = await api(id ? `/api/v1/crm/taxonomy/categories/${id}` : "/api/v1/crm/taxonomy/categories", {
+          method: id ? "PUT" : "POST",
+          body: JSON.stringify(categoryPayload()),
+        });
+        selectedId = result.entity?.id || id;
+        closeDialog("category-dialog", "saved");
+        toast(`Category ${id ? "updated" : "created"}. ${result.frappe_category_sync?.status === "failed" ? "Helpdesk synchronization needs attention." : "Helpdesk synchronization checked."}`);
+        await load();
+      } catch (error) {
+        toast(error instanceof Error ? error.message : String(error), true);
+      } finally {
+        setDialogBusy("category-dialog", false);
+        button.disabled = false;
+        button.textContent = "Save category";
+      }
+    }
+
+    function findSubcategory(id: string) {
+      for (const category of categories) {
+        const item = category.subcategories.find((row) => row.id === id);
+        if (item) return { category, item };
+      }
+      return null;
+    }
+
+    function openSubcategory(id = "") {
+      const found = findSubcategory(id);
+      const category = found?.category || selected();
+      if (!category) return;
+      $("subcategory-dialog-title").textContent = found ? "Edit subcategory" : "New subcategory";
+      ($("subcategory-id") as HTMLInputElement).value = found?.item.id || "";
+      populateCategoryOptions($("subcategory-category") as HTMLSelectElement, found?.item.category_id || category.id);
+      ($("subcategory-name") as HTMLInputElement).value = found?.item.name || "";
+      ($("subcategory-description") as HTMLTextAreaElement).value = found?.item.description || "";
+      ($("subcategory-order") as HTMLInputElement).value = String(found?.item.display_order ?? 100);
+      ($("subcategory-active") as HTMLInputElement).checked = found?.item.active ?? true;
+      ($("subcategory-guidance") as HTMLTextAreaElement).value = found?.item.reply_guidance || "";
+      ($("subcategory-policy") as HTMLTextAreaElement).value = found?.item.policy_notes || "";
+      ($("subcategory-sync-cases") as HTMLInputElement).checked = true;
+      openDialog("subcategory-dialog");
+    }
+
+    function subcategoryPayload() {
+      return {
+        category_id: ($("subcategory-category") as HTMLSelectElement).value,
+        name: ($("subcategory-name") as HTMLInputElement).value.trim(),
+        description: ($("subcategory-description") as HTMLTextAreaElement).value,
+        display_order: Number(($("subcategory-order") as HTMLInputElement).value || 100),
+        active: ($("subcategory-active") as HTMLInputElement).checked,
+        reply_guidance: ($("subcategory-guidance") as HTMLTextAreaElement).value,
+        policy_notes: ($("subcategory-policy") as HTMLTextAreaElement).value,
+        synchronize_cases: ($("subcategory-sync-cases") as HTMLInputElement).checked,
+      };
+    }
+
+    async function saveSubcategory() {
+      const button = $("save-subcategory") as HTMLButtonElement;
+      const id = ($("subcategory-id") as HTMLInputElement).value;
+      button.disabled = true;
+      button.textContent = "Saving…";
+      setDialogBusy("subcategory-dialog", true);
+      try {
+        await api(id ? `/api/v1/crm/taxonomy/subcategories/${id}` : "/api/v1/crm/taxonomy/subcategories", {
+          method: id ? "PUT" : "POST",
+          body: JSON.stringify(subcategoryPayload()),
+        });
+        closeDialog("subcategory-dialog", "saved");
+        toast(`Subcategory ${id ? "updated" : "created"}.`);
+        await load();
+      } catch (error) {
+        toast(error instanceof Error ? error.message : String(error), true);
+      } finally {
+        setDialogBusy("subcategory-dialog", false);
+        button.disabled = false;
+        button.textContent = "Save subcategory";
+      }
+    }
+
+    async function toggleCategory() {
+      const category = selected();
+      if (!category) return;
+      const action = category.active ? "Deactivate" : "Reactivate";
+      if (!await confirmAction(`${action} ${category.name}?`, "Complaint history is preserved. Linked complaints can be synchronized with the new state.", action)) return;
+      try {
+        await api(`/api/v1/crm/taxonomy/categories/${category.id}/active`, {
+          method: "PATCH",
+          body: JSON.stringify({ active: !category.active, synchronize_cases: true }),
+        });
+        toast(`Category ${category.active ? "deactivated" : "reactivated"}.`);
+        await load();
+      } catch (error) {
+        toast(error instanceof Error ? error.message : String(error), true);
+      }
+    }
+
+    async function toggleSubcategory(id: string) {
+      const found = findSubcategory(id);
+      if (!found) return;
+      const action = found.item.active ? "Deactivate" : "Reactivate";
+      if (!await confirmAction(`${action} ${found.item.name}?`, "Complaint history remains available and no record is hard-deleted.", action)) return;
+      try {
+        await api(`/api/v1/crm/taxonomy/subcategories/${id}/active`, {
+          method: "PATCH",
+          body: JSON.stringify({ active: !found.item.active, synchronize_cases: true }),
+        });
+        toast(`Subcategory ${found.item.active ? "deactivated" : "reactivated"}.`);
+        await load();
+      } catch (error) {
+        toast(error instanceof Error ? error.message : String(error), true);
+      }
+    }
+
+    async function syncCategory() {
+      const category = selected();
+      if (!category) return;
+      const button = $("sync-category") as HTMLButtonElement;
+      button.disabled = true;
+      button.textContent = "Synchronizing…";
+      try {
+        const result = await api(`/api/v1/crm/taxonomy/categories/${category.id}/sync`, { method: "POST" });
+        toast(result.status === "failed" ? result.error : `${category.name} synchronized with Helpdesk.`, result.status === "failed");
+        await load();
+      } catch (error) {
+        toast(error instanceof Error ? error.message : String(error), true);
+      } finally {
+        button.disabled = false;
+        button.textContent = "Sync to Helpdesk";
+        ($("category-action-menu") as HTMLDetailsElement).open = false;
+      }
+    }
+
+    function openMerge(kind: "category" | "subcategory", sourceId: string) {
+      const category = selected();
+      if (!category) return;
+      ($("merge-kind") as HTMLInputElement).value = kind;
+      ($("merge-source-id") as HTMLInputElement).value = sourceId;
+      ($("merge-sync-cases") as HTMLInputElement).checked = true;
+      const select = $("merge-target") as HTMLSelectElement;
+
+      if (kind === "category") {
+        const source = categories.find((item) => item.id === sourceId);
+        $("merge-dialog-title").textContent = "Merge category";
+        $("merge-explanation").textContent = `All complaints and compatible subcategories from “${source?.name}” will move to the selected active category. The source remains in audit history as inactive.`;
+        select.innerHTML = activeCategories().filter((item) => item.id !== sourceId).map((item) => `<option value="${item.id}">${esc(item.name)}</option>`).join("");
+      } else {
+        const found = findSubcategory(sourceId);
+        $("merge-dialog-title").textContent = "Merge subcategory";
+        $("merge-explanation").textContent = `All complaints using “${found?.item.name}” will move to the selected active subcategory. Cross-category merging updates the parent category safely.`;
+        select.innerHTML = categories.flatMap((item) => item.subcategories
+          .filter((sub) => sub.active && !sub.merged_into_id && sub.id !== sourceId)
+          .map((sub) => `<option value="${sub.id}">${esc(item.name)} → ${esc(sub.name)}</option>`)).join("");
+      }
+
+      if (!select.options.length) {
+        toast("Create another active target before merging.", true);
+        return;
+      }
+      ($("category-action-menu") as HTMLDetailsElement).open = false;
+      openDialog("merge-dialog");
+    }
+
+    async function confirmMerge() {
+      const kind = ($("merge-kind") as HTMLInputElement).value;
+      const source = ($("merge-source-id") as HTMLInputElement).value;
+      const target = ($("merge-target") as HTMLSelectElement).value;
+      const button = $("confirm-merge") as HTMLButtonElement;
+      if (!source || !target) return;
+      button.disabled = true;
+      button.textContent = "Merging…";
+      setDialogBusy("merge-dialog", true);
+      try {
+        await api(`/api/v1/crm/taxonomy/${kind === "category" ? "categories" : "subcategories"}/${source}/merge`, {
+          method: "POST",
+          body: JSON.stringify({ target_id: target, synchronize_cases: ($("merge-sync-cases") as HTMLInputElement).checked }),
+        });
+        selectedId = kind === "category" ? target : selectedId;
+        closeDialog("merge-dialog", "merged");
+        toast("Merge completed and complaint references were preserved.");
+        await load();
+      } catch (error) {
+        toast(error instanceof Error ? error.message : String(error), true);
+      } finally {
+        setDialogBusy("merge-dialog", false);
+        button.disabled = false;
+        button.textContent = "Merge records";
+      }
+    }
+
+    async function loadAudit() {
+      if (auditLoaded) return;
+      auditLoaded = true;
+      try {
+        const data = await api("/api/v1/crm/taxonomy/audit?limit=100");
+        $("taxonomy-audit-list").innerHTML = (data.items || []).map((item: any) => `<article class="crm-audit-row"><div><strong>${esc(item.event_type.replaceAll("_", " "))}</strong><small>${esc(item.entity_type)}</small></div><div><span>${esc(item.actor)}</span>${item.error ? `<small class="danger">${esc(item.error)}</small>` : ""}</div><small>${new Date(item.created_at).toLocaleString()}</small></article>`).join("") || '<div class="crm-empty-state compact">No taxonomy activity yet.</div>';
+      } catch (error) {
+        $("taxonomy-audit-list").innerHTML = `<div class="crm-empty-state compact">${esc(error instanceof Error ? error.message : String(error))}</div>`;
+      }
+    }
+
+    wireDialogs();
+    $("category-form").addEventListener("submit", (event) => { event.preventDefault(); void saveCategory(); });
+    $("subcategory-form").addEventListener("submit", (event) => { event.preventDefault(); void saveSubcategory(); });
+    $("merge-form").addEventListener("submit", (event) => { event.preventDefault(); void confirmMerge(); });
+    $("new-category").addEventListener("click", () => openCategory());
+    $("edit-category").addEventListener("click", () => openCategory(selectedId));
+    $("new-subcategory").addEventListener("click", () => openSubcategory());
+    $("refresh-taxonomy").addEventListener("click", () => void load());
+    $("toggle-category").addEventListener("click", () => void toggleCategory());
+    $("sync-category").addEventListener("click", () => void syncCategory());
+    $("merge-category").addEventListener("click", () => openMerge("category", selectedId));
+    $("taxonomy-search").addEventListener("input", () => { renderCategories(); renderDetail(); });
+    $("show-inactive").addEventListener("change", () => { renderCategories(); renderDetail(); });
+    document.querySelector(".taxonomy-audit")?.addEventListener("toggle", (event) => {
+      if ((event.currentTarget as HTMLDetailsElement).open) void loadAudit();
+    });
+
+    void (async () => {
+      await configureSubcategoryTable();
+      await load(false);
+    })();
   </script>
 </CrmLayout>

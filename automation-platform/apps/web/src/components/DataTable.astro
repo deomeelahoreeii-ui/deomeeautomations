@@ -3,25 +3,47 @@ interface Props {
   id: string;
   emptyText?: string;
   pageSize?: number;
+  pageSizeOptions?: number[];
+  class?: string;
+  ariaLabel?: string;
 }
 
-const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
+const {
+  id,
+  emptyText = "No records found.",
+  pageSize = 10,
+  pageSizeOptions = [],
+  class: className = "",
+  ariaLabel = "Data table",
+} = Astro.props;
 ---
 
-<astro-data-table id={id} data-empty-text={emptyText} data-page-size={pageSize}>
+<astro-data-table
+  id={id}
+  class={className}
+  data-empty-text={emptyText}
+  data-page-size={pageSize}
+  data-page-size-options={JSON.stringify(pageSizeOptions)}
+>
   <div class="data-table-wrap">
-    <table class="data-table">
+    <table class="data-table" aria-label={ariaLabel}>
       <thead></thead>
       <tbody><tr><td class="empty-panel">Loading…</td></tr></tbody>
     </table>
   </div>
   <div class="pagination">
     <span data-page-summary>Loading…</span>
-    <div class="join">
-      <button class="btn btn-xs join-item" type="button" data-first-page aria-label="First page">«</button>
-      <button class="btn btn-xs join-item" type="button" data-previous-page>Previous</button>
-      <button class="btn btn-xs join-item" type="button" data-next-page>Next</button>
-      <button class="btn btn-xs join-item" type="button" data-last-page aria-label="Last page">»</button>
+    <div class="data-table-pagination-actions">
+      <label class="data-table-page-size" data-page-size-control hidden>
+        <span>Rows</span>
+        <select class="select select-bordered select-xs" data-page-size-select></select>
+      </label>
+      <div class="join">
+        <button class="btn btn-xs join-item" type="button" data-first-page aria-label="First page">«</button>
+        <button class="btn btn-xs join-item" type="button" data-previous-page>Previous</button>
+        <button class="btn btn-xs join-item" type="button" data-next-page>Next</button>
+        <button class="btn btn-xs join-item" type="button" data-last-page aria-label="Last page">»</button>
+      </div>
     </div>
   </div>
 </astro-data-table>
@@ -40,12 +62,26 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
   } from "@tanstack/table-core";
 
   type PageResult = { rows: unknown[]; total: number };
+  type ColumnMeta = {
+    className?: string;
+    headerClassName?: string;
+    width?: string;
+    minWidth?: string;
+    maxWidth?: string;
+    align?: "left" | "center" | "right";
+  };
   type TableConfig = {
     columns: ColumnDef<any, any>[];
     data?: unknown[];
     rowCount?: number;
     manualPagination?: boolean;
-    loadPage?: (pageIndex: number, pageSize: number) => Promise<PageResult>;
+    loadPage?: (pageIndex: number, pageSize: number, sorting: SortingState) => Promise<PageResult>;
+    initialPageIndex?: number;
+    initialPageSize?: number;
+    getRowId?: (row: any, index: number, parent?: any) => string;
+    rowClassName?: (row: any, index: number) => string;
+    onPageChange?: (pagination: PaginationState) => void;
+    onRender?: (rows: unknown[], pagination: PaginationState, total: number) => void;
   };
 
   const resolveUpdater = <T,>(updater: Updater<T>, value: T): T =>
@@ -60,8 +96,11 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
     private errorMessage = "";
     private pagination: PaginationState = { pageIndex: 0, pageSize: 10 };
     private sorting: SortingState = [];
+    private connected = false;
 
     connectedCallback() {
+      if (this.connected) return;
+      this.connected = true;
       this.pagination = {
         ...this.pagination,
         pageSize: Number(this.dataset.pageSize || 10),
@@ -70,6 +109,31 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
       this.querySelector<HTMLElement>("[data-previous-page]")?.addEventListener("click", () => this.goTo(this.pagination.pageIndex - 1));
       this.querySelector<HTMLElement>("[data-next-page]")?.addEventListener("click", () => this.goTo(this.pagination.pageIndex + 1));
       this.querySelector<HTMLElement>("[data-last-page]")?.addEventListener("click", () => this.goTo(this.pageCount() - 1));
+      this.configurePageSizeControl();
+    }
+
+    private configurePageSizeControl() {
+      const control = this.querySelector<HTMLElement>("[data-page-size-control]");
+      const select = this.querySelector<HTMLSelectElement>("[data-page-size-select]");
+      if (!control || !select) return;
+      let options: number[] = [];
+      try {
+        const parsed = JSON.parse(this.dataset.pageSizeOptions || "[]");
+        if (Array.isArray(parsed)) options = parsed.map(Number).filter((value) => Number.isFinite(value) && value > 0);
+      } catch {
+        options = [];
+      }
+      if (!options.length) return;
+      if (!options.includes(this.pagination.pageSize)) options.unshift(this.pagination.pageSize);
+      select.replaceChildren(...[...new Set(options)].map((value) => {
+        const option = document.createElement("option");
+        option.value = String(value);
+        option.textContent = String(value);
+        return option;
+      }));
+      select.value = String(this.pagination.pageSize);
+      control.hidden = false;
+      select.addEventListener("change", () => void this.setPageSize(Number(select.value)));
     }
 
     async configure(config: TableConfig) {
@@ -77,6 +141,12 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
         throw new TypeError("DataTable manualPagination requires a loadPage(pageIndex, pageSize) callback.");
       }
       this.config = config;
+      this.pagination = {
+        pageIndex: Math.max(0, Number(config.initialPageIndex ?? this.pagination.pageIndex)),
+        pageSize: Math.max(1, Number(config.initialPageSize ?? this.pagination.pageSize)),
+      };
+      const pageSizeSelect = this.querySelector<HTMLSelectElement>("[data-page-size-select]");
+      if (pageSizeSelect) pageSizeSelect.value = String(this.pagination.pageSize);
       this.rows = config.data || [];
       this.total = config.rowCount ?? this.rows.length;
       this.table = createTable({
@@ -85,21 +155,27 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
         state: {},
         onPaginationChange: (updater) => {
           this.pagination = resolveUpdater(updater, this.pagination);
+          this.config?.onPageChange?.({ ...this.pagination });
           void this.refresh(false);
         },
         onSortingChange: (updater) => {
           this.sorting = resolveUpdater(updater, this.sorting);
           this.pagination = { ...this.pagination, pageIndex: 0 };
-          this.syncTable();
-          this.render();
+          this.config?.onPageChange?.({ ...this.pagination });
+          if (this.config?.manualPagination) void this.refresh(false);
+          else {
+            this.syncTable();
+            this.render();
+          }
         },
         getCoreRowModel: getCoreRowModel(),
         getPaginationRowModel: config.manualPagination ? undefined : getPaginationRowModel(),
         getSortedRowModel: getSortedRowModel(),
         manualPagination: Boolean(config.manualPagination),
         rowCount: this.total,
+        getRowId: config.getRowId,
       });
-      await this.refresh(true);
+      await this.refresh(false);
     }
 
     async refresh(resetPage = false) {
@@ -111,16 +187,21 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
         this.loading = true;
         this.render();
         try {
-          const result = await this.config.loadPage(this.pagination.pageIndex, this.pagination.pageSize);
+          let result = await this.config.loadPage(this.pagination.pageIndex, this.pagination.pageSize, this.sorting);
           if (!result || !Array.isArray(result.rows) || !Number.isFinite(result.total)) {
             throw new TypeError("DataTable loadPage must return { rows: Array, total: number }.");
           }
-          this.rows = result.rows;
           this.total = Math.max(0, Number(result.total));
           const lastPage = Math.max(0, this.pageCount() - 1);
           if (this.pagination.pageIndex > lastPage) {
             this.pagination = { ...this.pagination, pageIndex: lastPage };
+            result = await this.config.loadPage(this.pagination.pageIndex, this.pagination.pageSize, this.sorting);
+            if (!result || !Array.isArray(result.rows) || !Number.isFinite(result.total)) {
+              throw new TypeError("DataTable loadPage must return { rows: Array, total: number }.");
+            }
+            this.total = Math.max(0, Number(result.total));
           }
+          this.rows = result.rows;
         } catch (error) {
           caught = error;
           this.rows = [];
@@ -153,6 +234,31 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
       await this.refresh(true);
     }
 
+    async setPageSize(pageSize: number, resetPage = true) {
+      const normalized = Math.max(1, Math.trunc(pageSize));
+      if (!Number.isFinite(normalized) || normalized === this.pagination.pageSize) return;
+      this.pagination = {
+        pageIndex: resetPage ? 0 : this.pagination.pageIndex,
+        pageSize: normalized,
+      };
+      const select = this.querySelector<HTMLSelectElement>("[data-page-size-select]");
+      if (select) select.value = String(normalized);
+      this.config?.onPageChange?.({ ...this.pagination });
+      await this.refresh(false);
+    }
+
+    async setPageIndex(pageIndex: number) {
+      await this.goTo(pageIndex);
+    }
+
+    getVisibleRows(): unknown[] {
+      return [...this.rows];
+    }
+
+    getPagination(): PaginationState {
+      return { ...this.pagination };
+    }
+
     private syncTable() {
       this.table?.setOptions((previous) => ({
         ...previous,
@@ -169,15 +275,24 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
     private async goTo(pageIndex: number) {
       const next = Math.max(0, Math.min(pageIndex, this.pageCount() - 1));
       if (next === this.pagination.pageIndex) return;
-      // TanStack memoizes its row models by state object identity. Keep pagination
-      // immutable so client-side tables recalculate their visible rows.
       this.pagination = { ...this.pagination, pageIndex: next };
+      this.config?.onPageChange?.({ ...this.pagination });
       await this.refresh(false);
     }
 
     private renderValue(target: HTMLElement, value: unknown) {
       if (value instanceof Node) target.append(value);
       else target.textContent = value == null ? "" : String(value);
+    }
+
+    private applyColumnMeta(target: HTMLElement, meta: ColumnMeta | undefined, header = false) {
+      if (!meta) return;
+      const className = header ? meta.headerClassName : meta.className;
+      if (className) target.classList.add(...className.split(/\s+/).filter(Boolean));
+      if (meta.width) target.style.width = meta.width;
+      if (meta.minWidth) target.style.minWidth = meta.minWidth;
+      if (meta.maxWidth) target.style.maxWidth = meta.maxWidth;
+      if (meta.align) target.style.textAlign = meta.align;
     }
 
     private render() {
@@ -192,11 +307,13 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
         const row = document.createElement("tr");
         for (const header of headerGroup.headers) {
           const cell = document.createElement("th");
+          const meta = header.column.columnDef.meta as ColumnMeta | undefined;
+          this.applyColumnMeta(cell, meta, true);
           if (!header.isPlaceholder) {
             const label = typeof header.column.columnDef.header === "function"
               ? header.column.columnDef.header(header.getContext())
               : header.column.columnDef.header ?? header.column.id;
-            if (header.column.getCanSort()) {
+            if (header.column.getCanSort() && !(label instanceof Node)) {
               const button = document.createElement("button");
               button.type = "button";
               button.className = "table-sort";
@@ -231,10 +348,14 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
           row.append(cell);
           body.append(row);
         }
-        for (const tableRow of rows) {
+        for (const [index, tableRow] of rows.entries()) {
           const row = document.createElement("tr");
+          row.dataset.rowId = tableRow.id;
+          const rowClass = this.config?.rowClassName?.(tableRow.original, index);
+          if (rowClass) row.classList.add(...rowClass.split(/\s+/).filter(Boolean));
           for (const cellData of tableRow.getVisibleCells()) {
             const cell = document.createElement("td");
+            this.applyColumnMeta(cell, cellData.column.columnDef.meta as ColumnMeta | undefined);
             const renderer = cellData.column.columnDef.cell;
             const value = typeof renderer === "function" ? renderer(cellData.getContext()) : cellData.getValue();
             this.renderValue(cell, value);
@@ -251,6 +372,12 @@ const { id, emptyText = "No records found.", pageSize = 10 } = Astro.props;
       const atEnd = this.pagination.pageIndex >= this.pageCount() - 1;
       for (const selector of ["[data-first-page]", "[data-previous-page]"]) this.querySelector<HTMLButtonElement>(selector)!.disabled = atStart;
       for (const selector of ["[data-next-page]", "[data-last-page]"]) this.querySelector<HTMLButtonElement>(selector)!.disabled = atEnd;
+
+      const visibleRows = this.table.getRowModel().rows.map((row) => row.original);
+      this.config?.onRender?.(visibleRows, { ...this.pagination }, this.total);
+      this.dispatchEvent(new CustomEvent("datatable:render", {
+        detail: { rows: visibleRows, pagination: { ...this.pagination }, total: this.total },
+      }));
     }
   }
 

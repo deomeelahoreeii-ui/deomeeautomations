@@ -1,0 +1,127 @@
+{
+  "schema_version": 2,
+  "bundle_id": "crm-controlled-tags-b3.4.2.1",
+  "display_name": "CRM Controlled Tag Management and Classification Review UX B3.4.2.1",
+  "version": "B3.4.2.1",
+  "created_at_utc": "2026-07-21T04:10:00Z",
+  "baseline_commit": "034b9ddb9df257e33ff08628253f591ce81e9241",
+  "baseline_database_revision": "f3b7d9e1a408",
+  "final_database_revision": "f5c9e1a3b620",
+  "database_migration": true,
+  "migration_reversible": true,
+  "project_markers": [
+    "pyproject.toml",
+    "alembic.ini",
+    "apps/web/package.json",
+    "apps/api/automation_api/main.py"
+  ],
+  "summary": [
+    "Dedicated Controlled Tags management workspace with searchable TanStack table, usage counts and status filters",
+    "Manual tag and tag-group creation with descriptions, aliases, AI visibility and duplicate prevention",
+    "Safe tag editing, deactivation and merge flow that preserves complaint links and aliases",
+    "Scalable classification tag picker with selected chips, search, group filters, recommendations and accordion groups",
+    "Create controlled tags or submit tag suggestions directly from classification review",
+    "Promote pending AI tag suggestions into approved controlled tags from the review queue",
+    "Copy Classification Prompt action beside the classification reference package",
+    "Mandatory complete Python tests, migration verification and Astro production build during normal installation",
+    "ISO-8601 serialization for tag and tag-group timestamps before audit JSON persistence, with regression coverage"
+  ],
+  "files": [
+    {
+      "path": "alembic/versions/f5c9e1a3b620_crm_controlled_tag_management.py",
+      "baseline_sha256": null,
+      "baseline_size": null,
+      "final_sha256": "e3550136d68e68727b51b62f89af230805e05f2fda193c63e0bd633df21a73fe",
+      "final_size": 6100,
+      "mode": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/taxonomy/tags/index.astro",
+      "baseline_sha256": null,
+      "baseline_size": null,
+      "final_sha256": "bbac4f4a1b466553b47fa81fab3a5777d387f9977d4635214ce8b32f4762a67e",
+      "final_size": 22517,
+      "mode": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/bulk/classification/index.astro",
+      "baseline_sha256": "1b73b0a6835a2b8b21c7d786086a0837047031117d1222e672738c78c0231017",
+      "baseline_size": 15630,
+      "final_sha256": "a40eb2a97bbbcc2a48a49101f14cce80c4fec607c1739365995455c801b90d0a",
+      "final_size": 31310,
+      "mode": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/taxonomy/index.astro",
+      "baseline_sha256": "abc48b3dd16513a4f44ee7a0957e1f4a02419ecb0853e6bb0f9af56efb6f8e14",
+      "baseline_size": 38457,
+      "final_sha256": "985e90b25eefa80c14ad23245b2538131060f7916d85de9e3fa5f6ecfe5db06a",
+      "final_size": 38854,
+      "mode": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/bulk/index.astro",
+      "baseline_sha256": "eeb38ac4897b65e789690a9646b21e1091f7abf966a5af1447e423ac7a34a471",
+      "baseline_size": 29208,
+      "final_sha256": "1ae697e89444242c588e2b7d796964d46c337c1a6adcb40fe530172d92afe3b3",
+      "final_size": 30067,
+      "mode": "0644"
+    },
+    {
+      "path": "apps/web/src/styles/crm.css",
+      "baseline_sha256": "e1bee29454f79699c46f9fc2c23f8376901d1bc4f5c66e4bdc0f9e80d279553e",
+      "baseline_size": 69578,
+      "final_sha256": "94c392ef76bf2595283ab8f79ead3e73e6117e141d3a429e56c37ac76c2f6833",
+      "final_size": 77709,
+      "mode": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/models.py",
+      "baseline_sha256": "6190b31fae3561d941eeb5ab2ba13d1914c6154ed4e5383c15d5e6dc9c359685",
+      "baseline_size": 31638,
+      "final_sha256": "6136b65b345bb68d47feef641f25b5868b4245d98dd2267d7191e99bc5136156",
+      "final_size": 32899,
+      "mode": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/__init__.py",
+      "baseline_sha256": "ad64174b42d8008fcdb31cee4af449e584f0d1cbcaa19f5a78e680c44ace8e3c",
+      "baseline_size": 1409,
+      "final_sha256": "f3b56cc0bc40c12de7f6e7ffb8dbf38b5e4dfcde0d2578e95af8dc07231efcb7",
+      "final_size": 1463,
+      "mode": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/ai_pipeline.py",
+      "baseline_sha256": "7873f43b8d6b01e317e57bdf8f8b40e1c22692bf73938e75093b2e6a01504464",
+      "baseline_size": 70886,
+      "final_sha256": "e60481798c70831dd8f96b854a7bc8df1d580e599672599681d8130476e528b5",
+      "final_size": 96459,
+      "mode": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/ai_pipeline_api.py",
+      "baseline_sha256": "5320b9f1232f41ccf4c79a11c87593681ce4121fa3ff778aa64ecb863fe9802d",
+      "baseline_size": 10811,
+      "final_sha256": "f838d047e9b4aae372d2c4f7ee6f0a4831628662fac0964918974f2fa8697957",
+      "final_size": 18398,
+      "mode": "0644"
+    },
+    {
+      "path": "tests/test_crm_controlled_tags_b342.py",
+      "baseline_sha256": null,
+      "baseline_size": null,
+      "final_sha256": "07b40807faf4160a3756ab57b2209505675e1ad69b7426fd98c7228616bb12f1",
+      "final_size": 11151,
+      "mode": "0644"
+    },
+    {
+      "path": "tests/test_preview_partial_approval.py",
+      "baseline_sha256": "8ef8f4a0d09e0bb731a1e38ce2b793442b1adf997d56311d5fd93b072cdd8e13",
+      "baseline_size": 13767,
+      "final_sha256": "88505186098d8dd5acabc464f2341afa681828db9948472415d7669b003f8044",
+      "final_size": 13822,
+      "mode": "0644"
+    }
+  ]
+}

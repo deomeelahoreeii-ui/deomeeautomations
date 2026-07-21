@@ -20,6 +20,8 @@ from crm_domain.models import (
     ComplaintReply,
     ComplaintReplyRevision,
     ComplaintSubcategory,
+    CrmBulkOperationBatch,
+    CrmBulkOperationItem,
     FrappeSyncEvent,
 )
 from crm_domain.taxonomy import clean_name
@@ -453,6 +455,112 @@ class ComplaintReplyWorkspaceService:
             values["status"] = workflow_status
         return values
 
+    def _workspace_reply(self, case_id: uuid.UUID) -> ComplaintReply | None:
+        return self.session.exec(
+            select(ComplaintReply).where(ComplaintReply.complaint_case_id == case_id)
+        ).first()
+
+    @staticmethod
+    def _workspace_reply_snapshot(reply: ComplaintReply | None) -> dict[str, Any]:
+        if reply is None:
+            return {}
+        return {
+            "id": str(reply.id),
+            "reply_text": reply.reply_text,
+            "inquiry_findings": reply.inquiry_findings or "",
+            "school_version": reply.school_version or "",
+            "applicable_policy": reply.applicable_policy or "",
+            "disposal_outcome": reply.disposal_outcome or "",
+            "ai_eligible": bool(reply.ai_eligible),
+            "source_filename": reply.source_filename,
+            "source_row": reply.source_row,
+            "source_kind": reply.source_kind,
+            "workspace_status": reply.workspace_status,
+            "sync_status": reply.sync_status,
+            "sync_error": reply.sync_error,
+            "source_batch_id": str(reply.source_batch_id) if reply.source_batch_id else None,
+            "source_item_id": str(reply.source_item_id) if reply.source_item_id else None,
+            "version": reply.version,
+            "imported_at": reply.imported_at,
+            "last_synced_at": reply.last_synced_at,
+            "updated_at": reply.updated_at,
+        }
+
+    def _store_local_workspace(
+        self,
+        case: ComplaintCase,
+        *,
+        inquiry_findings: str,
+        school_version: str,
+        applicable_policy: str,
+        final_reply: str,
+        reply_status: str,
+        disposal_outcome: str,
+        ai_eligible: bool,
+        actor: str,
+        sync_status: str,
+    ) -> ComplaintReply | None:
+        existing = self._workspace_reply(case.id)
+        if existing is None and not final_reply:
+            return None
+        now = utcnow()
+        before = self._workspace_reply_snapshot(existing)
+        if existing is None:
+            existing = ComplaintReply(
+                complaint_case_id=case.id,
+                reply_text=final_reply,
+                inquiry_findings=inquiry_findings or None,
+                school_version=school_version or None,
+                applicable_policy=applicable_policy or None,
+                disposal_outcome=disposal_outcome or None,
+                ai_eligible=ai_eligible,
+                source_filename=f"reply-editor/{case.id}.txt",
+                source_row=0,
+                source_kind="manual_editor",
+                workspace_status=reply_status,
+                sync_status=sync_status,
+                imported_at=now,
+                updated_at=now,
+            )
+        else:
+            changed = any(
+                (
+                    existing.reply_text != final_reply,
+                    (existing.inquiry_findings or "") != inquiry_findings,
+                    (existing.school_version or "") != school_version,
+                    (existing.applicable_policy or "") != applicable_policy,
+                    (existing.disposal_outcome or "") != disposal_outcome,
+                    bool(existing.ai_eligible) != bool(ai_eligible),
+                    existing.workspace_status != reply_status,
+                )
+            )
+            if changed:
+                existing.version += 1
+            existing.reply_text = final_reply
+            existing.inquiry_findings = inquiry_findings or None
+            existing.school_version = school_version or None
+            existing.applicable_policy = applicable_policy or None
+            existing.disposal_outcome = disposal_outcome or None
+            existing.ai_eligible = ai_eligible
+            existing.source_kind = "manual_editor"
+            existing.workspace_status = reply_status
+            existing.sync_status = sync_status
+            existing.sync_error = None
+            existing.updated_at = now
+        self.session.add(existing)
+        self.session.flush()
+        self._audit(
+            case=case,
+            entity_type="complaint_reply_workspace",
+            entity_id=str(existing.id),
+            event_type="reply_local_saved",
+            actor=actor,
+            before=before,
+            after=self._workspace_reply_snapshot(existing),
+            details={"remote_sync_pending": sync_status == "pending"},
+        )
+        return existing
+
     def save_reply(
         self,
         case_id: uuid.UUID,
@@ -467,26 +575,58 @@ class ComplaintReplyWorkspaceService:
         actor: str = "web-operator",
     ) -> dict[str, Any]:
         case = self._require_case(case_id)
-        if not case.frappe_ticket_id:
-            raise ReplyValidationError("This complaint is not linked to Frappe Helpdesk")
         status = clean_name(reply_status)
         if status == "Not Started":
             status = "Not Prepared"
         if status not in REPLY_STATUSES:
             raise ReplyValidationError(f"Unsupported reply status: {status}")
         final_text = _text(final_reply)
+        inquiry_text = _text(inquiry_findings)
+        school_text = _text(school_version)
+        policy_text = _text(applicable_policy)
+        disposal_text = _text(disposal_outcome)
         if status in {"Pending Approval", "Approved", "Issued"} and not final_text:
             raise ReplyValidationError("Enter the final reply before using this status")
         if ai_eligible and status not in APPROVED_REPLY_STATUSES:
             raise ReplyValidationError("AI eligibility is allowed only for Approved or Issued replies")
+        if not case.frappe_ticket_id and status in {"Pending Approval", "Approved", "Issued"}:
+            raise ReplyValidationError(
+                "This complaint is not linked to Frappe Helpdesk; save it as a local Draft first"
+            )
+
         before = self._reply_snapshot(case)
-        values = self._reply_values(
-            inquiry_findings=_text(inquiry_findings),
-            school_version=_text(school_version),
-            applicable_policy=_text(applicable_policy),
+        local = self._store_local_workspace(
+            case,
+            inquiry_findings=inquiry_text,
+            school_version=school_text,
+            applicable_policy=policy_text,
             final_reply=final_text,
             reply_status=status,
-            disposal_outcome=_text(disposal_outcome),
+            disposal_outcome=disposal_text,
+            ai_eligible=ai_eligible,
+            actor=actor,
+            sync_status="pending" if case.frappe_ticket_id else "not_synced",
+        )
+        self.session.commit()
+
+        if not case.frappe_ticket_id:
+            return {
+                "case_id": str(case.id),
+                "ticket_id": None,
+                "saved": True,
+                "saved_locally": True,
+                "write_verified": False,
+                "reply": self._workspace_reply_snapshot(local),
+                "archive": None,
+            }
+
+        values = self._reply_values(
+            inquiry_findings=inquiry_text,
+            school_version=school_text,
+            applicable_policy=policy_text,
+            final_reply=final_text,
+            reply_status=status,
+            disposal_outcome=disposal_text,
             ai_eligible=ai_eligible,
         )
         try:
@@ -529,6 +669,14 @@ class ComplaintReplyWorkspaceService:
                     str(pull_result.get("error") or "Helpdesk write succeeded but CRM pull-back failed")
                 )
             refreshed = self._require_case(case.id)
+            local = self._workspace_reply(case.id)
+            if local is not None:
+                local.workspace_status = status
+                local.sync_status = "synchronized"
+                local.sync_error = None
+                local.last_synced_at = utcnow()
+                local.updated_at = utcnow()
+                self.session.add(local)
             after = self._reply_snapshot(refreshed)
             self._frappe_event(
                 refreshed,
@@ -538,25 +686,32 @@ class ComplaintReplyWorkspaceService:
                     "status": status,
                     "verified": True,
                     "reply": pull_result.get("reply"),
+                    "local_workspace_id": str(local.id) if local else None,
                 },
             )
             self._audit(
                 case=refreshed,
                 entity_type="complaint_reply",
-                entity_id=str(refreshed.id),
+                entity_id=str(local.id if local else refreshed.id),
                 event_type="reply_saved",
                 actor=actor,
                 before=before,
                 after=after,
-                details={"write_verified": True, "pull_result": pull_result},
+                details={
+                    "write_verified": True,
+                    "pull_result": pull_result,
+                    "local_workspace": self._workspace_reply_snapshot(local),
+                },
             )
             self.session.commit()
             return {
                 "case_id": str(refreshed.id),
                 "ticket_id": refreshed.frappe_ticket_id,
                 "saved": True,
+                "saved_locally": True,
                 "write_verified": True,
                 "reply": after,
+                "workspace": self._workspace_reply_snapshot(local),
                 "archive": pull_result.get("reply"),
             }
         except Exception as exc:
@@ -564,28 +719,37 @@ class ComplaintReplyWorkspaceService:
             case_key = case.id
             self.session.rollback()
             failed_case = self.session.get(ComplaintCase, case_key)
+            failed_local = self._workspace_reply(case_key)
+            if failed_local is not None:
+                failed_local.sync_status = "failed"
+                failed_local.sync_error = error[:4000]
+                failed_local.updated_at = utcnow()
+                self.session.add(failed_local)
             if failed_case is not None:
                 self._frappe_event(
                     failed_case,
                     operation="save_reply_workspace",
                     state="failed",
-                    details={"status": status, "values_present": sorted(values)},
+                    details={
+                        "status": status,
+                        "values_present": sorted(values),
+                        "local_draft_preserved": failed_local is not None,
+                    },
                     error=error,
                 )
                 self._audit(
                     case=failed_case,
                     entity_type="complaint_reply",
-                    entity_id=str(failed_case.id),
+                    entity_id=str(failed_local.id if failed_local else failed_case.id),
                     event_type="reply_save_failed",
                     actor=actor,
                     state="failed",
                     before=before,
-                    details={"write_verified": False},
+                    after=self._workspace_reply_snapshot(failed_local),
+                    details={"write_verified": False, "local_draft_preserved": failed_local is not None},
                     error=error,
                 )
                 self.session.commit()
-            if isinstance(exc, ReplyWorkspaceError):
-                raise ReplyRemoteError(error) from exc
             raise ReplyRemoteError(error) from exc
 
     def _paperless_url(self, case: ComplaintCase) -> str:
@@ -633,7 +797,7 @@ class ComplaintReplyWorkspaceService:
                 .order_by(ComplaintDocument.created_at)
             ).all()
         )
-        current_reply = {
+        remote_reply = {
             "inquiry_findings": _text(
                 live_ticket.get("custom_inquiry_findings")
                 if live_ticket
@@ -676,6 +840,93 @@ class ComplaintReplyWorkspaceService:
                 str(live_ticket.get("status") if live_ticket else case.frappe_workflow_status or "")
             ),
         }
+        local_snapshot = self._workspace_reply_snapshot(reply)
+        local_text = _text(reply.reply_text) if reply else ""
+        remote_text = remote_reply["final_reply"]
+        local_pending = bool(
+            reply
+            and reply.source_kind in {"bulk_import", "manual_editor"}
+            and reply.sync_status in {"not_synced", "pending", "failed", "conflict"}
+        )
+        conflict = bool(local_pending and local_text and remote_text and local_text != remote_text)
+        use_local = bool(reply and local_text and (local_pending or not remote_text or live_error))
+        if use_local and reply is not None:
+            operational_status = (
+                "Draft" if reply.workspace_status == "Imported Draft" else reply.workspace_status
+            )
+            current_reply = {
+                "inquiry_findings": _text(reply.inquiry_findings) or remote_reply["inquiry_findings"],
+                "school_version": _text(reply.school_version) or remote_reply["school_version"],
+                "applicable_policy": _text(reply.applicable_policy) or remote_reply["applicable_policy"],
+                "final_reply": local_text,
+                "reply_status": operational_status or "Draft",
+                "display_status": reply.workspace_status or operational_status or "Draft",
+                "disposal_outcome": _text(reply.disposal_outcome) or remote_reply["disposal_outcome"],
+                "ai_eligible": bool(reply.ai_eligible),
+                "workflow_status": remote_reply["workflow_status"],
+                "source": "local_workspace",
+                "source_label": (
+                    "Imported CSV draft" if reply.source_batch_id or reply.source_filename.lower().endswith((".csv", ".xlsx"))
+                    else "Local workspace draft"
+                ),
+                "sync_status": "conflict" if conflict else reply.sync_status,
+                "sync_error": reply.sync_error,
+                "conflict": conflict,
+                "remote_final_reply": remote_text,
+                "local_final_reply": local_text,
+                "last_pulled_at": case.frappe_last_workflow_pull_at,
+            }
+        else:
+            current_reply = {
+                **remote_reply,
+                "display_status": remote_reply["reply_status"],
+                "source": "live_helpdesk" if live_ticket else "crm_snapshot",
+                "source_label": "Live Helpdesk" if live_ticket else "PostgreSQL Helpdesk snapshot",
+                "sync_status": "synchronized" if remote_text or live_ticket else "not_synced",
+                "sync_error": live_error or None,
+                "conflict": False,
+                "remote_final_reply": remote_text,
+                "local_final_reply": local_text,
+                "last_pulled_at": case.frappe_last_workflow_pull_at,
+            }
+        source_batch = (
+            self.session.get(CrmBulkOperationBatch, reply.source_batch_id)
+            if reply and reply.source_batch_id
+            else None
+        )
+        source_item = (
+            self.session.get(CrmBulkOperationItem, reply.source_item_id)
+            if reply and reply.source_item_id
+            else None
+        )
+        current_reply["source_filename"] = reply.source_filename if reply else None
+        current_reply["source_row"] = reply.source_row if reply else None
+        current_reply["source_kind"] = reply.source_kind if reply else None
+        current_reply["workspace_version"] = reply.version if reply else None
+        current_reply["workspace_updated_at"] = reply.updated_at if reply else None
+        current_reply["last_synced_at"] = reply.last_synced_at if reply else None
+        current_reply["source_item_id"] = str(source_item.id) if source_item else None
+        current_reply["source_batch"] = (
+            {
+                "id": str(source_batch.id),
+                "batch_number": source_batch.batch_number,
+                "operation_type": source_batch.operation_type,
+                "status": source_batch.status,
+                "url": f"/crm/replies/bulk/batches/{source_batch.id}/",
+            }
+            if source_batch
+            else None
+        )
+        latest_revision = next((row for row in revisions if row.is_current), revisions[0] if revisions else None)
+        revision_payloads = [
+            {**row.model_dump(mode="json"), "version": len(revisions) - index}
+            for index, row in enumerate(revisions)
+        ]
+        latest_revision_version = (
+            len(revisions) - revisions.index(latest_revision)
+            if latest_revision is not None
+            else None
+        )
         return {
             "case": {
                 "id": str(case.id),
@@ -697,12 +948,14 @@ class ComplaintReplyWorkspaceService:
                 "updated_at": case.updated_at,
             },
             "reply": current_reply,
+            "workspace": local_snapshot,
             "approved_archive": {
-                "reply_text": reply.reply_text if reply else "",
-                "version": reply.version if reply else None,
-                "imported_at": reply.imported_at if reply else None,
+                "reply_text": latest_revision.reply_text if latest_revision else "",
+                "version": latest_revision_version,
+                "approval_status": latest_revision.approval_status if latest_revision else None,
+                "captured_at": latest_revision.captured_at if latest_revision else None,
             },
-            "revisions": [row.model_dump(mode="json") for row in revisions],
+            "revisions": revision_payloads,
             "documents": [
                 {
                     "id": str(document.id),
@@ -724,20 +977,41 @@ class ComplaintReplyWorkspaceService:
                 select(ComplaintCase).where(ComplaintCase.state == "published")
             ).all()
         )
-        statuses = Counter(case.frappe_reply_approval_status or "Not Prepared" for case in cases)
+        replies = {
+            row.complaint_case_id: row
+            for row in self.session.exec(select(ComplaintReply)).all()
+        }
+        effective_statuses: list[str] = []
+        awaiting_reply = 0
+        for case in cases:
+            local = replies.get(case.id)
+            local_pending = bool(
+                local
+                and local.reply_text.strip()
+                and local.source_kind in {"bulk_import", "manual_editor"}
+                and local.sync_status in {"not_synced", "pending", "failed", "conflict"}
+            )
+            status = (
+                local.workspace_status
+                if local_pending and local is not None
+                else case.frappe_reply_approval_status or "Not Prepared"
+            )
+            effective_statuses.append(status)
+            if status == "Not Prepared" and not _text(case.frappe_reply_text_snapshot):
+                awaiting_reply += 1
+        statuses = Counter(effective_statuses)
         return {
             "published_cases": len(cases),
             "awaiting_classification": sum(case.category_id is None for case in cases),
-            "awaiting_reply": sum(
-                (case.frappe_reply_approval_status or "Not Prepared") == "Not Prepared"
-                and not _text(case.frappe_reply_text_snapshot)
-                for case in cases
-            ),
+            "awaiting_reply": awaiting_reply,
+            "imported_drafts": statuses.get("Imported Draft", 0),
             "draft_replies": statuses.get("Draft", 0),
             "pending_approval": statuses.get("Pending Approval", 0),
             "approved": statuses.get("Approved", 0),
             "issued": statuses.get("Issued", 0),
             "rejected": statuses.get("Rejected", 0),
+            "sync_failed": sum(row.sync_status == "failed" for row in replies.values()),
+            "sync_conflicts": sum(row.sync_status == "conflict" for row in replies.values()),
             "ai_ready": sum(
                 case.frappe_ai_eligible
                 and bool(case.frappe_reply_hash)
@@ -762,6 +1036,11 @@ class ComplaintReplyWorkspaceService:
         page_size: int = 25,
     ) -> dict[str, Any]:
         filters: list[Any] = [ComplaintCase.state == "published"]
+        pending_local_ids = select(ComplaintReply.complaint_case_id).where(
+            ComplaintReply.sync_status.in_(("not_synced", "pending", "failed", "conflict")),
+            ComplaintReply.source_kind.in_(("bulk_import", "manual_editor")),
+            ComplaintReply.reply_text != "",
+        )
         if category_id:
             filters.append(ComplaintCase.category_id == category_id)
         if subcategory_id:
@@ -769,14 +1048,36 @@ class ComplaintReplyWorkspaceService:
         if reply_status:
             normalized = "Not Prepared" if reply_status == "Not Started" else reply_status
             if normalized == "Not Prepared":
+                filters.extend(
+                    [
+                        or_(
+                            ComplaintCase.frappe_reply_approval_status.is_(None),
+                            ComplaintCase.frappe_reply_approval_status == "Not Prepared",
+                        ),
+                        ~ComplaintCase.id.in_(pending_local_ids),
+                    ]
+                )
+            elif normalized == "Imported Draft":
                 filters.append(
-                    or_(
-                        ComplaintCase.frappe_reply_approval_status.is_(None),
-                        ComplaintCase.frappe_reply_approval_status == "Not Prepared",
+                    ComplaintCase.id.in_(
+                        select(ComplaintReply.complaint_case_id).where(
+                            ComplaintReply.workspace_status == "Imported Draft",
+                            ComplaintReply.sync_status.in_(("not_synced", "pending", "failed", "conflict")),
+                        )
                     )
                 )
             else:
-                filters.append(ComplaintCase.frappe_reply_approval_status == normalized)
+                filters.append(
+                    or_(
+                        ComplaintCase.frappe_reply_approval_status == normalized,
+                        ComplaintCase.id.in_(
+                            select(ComplaintReply.complaint_case_id).where(
+                                ComplaintReply.workspace_status == normalized,
+                                ComplaintReply.sync_status.in_(("not_synced", "pending", "failed", "conflict")),
+                            )
+                        ),
+                    )
+                )
         if source_system:
             filters.append(ComplaintCase.source_system == source_system)
         if ai_eligible is not None:
@@ -794,6 +1095,11 @@ class ComplaintReplyWorkspaceService:
                     ComplaintCase.category.ilike(term),
                     ComplaintCase.sub_category.ilike(term),
                     ComplaintCase.frappe_reply_text_snapshot.ilike(term),
+                    ComplaintCase.id.in_(
+                        select(ComplaintReply.complaint_case_id).where(
+                            ComplaintReply.reply_text.ilike(term)
+                        )
+                    ),
                 )
             )
         total = int(
@@ -810,8 +1116,34 @@ class ComplaintReplyWorkspaceService:
                 .limit(page_size)
             ).all()
         )
-        return {
-            "items": [
+        reply_map = {
+            row.complaint_case_id: row
+            for row in self.session.exec(
+                select(ComplaintReply).where(
+                    ComplaintReply.complaint_case_id.in_([case.id for case in rows])
+                )
+            ).all()
+        } if rows else {}
+        items: list[dict[str, Any]] = []
+        for case in rows:
+            local = reply_map.get(case.id)
+            local_pending = bool(
+                local
+                and local.reply_text.strip()
+                and local.source_kind in {"bulk_import", "manual_editor"}
+                and local.sync_status in {"not_synced", "pending", "failed", "conflict"}
+            )
+            reply_text = (
+                local.reply_text
+                if local_pending and local is not None
+                else _text(case.frappe_reply_text_snapshot)
+            )
+            status = (
+                local.workspace_status
+                if local_pending and local is not None
+                else case.frappe_reply_approval_status or "Not Prepared"
+            )
+            items.append(
                 {
                     "case_id": str(case.id),
                     "complaint_number": case.complaint_number,
@@ -821,8 +1153,12 @@ class ComplaintReplyWorkspaceService:
                     "subcategory_id": str(case.sub_category_id) if case.sub_category_id else None,
                     "subcategory": case.sub_category or "Unclassified",
                     "complaint_preview": _text(case.remarks)[:500],
-                    "reply_preview": _text(case.frappe_reply_text_snapshot)[:500],
-                    "reply_status": case.frappe_reply_approval_status or "Not Prepared",
+                    "reply_preview": reply_text[:500],
+                    "reply_status": status,
+                    "reply_source": (
+                        "local_workspace" if local_pending else "helpdesk_snapshot"
+                    ),
+                    "reply_sync_status": local.sync_status if local else "synchronized",
                     "ai_eligible": bool(case.frappe_ai_eligible),
                     "archive_ready": bool(case.frappe_reply_hash),
                     "classification_sync_status": case.classification_sync_status,
@@ -830,10 +1166,13 @@ class ComplaintReplyWorkspaceService:
                     "helpdesk_ticket_id": case.frappe_ticket_id,
                     "helpdesk_ticket_url": case.frappe_ticket_url,
                     "paperless_document_id": case.canonical_paperless_document_id,
-                    "updated_at": case.updated_at,
+                    "updated_at": max(
+                        [value for value in (case.updated_at, local.updated_at if local else None) if value]
+                    ),
                 }
-                for case in rows
-            ],
+            )
+        return {
+            "items": items,
             "total": total,
             "page": page,
             "page_size": page_size,

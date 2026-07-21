@@ -1,0 +1,88 @@
+{
+  "schema_version": 2,
+  "bundle_id": "crm-imported-reply-workspace-b3.4.3",
+  "bundle_version": "B3.4.3",
+  "target_root": "/home/ahmad/code/deomeeautomations/automation-platform",
+  "created_at_utc": "2026-07-21T08:42:54.486245Z",
+  "status": "applied",
+  "database_revision_before": "f5c9e1a3b620",
+  "entries": [
+    {
+      "path": "packages/crm_domain/crm_domain/models.py",
+      "existed": true,
+      "sha256_before": "6136b65b345bb68d47feef641f25b5868b4245d98dd2267d7191e99bc5136156",
+      "mode_before": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/bulk_operations.py",
+      "existed": true,
+      "sha256_before": "98363c785188490eb3f1e14b99dd7af46a6e376a33a9895aa7631485cd7b9307",
+      "mode_before": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/reply_workspace.py",
+      "existed": true,
+      "sha256_before": "8cdcb1679e5df2d1f30bc6f5f4d0260e860b4fc241ffd1488b6a05db01b099a9",
+      "mode_before": "0644"
+    },
+    {
+      "path": "packages/crm_integrations/crm_integrations/frappe_helpdesk/workflow.py",
+      "existed": true,
+      "sha256_before": "a2c8d6d00b0462244aaea380c15e57d29fd3fa305df32731d0b74662aa8dea03",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/[id].astro",
+      "existed": true,
+      "sha256_before": "c309f50cc7dc5ad985874ad1ce8ad33e40169d6f6a2341cb95763e67addebf07",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/index.astro",
+      "existed": true,
+      "sha256_before": "e2f87cc52188272924c06d4716ad8b3f959024b43f47f151a9f7b75b5e1facf0",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/bulk/batches/[id].astro",
+      "existed": true,
+      "sha256_before": "b3f93e8ba3b2371de0d32f4c20614689cc525b202ebde750ab6a5fbf7386eb48",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/styles/crm.css",
+      "existed": true,
+      "sha256_before": "94c392ef76bf2595283ab8f79ead3e73e6117e141d3a429e56c37ac76c2f6833",
+      "mode_before": "0644"
+    },
+    {
+      "path": "tests/test_crm_reply_workspace_b31.py",
+      "existed": true,
+      "sha256_before": "b20e996e059581affd381dcde9f7b3b83f5e1ebe71995c775f09a6aac3d345fa",
+      "mode_before": "0644"
+    },
+    {
+      "path": "tests/test_preview_partial_approval.py",
+      "existed": true,
+      "sha256_before": "88505186098d8dd5acabc464f2341afa681828db9948472415d7669b003f8044",
+      "mode_before": "0644"
+    },
+    {
+      "path": "tests/test_crm_imported_reply_workspace_b343.py",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "alembic/versions/f7d1e3a5c842_crm_imported_reply_workspace.py",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    }
+  ],
+  "installed_at_utc": "2026-07-21T08:42:54.506719Z",
+  "database_revision_after": "f7d1e3a5c842",
+  "verified_at_utc": "2026-07-21T08:43:59.019993Z",
+  "test_mode": "complete",
+  "frontend_build_ran": true
+}

@@ -2,37 +2,41 @@ from __future__ import annotations
 
 import csv
 import io
-import re
-import zipfile
+import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
+from sqlalchemy import func, or_
 from sqlmodel import Session, select
 
+from automation_core.config import Settings, get_settings
 from automation_core.database import get_session
-from automation_core.time import utcnow
-from crm_domain.identifiers import normalize_complaint_number
+from crm_domain.bulk_operations import (
+    BulkOperationError,
+    BulkOperationValidationError,
+    CrmBulkOperationService,
+)
 from crm_domain.models import ComplaintCase, ComplaintReply
-from crm_domain.reply_documents import build_deo_report_odt
 
 
 router = APIRouter(prefix="/api/v1/crm/replies", tags=["crm-replies"])
 MAX_REPLY_FILE_BYTES = 5 * 1024 * 1024
 
 
-def _published_rows(session: Session) -> list[tuple[ComplaintCase, ComplaintReply | None]]:
-    return list(
-        session.exec(
-            select(ComplaintCase, ComplaintReply)
-            .join(
-                ComplaintReply,
-                ComplaintReply.complaint_case_id == ComplaintCase.id,
-                isouter=True,
-            )
-            .where(ComplaintCase.state == "published")
-            .order_by(ComplaintCase.complaint_number)
-        ).all()
+def _published_statement():
+    return (
+        select(ComplaintCase, ComplaintReply)
+        .join(
+            ComplaintReply,
+            ComplaintReply.complaint_case_id == ComplaintCase.id,
+            isouter=True,
+        )
+        .where(ComplaintCase.state == "published")
     )
+
+
+def _published_rows(session: Session) -> list[tuple[ComplaintCase, ComplaintReply | None]]:
+    return list(session.exec(_published_statement().order_by(ComplaintCase.complaint_number)).all())
 
 
 @router.get("/statistics")
@@ -48,8 +52,44 @@ def reply_statistics(session: Session = Depends(get_session)) -> dict[str, int]:
 
 
 @router.get("")
-def list_replies(session: Session = Depends(get_session)) -> dict[str, object]:
-    rows = _published_rows(session)
+def list_replies(
+    view: str = Query(default="published", pattern="^(published|awaiting|imported|generated)$"),
+    search: str = Query(default="", max_length=300),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=500),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    statement = _published_statement()
+    count_statement = (
+        select(func.count())
+        .select_from(ComplaintCase)
+        .join(ComplaintReply, ComplaintReply.complaint_case_id == ComplaintCase.id, isouter=True)
+        .where(ComplaintCase.state == "published")
+    )
+    filters = []
+    if view == "awaiting":
+        filters.append(ComplaintReply.id.is_(None))
+    elif view == "imported":
+        filters.append(ComplaintReply.id.is_not(None))
+    elif view == "generated":
+        filters.append(ComplaintReply.generated_at.is_not(None))
+    if search.strip():
+        like = f"%{search.strip()}%"
+        filters.append(
+            or_(
+                ComplaintCase.complaint_number.ilike(like),
+                ComplaintCase.remarks.ilike(like),
+                ComplaintReply.reply_text.ilike(like),
+            )
+        )
+    statement = statement.where(*filters)
+    count_statement = count_statement.where(*filters)
+    total = session.scalar(count_statement) or 0
+    rows = session.exec(
+        statement.order_by(ComplaintCase.complaint_number)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
     return {
         "items": [
             {
@@ -65,7 +105,10 @@ def list_replies(session: Session = Depends(get_session)) -> dict[str, object]:
             }
             for case, reply in rows
         ],
-        "total": len(rows),
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "view": view,
     }
 
 
@@ -74,6 +117,7 @@ def export_complaints_csv(
     scope: str = Query(default="awaiting", pattern="^(awaiting|all)$"),
     session: Session = Depends(get_session),
 ) -> Response:
+    """Compatibility CSV endpoint. New UI creates durable export batches."""
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow(["Complaint Number", "Complaint Remarks"])
@@ -91,15 +135,13 @@ def export_complaints_csv(
     )
 
 
-def _header_key(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "", value.casefold())
-
-
 @router.post("/imports")
 async def import_replies(
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
+    """Compatibility atomic import backed by the durable batch service."""
     filename = file.filename or "replies.csv"
     if not filename.casefold().endswith(".csv"):
         raise HTTPException(status_code=422, detail="Upload a UTF-8 CSV reply file.")
@@ -107,138 +149,68 @@ async def import_replies(
     await file.close()
     if len(content) > MAX_REPLY_FILE_BYTES:
         raise HTTPException(status_code=413, detail="The reply CSV exceeds 5 MB.")
+    service = CrmBulkOperationService(session, settings)
     try:
-        text = content.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=422, detail="The reply CSV must use UTF-8 encoding.") from exc
-    reader = csv.DictReader(io.StringIO(text))
-    headers = reader.fieldnames or []
-    if len(headers) != 2:
-        raise HTTPException(
-            status_code=422,
-            detail="Reply CSV must contain exactly two columns: Complaint Number and Reply.",
-        )
-    by_key = {_header_key(header): header for header in headers}
-    number_header = next(
-        (by_key[key] for key in ("complaintnumber", "complaintno", "number") if key in by_key),
-        None,
-    )
-    reply_header = next(
-        (by_key[key] for key in ("reply", "complaintreply", "remarks", "deoreply") if key in by_key),
-        None,
-    )
-    if number_header is None or reply_header is None or number_header == reply_header:
-        raise HTTPException(
-            status_code=422,
-            detail="Use headers 'Complaint Number' and 'Reply'.",
-        )
-
-    parsed: dict[str, tuple[str, int]] = {}
-    errors: list[str] = []
-    duplicates = 0
-    for row_number, row in enumerate(reader, start=2):
-        number = normalize_complaint_number(str(row.get(number_header) or ""))
-        reply = str(row.get(reply_header) or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-        if not number and not reply:
-            continue
-        if not number:
-            errors.append(f"Row {row_number}: invalid complaint number")
-            continue
-        if not reply:
-            errors.append(f"Row {row_number}: reply is empty for {number}")
-            continue
-        if number in parsed:
-            duplicates += 1
-        parsed[number] = (reply, row_number)
-    if not parsed and not errors:
-        errors.append("The reply CSV contains no reply rows")
-
-    cases = {
-        case.complaint_number: case
-        for case in session.exec(
-            select(ComplaintCase).where(ComplaintCase.complaint_number.in_(list(parsed)))
-        ).all()
-    }
-    for number in parsed:
-        case = cases.get(number)
-        if case is None:
-            errors.append(f"{number}: complaint case was not found")
-        elif case.state != "published":
-            errors.append(f"{number}: complaint is not published to Paperless yet")
-    if errors:
-        raise HTTPException(
-            status_code=422,
-            detail={"message": "Reply CSV validation failed", "errors": errors},
-        )
-
-    imported = 0
-    updated = 0
-    now = utcnow()
-    for number, (reply_text, row_number) in parsed.items():
-        case = cases[number]
-        existing = session.exec(
-            select(ComplaintReply).where(ComplaintReply.complaint_case_id == case.id)
-        ).first()
-        if existing is None:
-            existing = ComplaintReply(
-                complaint_case_id=case.id,
-                reply_text=reply_text,
-                source_filename=filename,
-                source_row=row_number,
+        validation = service.validate_import_batch(content=content, filename=filename)
+        if validation["status"] != "ready" or validation["failed_items"]:
+            items = service.list_items(uuid.UUID(validation["id"]), page=1, page_size=500)["items"]
+            errors = [
+                item["error_message"]
+                for item in items
+                if item.get("error_message")
+            ]
+            if not errors and validation.get("error_summary"):
+                errors = [validation["error_summary"]]
+            raise HTTPException(
+                status_code=422,
+                detail={"message": "Reply CSV validation failed", "errors": errors},
             )
-            imported += 1
-        else:
-            existing.reply_text = reply_text
-            existing.source_filename = filename
-            existing.source_row = row_number
-            existing.version += 1
-            existing.imported_at = now
-            existing.generated_at = None
-            existing.updated_at = now
-            updated += 1
-        session.add(existing)
-    session.commit()
-    return {
-        "rows": len(parsed),
-        "imported": imported,
-        "updated": updated,
-        "duplicate_rows": duplicates,
-        "letters_ready": len(parsed),
-    }
+        committed = service.commit_import_batch(uuid.UUID(validation["id"]), allow_partial=False)
+        summary = committed["commit_summary"]
+        return {
+            "batch_id": committed["id"],
+            "batch_number": committed["batch_number"],
+            "rows": validation["valid_items"],
+            "imported": summary["imported"],
+            "updated": summary["updated"],
+            "unchanged": summary["unchanged"],
+            "duplicate_rows": validation["duplicate_items"],
+            "letters_ready": summary["letters_ready"],
+        }
+    except HTTPException:
+        raise
+    except BulkOperationValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except BulkOperationError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/letter-packages")
-def download_reply_letters(session: Session = Depends(get_session)) -> Response:
-    rows = [(case, reply) for case, reply in _published_rows(session) if reply is not None]
-    if not rows:
-        raise HTTPException(status_code=409, detail="Import at least one reply before generating letters.")
-    output = io.BytesIO()
-    manifest = io.StringIO(newline="")
-    manifest_writer = csv.writer(manifest)
-    manifest_writer.writerow(["Complaint Number", "Paperless Document ID", "Reply Version", "ODT File"])
-    generated_at = utcnow()
-    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for case, reply in rows:
-            assert reply is not None
-            number = case.complaint_number or str(case.id)
-            relative = f"{number}/{number} - DEO Report.odt"
-            archive.writestr(relative, build_deo_report_odt(case, reply.reply_text))
-            manifest_writer.writerow(
-                [number, case.canonical_paperless_document_id or "", reply.version, relative]
-            )
-            reply.generated_at = generated_at
-            reply.updated_at = generated_at
-            session.add(reply)
-        archive.writestr("manifest.csv", "\ufeff" + manifest.getvalue())
-        archive.writestr(
-            "README.txt",
-            "Native CRM reply package. Each complaint folder contains its DEO Report ODT.\n",
+def download_reply_letters(
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    """Compatibility download backed by a durable formal-letter batch."""
+    service = CrmBulkOperationService(session, settings)
+    try:
+        batch = service.create_letter_batch(scope="all_imported")
+        artifact = next(
+            (item for item in batch["artifacts"] if item["kind"] == "letter_package"),
+            None,
         )
-    session.commit()
-    return Response(
-        content=output.getvalue(),
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="crm-deo-reply-letters-{len(rows)}.zip"'
-        },
-    )
+        if artifact is None:
+            raise BulkOperationError("The formal-letter package was not created")
+        _record, path = service.artifact_path(uuid.UUID(artifact["id"]))
+        return Response(
+            content=path.read_bytes(),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{artifact["name"]}"',
+                "X-CRM-Batch-ID": batch["id"],
+                "X-CRM-Batch-Number": batch["batch_number"],
+            },
+        )
+    except BulkOperationValidationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except BulkOperationError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

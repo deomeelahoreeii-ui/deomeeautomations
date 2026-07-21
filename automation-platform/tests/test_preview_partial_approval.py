@@ -303,7 +303,12 @@ def test_partial_approval_migration_is_the_single_linear_head() -> None:
             revisions[revision] = down_revision if isinstance(down_revision, str) else None
 
     referenced = {value for value in revisions.values() if value}
-    assert sorted(set(revisions) - referenced) == ["e9b3c5d7f104"]
+    assert sorted(set(revisions) - referenced) == ["f9e3a5c7d064"]
+    assert revisions["f9e3a5c7d064"] == "f7d1e3a5c842"
+    assert revisions["f7d1e3a5c842"] == "f5c9e1a3b620"
+    assert revisions["f5c9e1a3b620"] == "f3b7d9e1a408"
+    assert revisions["f3b7d9e1a408"] == "f1a5c7e9b306"
+    assert revisions["f1a5c7e9b306"] == "e9b3c5d7f104"
     assert revisions["e9b3c5d7f104"] == "d6e9f2a4b705"
     assert revisions["d6e9f2a4b705"] == "c3d8e1f4a702"
     assert revisions["b1f4a7c9d203"] == "a1c3e5f7b902"

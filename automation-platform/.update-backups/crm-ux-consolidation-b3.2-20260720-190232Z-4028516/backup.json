@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "bundle_id": "crm-ux-consolidation-b3.2",
+  "bundle_version": "B3.2",
+  "target_root": "/home/ahmad/code/deomeeautomations/automation-platform",
+  "created_at_utc": "2026-07-20T19:02:32.413090Z",
+  "status": "applied",
+  "entries": [
+    {
+      "path": "apps/web/src/components/DataTable.astro",
+      "existed": true,
+      "sha256_before": "6250cb4cf782baddf097f40ea31e534a74d3d29f73d940bb6a9eabc68dea924f",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/components/ui/CheckboxField.astro",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "apps/web/src/components/ui/ModalDialog.astro",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "apps/web/src/components/ui/StatusBadge.astro",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "apps/web/src/layouts/AppLayout.astro",
+      "existed": true,
+      "sha256_before": "61a3d9ffaa1c37712962e557f54bfc9452a94cd4a95edb38cd438955339741a9",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/[id].astro",
+      "existed": true,
+      "sha256_before": "c271e4da6bf17a7d0e5f109f9692d65d95d566b76d72abee4a16990d045e0ea4",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/index.astro",
+      "existed": true,
+      "sha256_before": "b0a0967a5c0afcdb3d9685950c97b88c78637ff2d1b725038a4d216d87526968",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/taxonomy/index.astro",
+      "existed": true,
+      "sha256_before": "0ebb185edb8546ecab509b784980106a4a05841362543bc0b577a1bab88efc9f",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/scripts/dialogs.ts",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "apps/web/src/styles/crm.css",
+      "existed": true,
+      "sha256_before": "dcbe1b2899aca5a2642d42f89527f20e55aaf7e33097b479862be3507ac126a2",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/styles/global.css",
+      "existed": true,
+      "sha256_before": "c059311f3fc6859e4e3ba028ea3208d30b0afd3ff90becd8b2a6e6521a4e965e",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/styles/master-data.css",
+      "existed": true,
+      "sha256_before": "9b579b5ddf6bfd8f26d908d30723a2310efa656cf4584f28a62d448695315c3c",
+      "mode_before": "0644"
+    },
+    {
+      "path": "tests/test_crm_ux_consolidation_b32.py",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    }
+  ],
+  "installed_at_utc": "2026-07-20T19:02:32.435801Z",
+  "verified_at_utc": "2026-07-20T19:02:38.027513Z",
+  "frontend_build_ran": true,
+  "full_checks_ran": false
+}

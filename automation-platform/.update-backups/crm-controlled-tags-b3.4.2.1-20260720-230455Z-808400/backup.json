@@ -1,0 +1,88 @@
+{
+  "schema_version": 2,
+  "bundle_id": "crm-controlled-tags-b3.4.2.1",
+  "bundle_version": "B3.4.2.1",
+  "target_root": "/home/ahmad/code/deomeeautomations/automation-platform",
+  "created_at_utc": "2026-07-20T23:04:55.633215Z",
+  "status": "applied",
+  "database_revision_before": "f3b7d9e1a408",
+  "entries": [
+    {
+      "path": "alembic/versions/f5c9e1a3b620_crm_controlled_tag_management.py",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "apps/web/src/pages/crm/taxonomy/tags/index.astro",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/bulk/classification/index.astro",
+      "existed": true,
+      "sha256_before": "1b73b0a6835a2b8b21c7d786086a0837047031117d1222e672738c78c0231017",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/taxonomy/index.astro",
+      "existed": true,
+      "sha256_before": "abc48b3dd16513a4f44ee7a0957e1f4a02419ecb0853e6bb0f9af56efb6f8e14",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/bulk/index.astro",
+      "existed": true,
+      "sha256_before": "eeb38ac4897b65e789690a9646b21e1091f7abf966a5af1447e423ac7a34a471",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/styles/crm.css",
+      "existed": true,
+      "sha256_before": "e1bee29454f79699c46f9fc2c23f8376901d1bc4f5c66e4bdc0f9e80d279553e",
+      "mode_before": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/models.py",
+      "existed": true,
+      "sha256_before": "6190b31fae3561d941eeb5ab2ba13d1914c6154ed4e5383c15d5e6dc9c359685",
+      "mode_before": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/__init__.py",
+      "existed": true,
+      "sha256_before": "ad64174b42d8008fcdb31cee4af449e584f0d1cbcaa19f5a78e680c44ace8e3c",
+      "mode_before": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/ai_pipeline.py",
+      "existed": true,
+      "sha256_before": "7873f43b8d6b01e317e57bdf8f8b40e1c22692bf73938e75093b2e6a01504464",
+      "mode_before": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/ai_pipeline_api.py",
+      "existed": true,
+      "sha256_before": "5320b9f1232f41ccf4c79a11c87593681ce4121fa3ff778aa64ecb863fe9802d",
+      "mode_before": "0644"
+    },
+    {
+      "path": "tests/test_crm_controlled_tags_b342.py",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "tests/test_preview_partial_approval.py",
+      "existed": true,
+      "sha256_before": "8ef8f4a0d09e0bb731a1e38ce2b793442b1adf997d56311d5fd93b072cdd8e13",
+      "mode_before": "0644"
+    }
+  ],
+  "installed_at_utc": "2026-07-20T23:04:55.653226Z",
+  "database_revision_after": "f5c9e1a3b620",
+  "verified_at_utc": "2026-07-20T23:06:06.987174Z",
+  "test_mode": "complete",
+  "frontend_build_ran": true
+}

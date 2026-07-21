@@ -1,0 +1,149 @@
+---
+import CrmLayout from "../../../../layouts/CrmLayout.astro";
+import DataTable from "../../../../components/DataTable.astro";
+import CheckboxField from "../../../../components/ui/CheckboxField.astro";
+
+const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+---
+
+<CrmLayout
+  title="Controlled Complaint Tags"
+  description="Create, organize, search and safely merge the controlled tags used by AI classification and complaint review."
+  page="taxonomy"
+>
+  <a class="btn btn-sm" href="/crm/taxonomy/" slot="actions">Categories &amp; Subcategories</a>
+  <a class="btn btn-sm" href="/crm/replies/bulk/classification/" slot="actions">Review Suggestions</a>
+
+  <main id="tag-management" data-api-base={apiBase} class="crm32-page tag-management-page">
+    <nav class="taxonomy-mode-tabs" aria-label="Taxonomy management modes">
+      <a href="/crm/taxonomy/">Categories &amp; Subcategories</a>
+      <a class="active" href="/crm/taxonomy/tags/">Controlled Tags</a>
+      <a href="/crm/replies/bulk/classification/#taxonomy-suggestions">Suggestions</a>
+    </nav>
+
+    <section class="crm-metric-grid tag-summary" aria-label="Controlled tag summary">
+      <article class="crm-metric-card"><span>Active tags</span><strong id="tag-stat-active">—</strong><small id="tag-stat-inactive">— inactive or merged</small></article>
+      <article class="crm-metric-card"><span>Tag groups</span><strong id="tag-stat-groups">—</strong><small>Controlled dimensions</small></article>
+      <article class="crm-metric-card"><span>Complaint links</span><strong id="tag-stat-links">—</strong><small>Current tag assignments</small></article>
+      <article class="crm-metric-card"><span>Suggestions</span><strong id="tag-stat-suggestions">—</strong><small>Awaiting taxonomy review</small></article>
+    </section>
+
+    <section class="master-card crm-page-toolbar tag-toolbar">
+      <div class="crm-page-toolbar-copy">
+        <p class="eyebrow">Controlled vocabulary</p>
+        <h2>Tags add detail without fragmenting the category tree</h2>
+        <p>Use categories for broad domains, subcategories for the main complaint type, and controlled tags for institution, evidence, routing, secondary issues and handling.</p>
+      </div>
+      <div class="crm-page-toolbar-actions tag-toolbar-actions">
+        <input id="tag-search" class="input input-bordered" type="search" placeholder="Search tag, alias or description…" />
+        <select id="tag-group-filter" class="select select-bordered"><option value="">All groups</option></select>
+        <select id="tag-status-filter" class="select select-bordered"><option value="active">Active</option><option value="inactive">Inactive / merged</option><option value="all">All tags</option></select>
+        <button id="refresh-tags" class="btn" type="button">↻ Refresh</button>
+        <button id="manage-groups" class="btn" type="button">Manage groups</button>
+        <button id="new-tag" class="btn btn-primary" type="button">+ New tag</button>
+      </div>
+    </section>
+
+    <section class="master-card tag-table-card">
+      <DataTable id="controlled-tags-table" pageSize={25} pageSizeOptions={[10,25,50,100]} emptyText="No controlled tags match the current filters." ariaLabel="Controlled complaint tags" class="controlled-tags-table" />
+    </section>
+
+    <dialog id="tag-dialog" class="modal crm-modal">
+      <form id="tag-form" class="modal-box crm-modal-box tag-editor-dialog">
+        <header class="crm-modal-header"><div><p class="eyebrow">Controlled tag</p><h2 id="tag-dialog-title">New tag</h2><p>Create a reusable controlled option. Similar names and aliases are rejected to prevent duplicates.</p></div><button class="btn btn-sm" type="button" data-close-dialog aria-label="Close">×</button></header>
+        <div class="crm-modal-body">
+          <input id="tag-id" type="hidden" />
+          <div class="form-grid-two">
+            <label class="crm-field" for="tag-display-name"><span>Display name</span><input id="tag-display-name" class="input input-bordered" required maxlength="140" placeholder="Advance fee" /></label>
+            <label class="crm-field" for="tag-slug"><span>System slug</span><input id="tag-slug" class="input input-bordered" required maxlength="120" placeholder="advance-fee" /><small>Stable value used in CSV packages and AI output.</small></label>
+          </div>
+          <label class="crm-field" for="tag-group"><span>Group</span><select id="tag-group" class="select select-bordered" required></select></label>
+          <label class="crm-field" for="tag-description"><span>Description</span><textarea id="tag-description" class="textarea textarea-bordered" rows="3" maxlength="4000" placeholder="When this controlled tag should be applied."></textarea></label>
+          <label class="crm-field" for="tag-aliases"><span>Aliases</span><textarea id="tag-aliases" class="textarea textarea-bordered" rows="3" placeholder="advance vacation fee&#10;lump-sum fee&#10;three months fee"></textarea><small>One alias per line or comma-separated. Aliases improve search and duplicate detection.</small></label>
+          <div class="tag-setting-grid">
+            <CheckboxField id="tag-active" label="Active" description="Available for human assignment." checked />
+            <CheckboxField id="tag-ai-available" label="Available to AI" description="Included in classification ZIP files and AI tag search." checked />
+          </div>
+        </div>
+        <footer class="crm-modal-footer"><button class="btn" type="button" data-close-dialog>Cancel</button><button id="save-tag" class="btn btn-primary" type="submit">Save tag</button></footer>
+      </form>
+      <form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
+    </dialog>
+
+    <dialog id="groups-dialog" class="modal crm-modal">
+      <div class="modal-box crm-modal-box tag-groups-dialog">
+        <header class="crm-modal-header"><div><p class="eyebrow">Controlled dimensions</p><h2>Tag groups</h2><p>Groups organize a flat tag vocabulary. They are not nested taxonomy levels.</p></div><button class="btn btn-sm" type="button" data-close-dialog aria-label="Close">×</button></header>
+        <div class="crm-modal-body tag-groups-layout">
+          <section><h3>Existing groups</h3><div id="tag-group-list" class="tag-group-list"></div></section>
+          <form id="tag-group-form" class="tag-group-editor">
+            <input id="tag-group-id" type="hidden" />
+            <h3 id="tag-group-form-title">New group</h3>
+            <label class="crm-field" for="tag-group-name"><span>Name</span><input id="tag-group-name" class="input input-bordered" required maxlength="120" /></label>
+            <label class="crm-field" for="tag-group-slug"><span>Slug</span><input id="tag-group-slug" class="input input-bordered" maxlength="80" placeholder="institution" /><small>The slug is fixed after creation.</small></label>
+            <label class="crm-field" for="tag-group-description"><span>Description</span><textarea id="tag-group-description" class="textarea textarea-bordered" rows="3" maxlength="2000"></textarea></label>
+            <label class="crm-field" for="tag-group-order"><span>Display order</span><input id="tag-group-order" class="input input-bordered" type="number" min="0" max="9999" value="100" /></label>
+            <CheckboxField id="tag-group-active" label="Active" description="Available for new or edited tags." checked />
+            <div class="tag-group-form-actions"><button id="reset-group-form" class="btn" type="button">Clear</button><button class="btn btn-primary" type="submit">Save group</button></div>
+          </form>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
+    </dialog>
+
+    <dialog id="merge-tag-dialog" class="modal crm-modal">
+      <form id="merge-tag-form" class="modal-box crm-modal-box crm-confirm-dialog">
+        <header class="crm-modal-header"><div><p class="eyebrow">Merge controlled tag</p><h2 id="merge-tag-title">Merge tag</h2><p>Complaint links move to the target tag. The old name becomes an alias and remains in history.</p></div><button class="btn btn-sm" type="button" data-close-dialog aria-label="Close">×</button></header>
+        <div class="crm-modal-body"><input id="merge-source-id" type="hidden" /><label class="crm-field" for="merge-target-id"><span>Merge into</span><select id="merge-target-id" class="select select-bordered" required></select></label></div>
+        <footer class="crm-modal-footer"><button class="btn" type="button" data-close-dialog>Cancel</button><button class="btn btn-error" type="submit">Merge tag</button></footer>
+      </form>
+      <form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
+    </dialog>
+
+    <div id="tag-toast" class="crm-toast" role="status" aria-live="polite" hidden></div>
+  </main>
+
+  <script>
+    import { badge, stack } from "../../../../scripts/table-cells";
+    type Tag={id:string;name:string;display_name:string;group:string;description:string;aliases:string[];ai_available:boolean;active:boolean;merged_into_id?:string|null;version:number;usage_count:number;created_at:string;updated_at:string};
+    type TagGroup={id:string;slug:string;name:string;description:string;display_order:number;active:boolean;tag_count:number};
+    const root=document.getElementById("tag-management") as HTMLElement;
+    const API=root.dataset.apiBase||"";
+    const $=<T extends HTMLElement=HTMLElement>(id:string)=>document.getElementById(id) as T;
+    const table=$("controlled-tags-table") as HTMLElement & {configure:(config:any)=>Promise<void>;refresh:(reset?:boolean)=>Promise<void>};
+    const tagDialog=$("tag-dialog") as HTMLDialogElement;
+    const groupsDialog=$("groups-dialog") as HTMLDialogElement;
+    const mergeDialog=$("merge-tag-dialog") as HTMLDialogElement;
+    let groups:TagGroup[]=[];
+    let currentRows:Tag[]=[];
+    let slugTouched=false;
+    function toast(message:string,error=false){const node=$("tag-toast");node.textContent=message;node.classList.toggle("error",error);node.hidden=false;setTimeout(()=>node.hidden=true,4500)}
+    async function api(path:string,options?:RequestInit){const response=await fetch(`${API}${path}`,options);let body:any={};try{body=await response.json()}catch{}if(!response.ok)throw new Error(body.detail||`Request failed (${response.status})`);return body}
+    function slug(value:string){return value.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,120)}
+    function aliases(value:string){return Array.from(new Set(value.split(/[\n,;]+/).map(item=>item.trim()).filter(Boolean)))}
+    function closeNearest(event:Event){const button=event.currentTarget as HTMLElement;const dialog=button.closest("dialog") as HTMLDialogElement|null;if(dialog?.open)dialog.close()}
+    document.querySelectorAll<HTMLElement>("[data-close-dialog]").forEach(button=>button.addEventListener("click",closeNearest));
+    function groupName(value:string){return groups.find(row=>row.slug===value)?.name||value.replaceAll("-"," ")}
+    async function loadGroups(){const data=await api("/api/v1/crm/ai-pipeline/tag-groups?include_inactive=true");groups=data.items||[];const filter=$("tag-group-filter") as HTMLSelectElement;const selected=filter.value;filter.innerHTML='<option value="">All groups</option>'+groups.map(row=>`<option value="${row.slug}">${row.name}${row.active?"":" (inactive)"}</option>`).join("");filter.value=selected;const editor=$("tag-group") as HTMLSelectElement;const editorSelected=editor.value;editor.innerHTML=groups.filter(row=>row.active||row.slug===editorSelected).map(row=>`<option value="${row.slug}">${row.name}</option>`).join("");if(editorSelected)editor.value=editorSelected;renderGroupList()}
+    async function loadStats(){const data=await api("/api/v1/crm/ai-pipeline/tag-statistics");$("tag-stat-active").textContent=String(data.active_tags||0);$("tag-stat-inactive").textContent=`${data.inactive_tags||0} inactive or merged`;$("tag-stat-groups").textContent=String(data.active_groups||0);$("tag-stat-links").textContent=String(data.tag_links||0);$("tag-stat-suggestions").textContent=String(data.pending_suggestions||0)}
+    function renderGroupList(){const node=$("tag-group-list");node.innerHTML=groups.length?groups.map(row=>`<button type="button" class="tag-group-row" data-group-id="${row.id}"><span><strong>${row.name}</strong><small>${row.slug} · ${row.tag_count} tags</small></span><span class="crm-status-badge ${row.active?"":"inactive"}">${row.active?"Active":"Inactive"}</span></button>`).join(""):'<div class="crm-empty-state compact">No groups configured.</div>';node.querySelectorAll<HTMLElement>("[data-group-id]").forEach(button=>button.addEventListener("click",()=>editGroup(button.dataset.groupId||"")))}
+    function resetGroup(){($("tag-group-form") as HTMLFormElement).reset();($("tag-group-id") as HTMLInputElement).value="";($("tag-group-order") as HTMLInputElement).value="100";($("tag-group-active") as HTMLInputElement).checked=true;($("tag-group-slug") as HTMLInputElement).disabled=false;$("tag-group-form-title").textContent="New group"}
+    function editGroup(id:string){const row=groups.find(item=>item.id===id);if(!row)return;($("tag-group-id") as HTMLInputElement).value=row.id;($("tag-group-name") as HTMLInputElement).value=row.name;($("tag-group-slug") as HTMLInputElement).value=row.slug;($("tag-group-slug") as HTMLInputElement).disabled=true;($("tag-group-description") as HTMLTextAreaElement).value=row.description;($("tag-group-order") as HTMLInputElement).value=String(row.display_order);($("tag-group-active") as HTMLInputElement).checked=row.active;$("tag-group-form-title").textContent=`Edit ${row.name}`}
+    function openTag(row?:Tag){slugTouched=Boolean(row);$("tag-dialog-title").textContent=row?`Edit ${row.display_name}`:"New tag";($("tag-id") as HTMLInputElement).value=row?.id||"";($("tag-display-name") as HTMLInputElement).value=row?.display_name||"";($("tag-slug") as HTMLInputElement).value=row?.name||"";($("tag-description") as HTMLTextAreaElement).value=row?.description||"";($("tag-aliases") as HTMLTextAreaElement).value=(row?.aliases||[]).join("\n");($("tag-active") as HTMLInputElement).checked=row?.active??true;($("tag-ai-available") as HTMLInputElement).checked=row?.ai_available??true;const group=$("tag-group") as HTMLSelectElement;group.value=row?.group||groups.find(item=>item.active)?.slug||"issue";tagDialog.showModal();($("tag-display-name") as HTMLInputElement).focus()}
+    async function saveTag(event:SubmitEvent){event.preventDefault();const id=($("tag-id") as HTMLInputElement).value;const payload={display_name:($("tag-display-name") as HTMLInputElement).value.trim(),slug:($("tag-slug") as HTMLInputElement).value.trim(),group_name:($("tag-group") as HTMLSelectElement).value,description:($("tag-description") as HTMLTextAreaElement).value,aliases:aliases(($("tag-aliases") as HTMLTextAreaElement).value),active:($("tag-active") as HTMLInputElement).checked,ai_available:($("tag-ai-available") as HTMLInputElement).checked};const button=$("save-tag") as HTMLButtonElement;button.disabled=true;try{await api(id?`/api/v1/crm/ai-pipeline/tags/${id}`:"/api/v1/crm/ai-pipeline/tags",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});tagDialog.close();toast(id?"Controlled tag updated.":"Controlled tag created.");await Promise.all([table.refresh(false),loadStats(),loadGroups()])}catch(error){toast(error instanceof Error?error.message:String(error),true)}finally{button.disabled=false}}
+    async function deactivate(row:Tag){if(!confirm(`Deactivate ${row.display_name}? Existing complaint links are preserved.`))return;try{await api(`/api/v1/crm/ai-pipeline/tags/${row.id}/deactivate`,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});toast("Controlled tag deactivated.");await Promise.all([table.refresh(false),loadStats()])}catch(error){toast(error instanceof Error?error.message:String(error),true)}}
+    async function openMerge(row:Tag){const data=await api("/api/v1/crm/ai-pipeline/tags?status=active&page_size=200");const targets=(data.items||[]).filter((item:Tag)=>item.id!==row.id);if(!targets.length){toast("Create another active tag before merging.",true);return}($("merge-source-id") as HTMLInputElement).value=row.id;$("merge-tag-title").textContent=`Merge ${row.display_name}`;($("merge-target-id") as HTMLSelectElement).innerHTML=targets.map((item:Tag)=>`<option value="${item.id}">${item.display_name} · ${groupName(item.group)}</option>`).join("");mergeDialog.showModal()}
+    async function mergeTag(event:SubmitEvent){event.preventDefault();const source=($("merge-source-id") as HTMLInputElement).value;const target=($("merge-target-id") as HTMLSelectElement).value;try{await api(`/api/v1/crm/ai-pipeline/tags/${source}/merge`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({target_tag_id:target})});mergeDialog.close();toast("Controlled tags merged and complaint links preserved.");await Promise.all([table.refresh(false),loadStats(),loadGroups()])}catch(error){toast(error instanceof Error?error.message:String(error),true)}}
+    function actions(row:Tag){const wrap=document.createElement("div");wrap.className="table-action-row";const edit=document.createElement("button");edit.type="button";edit.className="btn btn-xs";edit.textContent="Edit";edit.disabled=Boolean(row.merged_into_id);edit.addEventListener("click",()=>openTag(row));const more=document.createElement("details");more.className="crm-inline-menu";const summary=document.createElement("summary");summary.className="table-action";summary.textContent="More";const menu=document.createElement("div");menu.className="crm-inline-menu-popover";const disable=document.createElement("button");disable.type="button";disable.textContent="Deactivate";disable.disabled=!row.active||Boolean(row.merged_into_id);disable.addEventListener("click",()=>void deactivate(row));const merge=document.createElement("button");merge.type="button";merge.textContent="Merge into…";merge.disabled=!row.active||Boolean(row.merged_into_id);merge.addEventListener("click",()=>void openMerge(row));menu.append(disable,merge);more.append(summary,menu);wrap.append(edit,more);return wrap}
+    async function configure(){await table.configure({columns:[
+      {accessorKey:"display_name",header:"Tag",meta:{minWidth:"220px"},cell:(c:any)=>{const row=c.row.original as Tag;return stack(row.display_name,row.name)}},
+      {accessorKey:"group",header:"Group",meta:{minWidth:"130px"},cell:(c:any)=>groupName(c.getValue())},
+      {id:"meaning",header:"Description / aliases",meta:{minWidth:"300px"},cell:(c:any)=>{const row=c.row.original as Tag;return stack(row.description||"No description",row.aliases.length?`Aliases: ${row.aliases.join(", ")}`:"No aliases")}},
+      {accessorKey:"usage_count",header:"Used by",meta:{width:"90px",align:"right"}},
+      {id:"ai",header:"AI",meta:{width:"95px"},cell:(c:any)=>badge(c.row.original.ai_available?"Available":"Hidden",c.row.original.ai_available?"":"inactive")},
+      {id:"status",header:"Status",meta:{width:"110px"},cell:(c:any)=>{const row=c.row.original as Tag;return badge(row.merged_into_id?"Merged":row.active?"Active":"Inactive",row.active&&!row.merged_into_id?"":"inactive")}},
+      {id:"actions",header:"",meta:{width:"130px",align:"right"},cell:(c:any)=>actions(c.row.original)}
+    ],manualPagination:true,getRowId:(row:Tag)=>row.id,loadPage:async(pageIndex:number,pageSize:number)=>{const p=new URLSearchParams({page:String(pageIndex+1),page_size:String(pageSize),status:($("tag-status-filter") as HTMLSelectElement).value});const search=($("tag-search") as HTMLInputElement).value.trim();const group=($("tag-group-filter") as HTMLSelectElement).value;if(search)p.set("search",search);if(group)p.set("group",group);const data=await api(`/api/v1/crm/ai-pipeline/tags?${p}`);currentRows=data.items||[];return{rows:currentRows,total:data.total||0}}})}
+    let timer:number|undefined;$("tag-search").addEventListener("input",()=>{clearTimeout(timer);timer=window.setTimeout(()=>void table.refresh(true),250)});$("tag-group-filter").addEventListener("change",()=>void table.refresh(true));$("tag-status-filter").addEventListener("change",()=>void table.refresh(true));$("refresh-tags").addEventListener("click",()=>void Promise.all([table.refresh(false),loadStats(),loadGroups()]));$("new-tag").addEventListener("click",()=>openTag());$("manage-groups").addEventListener("click",()=>{resetGroup();groupsDialog.showModal()});$("tag-form").addEventListener("submit",event=>void saveTag(event as SubmitEvent));$("merge-tag-form").addEventListener("submit",event=>void mergeTag(event as SubmitEvent));$("tag-display-name").addEventListener("input",()=>{if(!slugTouched)($("tag-slug") as HTMLInputElement).value=slug(($("tag-display-name") as HTMLInputElement).value)});$("tag-slug").addEventListener("input",()=>{slugTouched=true});$("tag-group-name").addEventListener("input",()=>{const input=$("tag-group-slug") as HTMLInputElement;if(!input.disabled&&!input.dataset.touched)input.value=slug(($("tag-group-name") as HTMLInputElement).value)});$("tag-group-slug").addEventListener("input",event=>(event.currentTarget as HTMLInputElement).dataset.touched="true");$("reset-group-form").addEventListener("click",resetGroup);$("tag-group-form").addEventListener("submit",async(event)=>{event.preventDefault();const id=($("tag-group-id") as HTMLInputElement).value;const payload={name:($("tag-group-name") as HTMLInputElement).value.trim(),slug:($("tag-group-slug") as HTMLInputElement).value.trim()||null,description:($("tag-group-description") as HTMLTextAreaElement).value,display_order:Number(($("tag-group-order") as HTMLInputElement).value||100),active:($("tag-group-active") as HTMLInputElement).checked};try{await api(id?`/api/v1/crm/ai-pipeline/tag-groups/${id}`:"/api/v1/crm/ai-pipeline/tag-groups",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});toast(id?"Tag group updated.":"Tag group created.");resetGroup();await Promise.all([loadGroups(),loadStats(),table.refresh(false)])}catch(error){toast(error instanceof Error?error.message:String(error),true)}});
+    void Promise.all([loadGroups(),loadStats(),configure()]).catch(error=>toast(error instanceof Error?error.message:String(error),true));
+  </script>
+</CrmLayout>

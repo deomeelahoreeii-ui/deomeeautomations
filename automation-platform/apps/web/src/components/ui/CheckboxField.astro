@@ -1,0 +1,43 @@
+---
+interface Props {
+  id: string;
+  label: string;
+  description?: string;
+  checked?: boolean;
+  disabled?: boolean;
+  name?: string;
+  value?: string;
+  wide?: boolean;
+  compact?: boolean;
+  class?: string;
+}
+
+const {
+  id,
+  label,
+  description = "",
+  checked = false,
+  disabled = false,
+  name,
+  value,
+  wide = false,
+  compact = false,
+  class: className = "",
+} = Astro.props;
+---
+
+<label class:list={["crm-check-field", { wide, compact }, className]} for={id}>
+  <input
+    id={id}
+    class="checkbox checkbox-sm"
+    type="checkbox"
+    name={name}
+    value={value}
+    checked={checked}
+    disabled={disabled}
+  />
+  <span class="crm-check-copy">
+    <strong>{label}</strong>
+    {description && <small>{description}</small>}
+  </span>
+</label>

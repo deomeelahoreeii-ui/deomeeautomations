@@ -11,6 +11,7 @@ DEV_SCRIPT = ROOT / "scripts/dev.sh"
 CASE_PAGE = ROOT / "apps/web/src/pages/crm/cases/[id].astro"
 CASE_LIST_PAGE = ROOT / "apps/web/src/pages/crm/cases/index.astro"
 REPLY_PAGE = ROOT / "apps/web/src/pages/crm/replies/index.astro"
+BULK_REPLY_PAGE = ROOT / "apps/web/src/pages/crm/replies/bulk/index.astro"
 
 
 def test_crm_intake_navigation_exposes_review_workspace() -> None:
@@ -99,15 +100,17 @@ def test_approved_cases_can_be_verified_and_batch_published_to_crm_pending() -> 
     assert "Ready for CRM Pending" in detail_source
 
 
-def test_native_reply_workspace_exposes_export_import_and_letter_generation() -> None:
+def test_native_reply_workspace_exposes_batch_export_import_and_letter_generation() -> None:
     source = REPLY_PAGE.read_text(encoding="utf-8")
+    bulk_source = BULK_REPLY_PAGE.read_text(encoding="utf-8")
     review_source = LIST_PAGE.read_text(encoding="utf-8")
-    assert "Export complaint remarks" in source
-    assert "Import ChatGPT reply CSV" in source
-    assert "Generate DEO Report package" in source
-    assert "/api/v1/crm/replies/complaints.csv" in source
-    assert "/api/v1/crm/replies/imports" in source
-    assert "/api/v1/crm/replies/letter-packages" in source
+    assert 'href="/crm/replies/bulk/"' in source
+    assert "Export batch" in bulk_source
+    assert "Validate before changing replies" in bulk_source
+    assert "Formal-letter batch" in bulk_source
+    assert "/api/v1/crm/bulk-operations/export-batches" in bulk_source
+    assert "/api/v1/crm/bulk-operations/import-batches/validate" in bulk_source
+    assert "/api/v1/crm/bulk-operations/letter-batches" in bulk_source
     assert "Replies & formal letters" in review_source
 
 

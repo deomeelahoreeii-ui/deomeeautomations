@@ -1,0 +1,40 @@
+---
+import CrmLayout from "../../../../../layouts/CrmLayout.astro";
+import DataTable from "../../../../../components/DataTable.astro";
+const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+---
+<CrmLayout title="CRM Bulk Batches" description="Search and inspect classification, contextual reply, import and formal-letter batches." page="replies">
+  <a class="btn btn-sm" href="/crm/replies/bulk/" slot="actions">← Bulk Operations</a>
+  <main id="batch-list-page" data-api-base={apiBase} class="crm32-page bulk-batch-list-page">
+    <nav class="reply-mode-tabs" aria-label="Reply workspace modes"><a href="/crm/replies/">Reply Queue</a><a class="active" href="/crm/replies/bulk/">Bulk Operations</a></nav>
+    <section class="master-card bulk-list-filters">
+      <header class="crm-card-heading"><div><p class="eyebrow">Batch history</p><h2>All bulk-operation batches</h2><p>Filter by operation or state, then open any batch for item-level results and artifacts.</p></div><button id="refresh-list" class="btn btn-sm" type="button">↻ Refresh</button></header>
+      <div class="reply-primary-filters">
+        <label class="crm-field reply-search-filter"><span>Search</span><input id="batch-search" class="input input-bordered" placeholder="Batch number, filename or operator…" /></label>
+        <label class="crm-field"><span>Operation</span><select id="batch-type" class="select select-bordered"><option value="">All operations</option><option value="classification_export">Classification exports</option><option value="classification_import">Classification imports</option><option value="reply_context_export">Reply context packages</option><option value="reply_export">Basic reply exports</option><option value="reply_import">Reply imports</option><option value="formal_letters">Formal letters</option></select></label>
+        <label class="crm-field"><span>Status</span><select id="batch-status" class="select select-bordered"><option value="">All statuses</option><option value="ready">Ready</option><option value="processing">Processing</option><option value="completed">Completed</option><option value="completed_with_errors">Completed with errors</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option></select></label>
+        <button id="clear-batch-filters" class="btn" type="button">Clear</button>
+      </div>
+    </section>
+    <section class="master-card bulk-recent-card"><DataTable id="all-batches-table" pageSize={25} pageSizeOptions={[25,50,100]} emptyText="No batches match the current filters." ariaLabel="CRM bulk-operation batch history" class="bulk-batches-table" /></section>
+    <div id="batch-list-toast" class="crm-toast" role="status" aria-live="polite" hidden></div>
+  </main>
+  <script>
+    import { badge, stack } from "../../../../../scripts/table-cells";
+    type Batch={id:string;batch_number:string;operation_type:string;status:string;source_filename?:string|null;parent_batch_id?:string|null;total_items:number;successful_items:number;failed_items:number;skipped_items:number;created_by:string;created_at:string;completed_at?:string|null};
+    const root=document.getElementById("batch-list-page") as HTMLElement; const API=root.dataset.apiBase||""; const $=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T; const table=$("all-batches-table") as any;
+    const typeLabel=(v:string)=>({classification_export:"Classification export",classification_import:"Classification import",reply_context_export:"Reply context package",reply_export:"Basic reply export",reply_import:"Reply import",formal_letters:"Formal letters"}[v]||v.replaceAll("_"," ")); const tone=(v:string)=>v==="completed"?"success":v==="ready"||v==="completed_with_errors"?"warning":v==="failed"||v==="cancelled"?"danger":"info"; const dt=(v?:string|null)=>v?new Date(v).toLocaleString():"—";
+    async function api(path:string){const r=await fetch(`${API}${path}`);const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.detail||r.statusText);return b}
+    function params(pageIndex:number,pageSize:number){const p=new URLSearchParams({page:String(pageIndex+1),page_size:String(pageSize)});const type=($("batch-type") as HTMLSelectElement).value,status=($("batch-status") as HTMLSelectElement).value,search=($("batch-search") as HTMLInputElement).value.trim();if(type)p.set("operation_type",type);if(status)p.set("status",status);if(search)p.set("search",search);history.replaceState(null,"",`${location.pathname}?${p}`);return p}
+    async function configure(){const url=new URLSearchParams(location.search);($("batch-type") as HTMLSelectElement).value=url.get("type")||url.get("operation_type")||"";($("batch-status") as HTMLSelectElement).value=url.get("status")||"";($("batch-search") as HTMLInputElement).value=url.get("search")||"";await table.configure({columns:[
+      {accessorKey:"batch_number",header:"Batch",meta:{minWidth:"190px"},cell:(c:any)=>{const r=c.row.original as Batch,a=document.createElement("a");a.className="table-primary-link";a.href=`/crm/replies/bulk/batches/${r.id}/`;a.textContent=r.batch_number;return a}},
+      {accessorKey:"operation_type",header:"Operation",meta:{minWidth:"155px"},cell:(c:any)=>stack(typeLabel(c.getValue()),c.row.original.source_filename||"")},
+      {accessorKey:"status",header:"Status",meta:{minWidth:"160px"},cell:(c:any)=>badge(String(c.getValue()).replaceAll("_"," "),tone(c.getValue()))},
+      {id:"lineage",header:"Lineage",meta:{minWidth:"130px"},cell:(c:any)=>c.row.original.parent_batch_id?"Has parent batch":"Root batch"},
+      {id:"items",header:"Items",meta:{minWidth:"170px"},cell:(c:any)=>{const r=c.row.original as Batch;return stack(`${r.successful_items} successful`,`${r.failed_items} failed · ${r.skipped_items} skipped · ${r.total_items} total`)}},
+      {accessorKey:"created_at",header:"Created",meta:{minWidth:"170px"},cell:(c:any)=>stack(dt(c.getValue()),c.row.original.created_by||"web-operator")},
+      {id:"actions",header:"",meta:{width:"80px",align:"right"},cell:(c:any)=>{const a=document.createElement("a");a.className="btn btn-xs";a.href=`/crm/replies/bulk/batches/${c.row.original.id}/`;a.textContent="Open";return a}}
+    ],manualPagination: true,getRowId:(r:Batch)=>r.id,loadPage:async(i:number,s:number)=>{const d=await api(`/api/v1/crm/bulk-operations/batches?${params(i,s)}`);return{rows:d.items||[],total:d.total||0}}})}
+    let timer:number|undefined;($("batch-search") as HTMLInputElement).addEventListener("input",()=>{clearTimeout(timer);timer=window.setTimeout(()=>void table.refresh(true),250)});["batch-type","batch-status"].forEach(id=>$(id).addEventListener("change",()=>void table.refresh(true)));$("clear-batch-filters").addEventListener("click",()=>{($("batch-search") as HTMLInputElement).value="";($("batch-type") as HTMLSelectElement).value="";($("batch-status") as HTMLSelectElement).value="";void table.refresh(true)});$("refresh-list").addEventListener("click",()=>void table.refresh(false));void configure();
+  </script>
+</CrmLayout>

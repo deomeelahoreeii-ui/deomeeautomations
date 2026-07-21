@@ -1,5 +1,9 @@
 ---
 import CrmLayout from "../../../layouts/CrmLayout.astro";
+import DataTable from "../../../components/DataTable.astro";
+import CheckboxField from "../../../components/ui/CheckboxField.astro";
+import ModalDialog from "../../../components/ui/ModalDialog.astro";
+
 const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
 ---
 
@@ -11,130 +15,567 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
   <a class="btn btn-sm" href="/crm/taxonomy/" slot="actions">Manage Taxonomy</a>
   <a class="btn btn-sm" href="/crm/knowledge/" slot="actions">AI Reply Archive</a>
 
-  <main id="reply-workspace" data-api-base={apiBase} class="reply-shell">
+  <main id="reply-workspace" data-api-base={apiBase} class="crm32-page reply-workspace-page">
     <nav class="reply-mode-tabs" aria-label="Reply workspace modes">
-      <button class="active" data-tab="queue" type="button">Reply Queue</button>
-      <button data-tab="csv" type="button">Bulk CSV</button>
-      <button data-tab="letters" type="button">Formal Letters</button>
+      <a class="active" href="/crm/replies/">Reply Queue</a>
+      <a href="/crm/replies/bulk/">Bulk Operations</a>
+      <a href="/crm/replies/official-letters/">Official Letters</a>
     </nav>
 
     <section id="tab-queue" data-tab-panel="queue" class="reply-tab-panel">
-      <section class="reply-summary" aria-label="Reply workflow summary">
-        <article class="metric-card"><span>Awaiting classification</span><strong id="stat-unclassified">—</strong><small>Choose category and subcategory</small></article>
-        <article class="metric-card"><span>Awaiting reply</span><strong id="stat-awaiting">—</strong><small>No saved reply yet</small></article>
-        <article class="metric-card"><span>Draft / pending</span><strong id="stat-drafts">—</strong><small id="stat-pending">— pending approval</small></article>
-        <article class="metric-card"><span>Approved / issued</span><strong id="stat-approved">—</strong><small id="stat-issued">— issued</small></article>
-        <article class="metric-card"><span>AI ready</span><strong id="stat-ai-ready">—</strong><small>Verified approved archive records</small></article>
+      <section class="crm-metric-grid reply-summary" aria-label="Reply workflow summary">
+        <article class="crm-metric-card"><span>Awaiting classification</span><strong id="stat-unclassified">—</strong><small>Choose category and subcategory</small></article>
+        <article class="crm-metric-card"><span>Awaiting reply</span><strong id="stat-awaiting">—</strong><small>No saved reply yet</small></article>
+        <article class="crm-metric-card"><span>Draft / pending</span><strong id="stat-drafts">—</strong><small id="stat-pending">— pending approval</small></article>
+        <article class="crm-metric-card"><span>Approved / issued</span><strong id="stat-approved">—</strong><small id="stat-issued">— issued</small></article>
+        <article class="crm-metric-card"><span>AI ready</span><strong id="stat-ai-ready">—</strong><small>Verified approved archive records</small></article>
       </section>
 
       <section class="master-card reply-filter-card">
-        <div class="reply-filter-heading">
-          <div><p class="eyebrow">Primary workflow</p><h2>Complaint reply queue</h2><p>Routing is optional. Classification and approved replies are the only requirements for the AI archive.</p></div>
-          <div class="reply-filter-actions"><button id="refresh-queue" class="btn btn-sm" type="button">↻ Refresh</button><a class="btn btn-primary btn-sm" href="/crm/knowledge/">Open AI archive</a></div>
+        <header class="crm-card-heading reply-filter-heading">
+          <div>
+            <p class="eyebrow">Primary workflow</p>
+            <h2>Complaint reply queue</h2>
+            <p>Complaint numbers, text previews, classifications, workflow state and connections are arranged in dedicated columns.</p>
+          </div>
+          <div class="reply-filter-actions">
+            <button id="refresh-queue" class="btn btn-sm" type="button">↻ Refresh</button>
+            <a class="btn btn-primary btn-sm" href="/crm/knowledge/">Open AI archive</a>
+          </div>
+        </header>
+
+        <div class="reply-primary-filters">
+          <label class="crm-field reply-search-filter" for="filter-search"><span>Search</span><input id="filter-search" class="input input-bordered" placeholder="Complaint number, complaint text or reply…" /></label>
+          <label class="crm-field" for="filter-category"><span>Category</span><select id="filter-category" class="select select-bordered"><option value="">All categories</option></select></label>
+          <label class="crm-field" for="filter-status"><span>Reply status</span><select id="filter-status" class="select select-bordered"><option value="">All statuses</option><option>Not Prepared</option><option>Imported Draft</option><option>Draft</option><option>Pending Approval</option><option>Approved</option><option>Issued</option><option>Rejected</option></select></label>
+          <label class="crm-field" for="filter-source"><span>Source</span><select id="filter-source" class="select select-bordered"><option value="">All sources</option><option value="crm_portal">CRM portal</option><option value="pm_portal">PM portal</option><option value="whatsapp">WhatsApp</option></select></label>
+          <button id="toggle-more-filters" class="btn" type="button" aria-expanded="false" aria-controls="advanced-filters">More filters</button>
+          <button id="clear-filters" class="btn btn-ghost" type="button">Clear</button>
         </div>
-        <div class="reply-filters">
-          <label>Search<input id="filter-search" class="input input-bordered" placeholder="Complaint number, text or reply" /></label>
-          <label>Category<select id="filter-category" class="select select-bordered"><option value="">All categories</option></select></label>
-          <label>Subcategory<select id="filter-subcategory" class="select select-bordered"><option value="">All subcategories</option></select></label>
-          <label>Reply status<select id="filter-status" class="select select-bordered"><option value="">All statuses</option><option>Not Prepared</option><option>Draft</option><option>Pending Approval</option><option>Approved</option><option>Issued</option><option>Rejected</option></select></label>
-          <label>AI eligibility<select id="filter-ai" class="select select-bordered"><option value="">All</option><option value="true">Eligible</option><option value="false">Not eligible</option></select></label>
-          <label>Source<select id="filter-source" class="select select-bordered"><option value="">All sources</option><option value="crm_portal">CRM portal</option><option value="pm_portal">PM portal</option><option value="whatsapp">WhatsApp</option></select></label>
-          <label>From<span class="date-wrap"><input id="filter-from" type="date" /></span></label>
-          <label>To<span class="date-wrap"><input id="filter-to" type="date" /></span></label>
+
+        <div id="advanced-filters" class="reply-advanced-filters" hidden>
+          <label class="crm-field" for="filter-subcategory"><span>Subcategory</span><select id="filter-subcategory" class="select select-bordered"><option value="">All subcategories</option></select></label>
+          <label class="crm-field" for="filter-ai"><span>AI eligibility</span><select id="filter-ai" class="select select-bordered"><option value="">All</option><option value="true">Eligible</option><option value="false">Not eligible</option></select></label>
+          <label class="crm-field" for="filter-from"><span>Created from</span><input id="filter-from" class="input input-bordered" type="date" /></label>
+          <label class="crm-field" for="filter-to"><span>Created to</span><input id="filter-to" class="input input-bordered" type="date" /></label>
         </div>
       </section>
 
       <section id="bulk-classification" class="master-card bulk-classification" hidden>
-        <div><strong><span id="selected-count">0</span> complaints selected</strong><small>Apply one controlled category and optional subcategory to the selected complaints.</small></div>
-        <label>Category<select id="bulk-category" class="select select-bordered"></select></label>
-        <label>Subcategory<select id="bulk-subcategory" class="select select-bordered"><option value="">No subcategory</option></select></label>
-        <label class="form-check"><input id="bulk-sync" class="form-check-input" type="checkbox" checked /><span class="form-check-label">Sync Helpdesk</span></label>
+        <div class="bulk-selection-copy"><strong><span id="selected-count">0</span> complaints selected</strong><small>Apply one controlled category and optional subcategory to every selected complaint.</small></div>
+        <label class="crm-field" for="bulk-category"><span>Category</span><select id="bulk-category" class="select select-bordered"></select></label>
+        <label class="crm-field" for="bulk-subcategory"><span>Subcategory</span><select id="bulk-subcategory" class="select select-bordered"><option value="">No subcategory</option></select></label>
+        <CheckboxField id="bulk-sync" label="Sync Helpdesk" description="Write and verify linked tickets." checked compact />
         <button id="apply-bulk-classification" class="btn btn-primary" type="button">Apply classification</button>
-        <button id="clear-selection" class="btn" type="button">Clear</button>
+        <button id="clear-selection" class="btn" type="button">Clear selection</button>
       </section>
 
       <section class="master-card reply-table-card">
-        <div class="reply-table-toolbar">
-          <label class="form-check"><input id="select-page" class="form-check-input" type="checkbox" /><span class="form-check-label">Select page</span></label>
-          <span id="queue-count">Loading complaints…</span>
-          <label>Rows<select id="page-size" class="select select-bordered select-sm"><option>25</option><option>50</option><option>100</option></select></label>
-        </div>
-        <div class="reply-table-scroll">
-          <table class="reply-table">
-            <thead><tr><th aria-label="Select"></th><th>Complaint</th><th>Classification</th><th>Reply workflow</th><th>Connections</th><th></th></tr></thead>
-            <tbody id="reply-rows"><tr><td colspan="6" class="reply-empty">Loading reply queue…</td></tr></tbody>
-          </table>
-        </div>
-        <footer class="reply-pagination"><button id="prev-page" class="btn btn-sm" type="button">← Previous</button><span id="page-label">Page 1</span><button id="next-page" class="btn btn-sm" type="button">Next →</button></footer>
+        <header class="reply-table-heading">
+          <div>
+            <h2>Pending complaint replies</h2>
+            <p id="queue-count">Loading complaints…</p>
+          </div>
+          <span class="reply-table-hint">Complaint text is kept to one line. Use <b>View</b> for the complete record.</span>
+        </header>
+        <DataTable
+          id="reply-queue-table"
+          pageSize={25}
+          pageSizeOptions={[25, 50, 100]}
+          emptyText="No complaints match the current filters."
+          ariaLabel="Complaint reply queue"
+          class="reply-queue-table"
+        />
       </section>
     </section>
 
-    <section id="tab-csv" data-tab-panel="csv" class="reply-tab-panel" hidden>
-      <section class="legacy-intro master-card"><div><p class="eyebrow">Compatible bulk workflow</p><h2>ChatGPT CSV exchange</h2><p>The existing two-column export/import workflow remains available. Imported replies are preserved and can still generate formal letters.</p></div></section>
-      <section class="legacy-grid">
-        <article class="master-card legacy-step"><span class="step-number">1</span><div><h2>Export complaint remarks</h2><p>Downloads exactly <b>Complaint Number</b> and <b>Complaint Remarks</b>.</p><div class="button-row"><a id="download-awaiting" class="btn btn-primary" href="#">Download awaiting replies</a><a id="download-all" class="btn" href="#">Download all published</a></div></div></article>
-        <article class="master-card legacy-step"><span class="step-number">2</span><div><h2>Import ChatGPT reply CSV</h2><p>The file must contain exactly <b>Complaint Number</b> and <b>Reply</b>.</p><form id="reply-import-form" class="legacy-form"><input id="reply-file" class="file-input file-input-bordered" type="file" accept=".csv,text/csv" required /><button id="import-replies" class="btn btn-primary" type="submit">Validate and import</button></form><div id="reply-import-result" class="reply-message" hidden></div></div></article>
-      </section>
-      <section class="reply-summary legacy-summary"><article class="metric-card"><span>Published complaints</span><strong id="legacy-published">—</strong></article><article class="metric-card"><span>Awaiting reply</span><strong id="legacy-awaiting">—</strong></article><article class="metric-card"><span>Replies imported</span><strong id="legacy-imported">—</strong></article><article class="metric-card"><span>Letters generated</span><strong id="legacy-generated">—</strong></article></section>
-      <section class="master-card"><div class="reply-filter-heading"><div><p class="eyebrow">Legacy register</p><h2>CSV reply coverage</h2></div><button id="refresh-legacy" class="btn btn-sm" type="button">↻ Refresh</button></div><div id="legacy-list" class="legacy-list"></div></section>
-    </section>
-
-    <section id="tab-letters" data-tab-panel="letters" class="reply-tab-panel" hidden>
-      <section class="formal-letter-panel master-card">
-        <div><p class="eyebrow">Native formal documents</p><h2>Generate DEO Report package</h2><p>Creates a ZIP with one complaint folder and formal ODT letter per imported reply, plus a traceable manifest. The existing document-generation behavior is unchanged.</p></div>
-        <button id="download-letters" class="btn btn-primary" type="button">Generate and download letters</button>
-        <div id="letter-result" class="reply-message" hidden></div>
-      </section>
-    </section>
-
-    <div id="reply-toast" class="reply-toast" role="status" aria-live="polite" hidden></div>
+    <div id="reply-toast" class="crm-toast" role="status" aria-live="polite" hidden></div>
   </main>
 
-  <style>
-    .reply-shell{display:grid;gap:1rem}.reply-mode-tabs{display:flex;gap:.35rem;border-bottom:1px solid #dfe7ed}.reply-mode-tabs button{border:0;border-bottom:3px solid transparent;background:transparent;padding:.75rem 1rem;color:#64748b;font-weight:750;cursor:pointer}.reply-mode-tabs button.active{border-color:#16879a;color:#146f7e}.reply-summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.75rem}.metric-card{display:grid;gap:.2rem;border:1px solid #dbe5ec;border-radius:.8rem;background:#fff;padding:1rem}.metric-card span,.metric-card small{color:#64748b}.metric-card strong{font-size:1.55rem;color:#172033}.reply-filter-card{display:grid;gap:1rem}.reply-filter-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}.reply-filter-heading h2{margin:.1rem 0}.reply-filter-heading p{margin:.25rem 0;color:#64748b}.reply-filter-actions,.button-row{display:flex;gap:.5rem;flex-wrap:wrap}.reply-filters{display:grid;grid-template-columns:2fr repeat(5,minmax(8rem,1fr));gap:.65rem;align-items:end}.reply-filters label,.bulk-classification label{display:grid;gap:.3rem;font-size:.75rem;font-weight:750;color:#475569}.reply-filters input,.reply-filters select{width:100%}.date-wrap{display:flex;width:100%;min-width:0;border:1px solid #d7e0e7;border-radius:.55rem;background:#fff;padding:.55rem .65rem}.date-wrap input{display:block;width:100%;min-width:0;border:0;background:transparent;padding:0}.bulk-classification{display:grid;grid-template-columns:minmax(13rem,1fr) minmax(10rem,.8fr) minmax(10rem,.8fr) auto auto auto;gap:.65rem;align-items:end;border-left:4px solid #16879a}.bulk-classification div{display:grid}.bulk-classification small{color:#64748b}.reply-table-card{padding:0;overflow:hidden}.reply-table-toolbar,.reply-pagination{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.8rem 1rem}.reply-table-toolbar{border-bottom:1px solid #e2e8f0}.reply-table-toolbar>span{margin-right:auto;color:#64748b}.reply-table-toolbar label:last-child{display:flex;align-items:center;gap:.4rem}.reply-table-scroll{overflow-x:auto}.reply-table{width:100%;border-collapse:collapse;min-width:68rem}.reply-table th,.reply-table td{padding:.75rem;border-bottom:1px solid #edf1f4;text-align:left;vertical-align:top}.reply-table th{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:#64748b;background:#f8fafc}.reply-table td strong,.reply-table td small{display:block}.reply-table td small{margin-top:.2rem;color:#64748b}.classification-label{display:inline-flex;border-radius:999px;background:#e8f5f7;color:#146f7e;padding:.25rem .5rem;font-size:.7rem;font-weight:750}.classification-label.unclassified{background:#fff3dc;color:#925b05}.workflow-pill{display:inline-flex;border-radius:999px;background:#eef2f6;color:#475569;padding:.25rem .5rem;font-size:.7rem;font-weight:800}.workflow-pill.approved,.workflow-pill.issued{background:#e7f8f1;color:#176b57}.workflow-pill.draft,.workflow-pill.pending-approval{background:#fff3dc;color:#925b05}.workflow-pill.rejected{background:#fff0f1;color:#a52630}.connection-links{display:flex;gap:.35rem;flex-wrap:wrap}.row-actions{display:flex;justify-content:flex-end;gap:.4rem}.reply-empty{text-align:center!important;color:#64748b;padding:2rem!important}.reply-pagination{border-top:1px solid #e2e8f0}.legacy-intro{border-left:4px solid #16879a}.legacy-intro h2,.legacy-step h2,.formal-letter-panel h2{margin:.1rem 0}.legacy-intro p,.legacy-step p,.formal-letter-panel p{color:#64748b}.legacy-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}.legacy-step{display:flex;align-items:flex-start;gap:1rem}.step-number{display:grid;place-items:center;flex:0 0 2rem;height:2rem;border-radius:50%;background:#16879a;color:#fff;font-weight:850}.legacy-form{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1rem}.legacy-summary{grid-template-columns:repeat(4,1fr)}.legacy-list{display:grid;gap:.55rem;margin-top:.8rem}.legacy-row{display:grid;grid-template-columns:minmax(10rem,.7fr) minmax(16rem,1.8fr) auto;gap:1rem;align-items:center;border:1px solid #e0e8ee;border-radius:.65rem;padding:.75rem .85rem}.legacy-row strong,.legacy-row small{display:block}.legacy-row small{color:#718096}.formal-letter-panel{display:flex;align-items:center;justify-content:space-between;gap:2rem;min-height:15rem}.reply-message{margin-top:.8rem;border-radius:.6rem;background:#e9f8f2;color:#176b57;padding:.7rem}.reply-message.error{background:#fff0f1;color:#a52630}.reply-toast{position:fixed;right:1rem;bottom:1rem;z-index:1000;max-width:min(30rem,calc(100vw - 2rem));border-radius:.7rem;background:#183b45;color:#fff;padding:.8rem 1rem;box-shadow:0 12px 30px rgba(15,23,42,.25)}.reply-toast.error{background:#9f2530}@media(max-width:1250px){.reply-summary{grid-template-columns:repeat(3,1fr)}.reply-filters{grid-template-columns:repeat(4,1fr)}.bulk-classification{grid-template-columns:1fr 1fr 1fr auto}.bulk-classification>div{grid-column:1/-1}}@media(max-width:850px){.reply-summary,.legacy-summary{grid-template-columns:repeat(2,1fr)}.reply-filters,.legacy-grid{grid-template-columns:1fr 1fr}.formal-letter-panel{align-items:flex-start;flex-direction:column}.bulk-classification{grid-template-columns:1fr 1fr}.reply-filter-heading{flex-direction:column}}@media(max-width:560px){.reply-summary,.legacy-summary,.reply-filters{grid-template-columns:1fr}.bulk-classification{grid-template-columns:1fr}.reply-mode-tabs{overflow-x:auto}.reply-table-toolbar{align-items:flex-start;flex-wrap:wrap}}
-  </style>
+  <ModalDialog
+    id="complaint-preview-dialog"
+    formId="complaint-preview-form"
+    title="Complaint details"
+    eyebrow="Queue preview"
+    description="Read the complete complaint without losing filters, pagination or selected rows."
+    size="xl"
+  >
+    <div id="complaint-preview-loading" class="crm-empty-state compact">Loading complaint…</div>
+    <div id="complaint-preview-content" class="complaint-preview-content" hidden>
+      <div id="complaint-preview-meta" class="crm-chip-row"></div>
+      <section class="complaint-preview-grid">
+        <article><span>Classification</span><strong id="complaint-preview-classification">—</strong><small id="complaint-preview-sync">—</small></article>
+        <article><span>Reply workflow</span><strong id="complaint-preview-status">—</strong><small id="complaint-preview-ai">—</small></article>
+        <article><span>Connections</span><strong id="complaint-preview-connections">—</strong><small>Helpdesk and Paperless</small></article>
+      </section>
+      <article id="complaint-preview-text" class="complaint-preview-text"></article>
+    </div>
+
+    <Fragment slot="footer">
+      <button class="btn" type="button" data-dialog-close>Close</button>
+      <a id="preview-full-case" class="btn" href="#">Open complete case</a>
+      <a id="preview-open-editor" class="btn btn-primary" href="#">Open reply editor</a>
+    </Fragment>
+  </ModalDialog>
 
   <script>
-    type Category={id:string;name:string;active:boolean;merged_into_id?:string|null;subcategories:{id:string;name:string;active:boolean;merged_into_id?:string|null}[]};
-    const root=document.getElementById("reply-workspace") as HTMLElement,API=root.dataset.apiBase||"";
-    const $=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T;
-    const esc=(value:unknown)=>String(value??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
-    let categories:Category[]=[];let page=1;let pages=1;let visibleIds:string[]=[];const selectedIds=new Set<string>();let filterTimer=0;
-    async function api(path:string,init?:RequestInit){const response=await fetch(`${API}${path}`,init),body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(typeof body.detail==="string"?body.detail:body.detail?.message||response.statusText);return body}
-    function toast(message:string,error=false){const node=$("reply-toast");node.textContent=message;node.className=`reply-toast${error?" error":""}`;node.hidden=false;window.setTimeout(()=>node.hidden=true,4500)}
-    function statusClass(value:string){return value.toLowerCase().replaceAll(" ","-")}
-    function formatDate(value:unknown){return value?new Date(String(value)).toLocaleString():"—"}
-    function filterParams(){const p=new URLSearchParams({category_id:($("filter-category") as HTMLSelectElement).value,subcategory_id:($("filter-subcategory") as HTMLSelectElement).value,reply_status:($("filter-status") as HTMLSelectElement).value,source_system:($("filter-source") as HTMLSelectElement).value,search:($("filter-search") as HTMLInputElement).value.trim(),ai_eligible:($("filter-ai") as HTMLSelectElement).value,date_from:($("filter-from") as HTMLInputElement).value,date_to:($("filter-to") as HTMLInputElement).value,page:String(page),page_size:($("page-size") as HTMLSelectElement).value});for(const[key,value]of[...p])if(!value)p.delete(key);return p}
-    function populateCategories(){
-      const active=categories.filter(item=>item.active&&!item.merged_into_id);const categoryOptions=active.map(item=>`<option value="${item.id}">${esc(item.name)}</option>`).join("");
-      const filter=$("filter-category") as HTMLSelectElement,bulk=$("bulk-category") as HTMLSelectElement;const filterValue=filter.value,bulkValue=bulk.value;filter.innerHTML=`<option value="">All categories</option>${categoryOptions}`;bulk.innerHTML=`<option value="">Choose category</option>${categoryOptions}`;if(active.some(item=>item.id===filterValue))filter.value=filterValue;if(active.some(item=>item.id===bulkValue))bulk.value=bulkValue;updateSubcategoryOptions("filter");updateSubcategoryOptions("bulk");
-    }
-    function updateSubcategoryOptions(kind:"filter"|"bulk"){
-      const categoryId=($(kind==="filter"?"filter-category":"bulk-category") as HTMLSelectElement).value;const select=$(kind==="filter"?"filter-subcategory":"bulk-subcategory") as HTMLSelectElement;const current=select.value;const category=categories.find(item=>item.id===categoryId);const items=(category?.subcategories||[]).filter(item=>item.active&&!item.merged_into_id);select.innerHTML=`<option value="">${kind==="filter"?"All subcategories":"No subcategory"}</option>${items.map(item=>`<option value="${item.id}">${esc(item.name)}</option>`).join("")}`;if(items.some(item=>item.id===current))select.value=current;
-    }
-    async function loadTaxonomy(){const data=await api("/api/v1/crm/taxonomy?include_inactive=false");categories=data.categories||[];populateCategories()}
-    async function loadStats(){const stats=await api("/api/v1/crm/reply-workspace/statistics");$("stat-unclassified").textContent=String(stats.awaiting_classification??0);$("stat-awaiting").textContent=String(stats.awaiting_reply??0);$("stat-drafts").textContent=String((stats.draft_replies??0)+(stats.pending_approval??0));$("stat-pending").textContent=`${stats.pending_approval??0} pending approval`;$("stat-approved").textContent=String((stats.approved??0)+(stats.issued??0));$("stat-issued").textContent=`${stats.issued??0} issued`;$("stat-ai-ready").textContent=String(stats.ai_ready??0)}
-    function updateSelection(){$("selected-count").textContent=String(selectedIds.size);$("bulk-classification").hidden=selectedIds.size===0;($("select-page") as HTMLInputElement).checked=visibleIds.length>0&&visibleIds.every(id=>selectedIds.has(id));document.querySelectorAll<HTMLInputElement>("[data-select-case]").forEach(input=>input.checked=selectedIds.has(input.dataset.selectCase||""))}
-    async function loadQueue(){
-      $("reply-rows").innerHTML=`<tr><td colspan="6" class="reply-empty">Loading reply queue…</td></tr>`;
-      try{const data=await api(`/api/v1/crm/reply-workspace/cases?${filterParams()}`);pages=data.pages||1;if(page>pages){page=pages;return loadQueue()}visibleIds=(data.items||[]).map((item:any)=>item.case_id);$("queue-count").textContent=`${data.total} complaint${data.total===1?"":"s"}`;$("page-label").textContent=`Page ${data.page} of ${data.pages}`;($("prev-page") as HTMLButtonElement).disabled=page<=1;($("next-page") as HTMLButtonElement).disabled=page>=pages;
-        $("reply-rows").innerHTML=(data.items||[]).length?(data.items||[]).map((item:any)=>`<tr><td><input class="checkbox" type="checkbox" data-select-case="${item.case_id}" aria-label="Select complaint ${esc(item.complaint_number)}" /></td><td><strong>${esc(item.complaint_number||item.case_id)}</strong><small>${esc(item.source_system)} · updated ${esc(formatDate(item.updated_at))}</small><small>${esc(item.complaint_preview||"No complaint text")}</small></td><td><span class="classification-label ${item.category_id?"":"unclassified"}">${esc(item.category||"Unclassified")}</span><small>${esc(item.subcategory||"No subcategory")}</small><small>Sync: ${esc(item.classification_sync_status||"not_synced")}</small></td><td><span class="workflow-pill ${statusClass(item.reply_status||"Not Prepared")}">${esc(item.reply_status||"Not Prepared")}</span><small>${item.ai_eligible?"AI eligible":"Not AI eligible"}${item.archive_ready?" · archived":""}</small><small>${esc(item.reply_preview||"No reply text")}</small></td><td><div class="connection-links">${item.helpdesk_ticket_url?`<a class="btn btn-xs" href="${esc(item.helpdesk_ticket_url)}" target="_blank" rel="noreferrer">Helpdesk #${esc(item.helpdesk_ticket_id)} ↗</a>`:""}${item.paperless_document_id?`<span class="btn btn-xs">Paperless #${esc(item.paperless_document_id)}</span>`:""}</div></td><td><div class="row-actions"><a class="btn btn-primary btn-sm" href="/crm/replies/${item.case_id}/">${item.reply_status==="Not Prepared"?"Write reply":"Open editor"}</a><a class="btn btn-sm" href="/crm/cases/${item.case_id}/">Case</a></div></td></tr>`).join(""):`<tr><td colspan="6" class="reply-empty">No complaints match the current filters.</td></tr>`;
-        document.querySelectorAll<HTMLInputElement>("[data-select-case]").forEach(input=>input.addEventListener("change",()=>{const id=input.dataset.selectCase||"";input.checked?selectedIds.add(id):selectedIds.delete(id);updateSelection()}));updateSelection();
-      }catch(error){$("reply-rows").innerHTML=`<tr><td colspan="6" class="reply-empty">${esc(error instanceof Error?error.message:String(error))}</td></tr>`}
-    }
-    async function refreshAll(){await Promise.all([loadStats(),loadQueue()])}
-    function scheduleLoad(){window.clearTimeout(filterTimer);filterTimer=window.setTimeout(()=>{page=1;void loadQueue()},250)}
-    async function applyBulk(){const categoryId=($("bulk-category") as HTMLSelectElement).value;if(!categoryId){toast("Choose a category first.",true);return}const button=$("apply-bulk-classification") as HTMLButtonElement;button.disabled=true;button.textContent="Applying…";try{const result=await api("/api/v1/crm/reply-workspace/classifications/bulk",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({case_ids:[...selectedIds],category_id:categoryId,subcategory_id:($("bulk-subcategory") as HTMLSelectElement).value||null,synchronize:($("bulk-sync") as HTMLInputElement).checked})});const failed=result.counts?.failed??0;toast(`Classification applied to ${result.requested-failed} complaint(s).${failed?` ${failed} failed and remain selected.`:""}`,Boolean(failed));if(!failed)selectedIds.clear();await refreshAll()}catch(error){toast(error instanceof Error?error.message:String(error),true)}finally{button.disabled=false;button.textContent="Apply classification"}}
+    import { badge, stack } from "../../../scripts/table-cells";
+    import { openDialog, wireDialogs } from "../../../scripts/dialogs";
 
-    function activateTab(name:string){document.querySelectorAll<HTMLElement>("[data-tab-panel]").forEach(panel=>panel.hidden=panel.dataset.tabPanel!==name);document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach(button=>button.classList.toggle("active",button.dataset.tab===name));if(name==="csv")void loadLegacy()}
-    async function legacyApi(path:string,init?:RequestInit){return api(path,init)}
-    async function loadLegacy(){try{const[stats,data]=await Promise.all([legacyApi("/api/v1/crm/replies/statistics"),legacyApi("/api/v1/crm/replies")]);$("legacy-published").textContent=String(stats.published_cases??0);$("legacy-awaiting").textContent=String(stats.awaiting_reply??0);$("legacy-imported").textContent=String(stats.replies_imported??0);$("legacy-generated").textContent=String(stats.letters_generated??0);$("legacy-list").innerHTML=(data.items||[]).map((item:any)=>`<article class="legacy-row"><div><strong>${esc(item.complaint_number)}</strong><small>Paperless #${esc(item.paperless_document_id||"—")}</small></div><div><strong>${item.reply?"Reply imported":"Awaiting reply"}</strong><small>${item.reply?`${esc(item.source_filename)} · version ${esc(item.reply_version)} · ${esc(formatDate(item.imported_at))}`:"Available in the awaiting-replies CSV"}</small></div><span class="workflow-pill ${item.generated_at?"issued":item.reply?"approved":""}">${item.generated_at?"Letter generated":item.reply?"Ready for letter":"Needs reply"}</span></article>`).join("")||`<div class="reply-empty">No published complaints yet.</div>`}catch(error){$("legacy-list").innerHTML=`<div class="reply-empty">${esc(error instanceof Error?error.message:String(error))}</div>`}}
-    $("download-awaiting").setAttribute("href",`${API}/api/v1/crm/replies/complaints.csv?scope=awaiting`);$("download-all").setAttribute("href",`${API}/api/v1/crm/replies/complaints.csv?scope=all`);
-    $("reply-import-form").addEventListener("submit",async event=>{event.preventDefault();const input=$("reply-file") as HTMLInputElement,file=input.files?.[0],button=$("import-replies") as HTMLButtonElement,message=$("reply-import-result");if(!file)return;button.disabled=true;button.textContent="Validating and importing…";message.hidden=true;const body=new FormData();body.append("file",file);try{const result=await legacyApi("/api/v1/crm/replies/imports",{method:"POST",body});message.className="reply-message";message.textContent=`Imported ${result.imported}, updated ${result.updated}; ${result.letters_ready} formal letter(s) ready.`;message.hidden=false;input.value="";await Promise.all([loadLegacy(),refreshAll()])}catch(error){message.className="reply-message error";message.textContent=error instanceof Error?error.message:String(error);message.hidden=false}finally{button.disabled=false;button.textContent="Validate and import"}});
-    $("download-letters").addEventListener("click",async()=>{const button=$("download-letters") as HTMLButtonElement,message=$("letter-result");button.disabled=true;button.textContent="Generating…";message.hidden=true;try{const response=await fetch(`${API}/api/v1/crm/replies/letter-packages`,{method:"POST"});if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.detail?.message||body.detail||response.statusText)}const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="crm-formal-replies.zip";document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);message.className="reply-message";message.textContent="Formal letter package generated and downloaded.";message.hidden=false;await loadLegacy()}catch(error){message.className="reply-message error";message.textContent=error instanceof Error?error.message:String(error);message.hidden=false}finally{button.disabled=false;button.textContent="Generate and download letters"}});
+    type Category = {
+      id: string;
+      name: string;
+      active: boolean;
+      merged_into_id?: string | null;
+      subcategories: { id: string; name: string; active: boolean; merged_into_id?: string | null }[];
+    };
+    type QueueItem = {
+      case_id: string;
+      complaint_number: string;
+      complaint_preview: string;
+      source_system: string;
+      category_id?: string | null;
+      category: string;
+      subcategory_id?: string | null;
+      subcategory: string;
+      reply_preview: string;
+      reply_status: string;
+      reply_source?: string;
+      reply_sync_status?: string;
+      ai_eligible: boolean;
+      archive_ready: boolean;
+      classification_sync_status: string;
+      helpdesk_ticket_id?: string | null;
+      helpdesk_ticket_url?: string | null;
+      paperless_document_id?: string | null;
+      updated_at: string;
+    };
 
-    document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach(button=>button.addEventListener("click",()=>activateTab(button.dataset.tab||"queue")));
-    ["filter-category","filter-subcategory","filter-status","filter-ai","filter-source","filter-from","filter-to","page-size"].forEach(id=>$(id).addEventListener("change",()=>{if(id==="filter-category")updateSubcategoryOptions("filter");page=1;void loadQueue()}));$("filter-search").addEventListener("input",scheduleLoad);$("bulk-category").addEventListener("change",()=>updateSubcategoryOptions("bulk"));$("refresh-queue").addEventListener("click",refreshAll);$("apply-bulk-classification").addEventListener("click",applyBulk);$("clear-selection").addEventListener("click",()=>{selectedIds.clear();updateSelection()});$("select-page").addEventListener("change",event=>{const checked=(event.target as HTMLInputElement).checked;visibleIds.forEach(id=>checked?selectedIds.add(id):selectedIds.delete(id));updateSelection()});$("prev-page").addEventListener("click",()=>{if(page>1){page--;void loadQueue()}});$("next-page").addEventListener("click",()=>{if(page<pages){page++;void loadQueue()}});$("refresh-legacy").addEventListener("click",loadLegacy);
-    void (async()=>{try{await loadTaxonomy();await refreshAll()}catch(error){toast(error instanceof Error?error.message:String(error),true)}})();
+    const root = document.getElementById("reply-workspace") as HTMLElement;
+    const API = root.dataset.apiBase || "";
+    const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const table = $("reply-queue-table") as any;
+    const esc = (value: unknown) => String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+    const selectedIds = new Set<string>();
+    let categories: Category[] = [];
+    let visibleIds: string[] = [];
+    let filterTimer = 0;
+
+    async function api(path: string, init?: RequestInit) {
+      const response = await fetch(`${API}${path}`, init);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : body.detail?.message || response.statusText);
+      return body;
+    }
+
+    function toast(message: string, error = false) {
+      const node = $("reply-toast");
+      node.textContent = message;
+      node.className = `crm-toast${error ? " error" : ""}`;
+      node.hidden = false;
+      window.setTimeout(() => node.hidden = true, 4500);
+    }
+
+    function statusTone(value: string) {
+      const normalized = value.toLowerCase();
+      if (["approved", "issued", "synchronized"].includes(normalized)) return "";
+      if (["imported draft", "draft", "pending approval", "pending", "not_synced"].includes(normalized)) return "warning";
+      if (["rejected", "failed", "conflict"].includes(normalized)) return "error";
+      return "inactive";
+    }
+
+    function formatDate(value: unknown) {
+      return value ? new Date(String(value)).toLocaleString() : "—";
+    }
+
+    function sourceLabel(value: string) {
+      return ({ crm_portal: "CRM portal", pm_portal: "PM portal", whatsapp: "WhatsApp" } as Record<string, string>)[value] || value || "Unknown";
+    }
+
+    function currentReturnUrl() {
+      return `${window.location.pathname}${window.location.search}`;
+    }
+
+    function editorUrl(item: QueueItem) {
+      return `/crm/replies/${item.case_id}/?return=${encodeURIComponent(currentReturnUrl())}`;
+    }
+
+    function hydrateFiltersFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const mappings: Array<[string, string]> = [
+        ["search", "filter-search"],
+        ["category_id", "filter-category"],
+        ["subcategory_id", "filter-subcategory"],
+        ["reply_status", "filter-status"],
+        ["ai_eligible", "filter-ai"],
+        ["source_system", "filter-source"],
+        ["date_from", "filter-from"],
+        ["date_to", "filter-to"],
+      ];
+      for (const [param, id] of mappings) {
+        const value = params.get(param);
+        if (value !== null) ($(id) as HTMLInputElement | HTMLSelectElement).value = value;
+      }
+      const advanced = ["subcategory_id", "ai_eligible", "date_from", "date_to"].some((key) => params.has(key));
+      setAdvancedFilters(advanced);
+      return {
+        pageIndex: Math.max(0, Number(params.get("page") || 1) - 1),
+        pageSize: [25, 50, 100].includes(Number(params.get("page_size"))) ? Number(params.get("page_size")) : 25,
+      };
+    }
+
+    function filterParams(pageIndex: number, pageSize: number) {
+      const params = new URLSearchParams({
+        category_id: ($("filter-category") as HTMLSelectElement).value,
+        subcategory_id: ($("filter-subcategory") as HTMLSelectElement).value,
+        reply_status: ($("filter-status") as HTMLSelectElement).value,
+        source_system: ($("filter-source") as HTMLSelectElement).value,
+        search: ($("filter-search") as HTMLInputElement).value.trim(),
+        ai_eligible: ($("filter-ai") as HTMLSelectElement).value,
+        date_from: ($("filter-from") as HTMLInputElement).value,
+        date_to: ($("filter-to") as HTMLInputElement).value,
+        page: String(pageIndex + 1),
+        page_size: String(pageSize),
+      });
+      for (const [key, value] of [...params]) if (!value) params.delete(key);
+      return params;
+    }
+
+    function syncUrl(pageIndex: number, pageSize: number) {
+      const params = filterParams(pageIndex, pageSize);
+      history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
+    }
+
+    function populateCategories() {
+      const active = categories.filter((item) => item.active && !item.merged_into_id);
+      const options = active.map((item) => `<option value="${item.id}">${esc(item.name)}</option>`).join("");
+      const filter = $("filter-category") as HTMLSelectElement;
+      const bulk = $("bulk-category") as HTMLSelectElement;
+      const filterValue = filter.value;
+      const bulkValue = bulk.value;
+      filter.innerHTML = `<option value="">All categories</option>${options}`;
+      bulk.innerHTML = `<option value="">Choose category</option>${options}`;
+      if (active.some((item) => item.id === filterValue)) filter.value = filterValue;
+      if (active.some((item) => item.id === bulkValue)) bulk.value = bulkValue;
+      updateSubcategoryOptions("filter");
+      updateSubcategoryOptions("bulk");
+    }
+
+    function updateSubcategoryOptions(kind: "filter" | "bulk", preferred = "") {
+      const categoryId = ($(kind === "filter" ? "filter-category" : "bulk-category") as HTMLSelectElement).value;
+      const select = $(kind === "filter" ? "filter-subcategory" : "bulk-subcategory") as HTMLSelectElement;
+      const current = preferred || select.value;
+      const category = categories.find((item) => item.id === categoryId);
+      const items = (category?.subcategories || []).filter((item) => item.active && !item.merged_into_id);
+      select.innerHTML = `<option value="">${kind === "filter" ? "All subcategories" : "No subcategory"}</option>${items.map((item) => `<option value="${item.id}">${esc(item.name)}</option>`).join("")}`;
+      if (items.some((item) => item.id === current)) select.value = current;
+    }
+
+    async function loadTaxonomy() {
+      const requestedCategory = new URLSearchParams(window.location.search).get("category_id") || "";
+      const requestedSubcategory = new URLSearchParams(window.location.search).get("subcategory_id") || "";
+      const data = await api("/api/v1/crm/taxonomy?include_inactive=false");
+      categories = data.categories || [];
+      populateCategories();
+      if (requestedCategory && categories.some((item) => item.id === requestedCategory)) {
+        ($("filter-category") as HTMLSelectElement).value = requestedCategory;
+        updateSubcategoryOptions("filter", requestedSubcategory);
+      }
+    }
+
+    async function loadStats() {
+      const stats = await api("/api/v1/crm/reply-workspace/statistics");
+      $("stat-unclassified").textContent = String(stats.awaiting_classification ?? 0);
+      $("stat-awaiting").textContent = String(stats.awaiting_reply ?? 0);
+      $("stat-drafts").textContent = String((stats.imported_drafts ?? 0) + (stats.draft_replies ?? 0) + (stats.pending_approval ?? 0));
+      $("stat-pending").textContent = `${stats.pending_approval ?? 0} pending approval`;
+      $("stat-approved").textContent = String((stats.approved ?? 0) + (stats.issued ?? 0));
+      $("stat-issued").textContent = `${stats.issued ?? 0} issued`;
+      $("stat-ai-ready").textContent = String(stats.ai_ready ?? 0);
+    }
+
+    function selectionHeader(): HTMLInputElement {
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.className = "checkbox checkbox-sm";
+      input.setAttribute("aria-label", "Select every complaint on this page");
+      input.dataset.selectVisible = "true";
+      const selectedVisible = visibleIds.filter((id) => selectedIds.has(id)).length;
+      input.checked = visibleIds.length > 0 && selectedVisible === visibleIds.length;
+      input.indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length;
+      input.addEventListener("change", () => {
+        visibleIds.forEach((id) => input.checked ? selectedIds.add(id) : selectedIds.delete(id));
+        updateSelection();
+      });
+      return input;
+    }
+
+    function selectionCell(item: QueueItem): HTMLInputElement {
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.className = "checkbox checkbox-sm";
+      input.dataset.selectCase = item.case_id;
+      input.checked = selectedIds.has(item.case_id);
+      input.setAttribute("aria-label", `Select complaint ${item.complaint_number || item.case_id}`);
+      input.addEventListener("change", () => {
+        input.checked ? selectedIds.add(item.case_id) : selectedIds.delete(item.case_id);
+        updateSelection();
+      });
+      return input;
+    }
+
+    function complaintNumberCell(item: QueueItem): DocumentFragment {
+      const fragment = document.createDocumentFragment();
+      const link = document.createElement("a");
+      link.className = "table-link complaint-number-link";
+      link.href = editorUrl(item);
+      link.textContent = item.complaint_number || item.case_id;
+      fragment.append(link);
+      if (item.archive_ready) {
+        const small = document.createElement("small");
+        small.textContent = "Approved revision archived";
+        fragment.append(small);
+      }
+      return fragment;
+    }
+
+    function complaintTextCell(item: QueueItem): HTMLElement {
+      const container = document.createElement("div");
+      container.className = "complaint-snippet-cell";
+      const text = document.createElement("span");
+      text.textContent = item.complaint_preview || "No complaint text";
+      text.title = item.complaint_preview || "No complaint text";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "table-inline-link";
+      button.textContent = "View";
+      button.addEventListener("click", () => void openComplaintPreview(item));
+      container.append(text, button);
+      return container;
+    }
+
+    function classificationCell(item: QueueItem): DocumentFragment {
+      const fragment = document.createDocumentFragment();
+      fragment.append(badge(item.category || "Unclassified", item.category_id ? "" : "warning"));
+      const small = document.createElement("small");
+      small.textContent = `${item.subcategory || "No subcategory"} · ${item.classification_sync_status || "not_synced"}`;
+      fragment.append(small);
+      return fragment;
+    }
+
+    function workflowCell(item: QueueItem): DocumentFragment {
+      const fragment = document.createDocumentFragment();
+      fragment.append(badge(item.reply_status || "Not Prepared", statusTone(item.reply_status || "Not Prepared")));
+      const small = document.createElement("small");
+      const source = item.reply_source === "local_workspace" ? "local draft" : "Helpdesk";
+      const sync = item.reply_sync_status && item.reply_sync_status !== "synchronized" ? ` · ${item.reply_sync_status.replaceAll("_", " ")}` : "";
+      small.textContent = `${source}${sync}${item.ai_eligible ? " · AI eligible" : ""}${item.archive_ready ? " · archived" : ""}`;
+      fragment.append(small);
+      return fragment;
+    }
+
+    function connectionsCell(item: QueueItem): HTMLElement {
+      const container = document.createElement("div");
+      container.className = "connection-links compact";
+      if (item.helpdesk_ticket_url) {
+        const link = document.createElement("a");
+        link.className = "connection-chip";
+        link.href = item.helpdesk_ticket_url;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        link.textContent = `Helpdesk #${item.helpdesk_ticket_id || "—"}`;
+        container.append(link);
+      }
+      if (item.paperless_document_id) {
+        const span = document.createElement("span");
+        span.className = "connection-chip";
+        span.textContent = `Paperless #${item.paperless_document_id}`;
+        container.append(span);
+      }
+      if (!container.childElementCount) container.textContent = "—";
+      return container;
+    }
+
+    function actionsCell(item: QueueItem): HTMLElement {
+      const container = document.createElement("div");
+      container.className = "reply-row-actions";
+      const editor = document.createElement("a");
+      editor.className = "btn btn-primary btn-xs";
+      editor.href = editorUrl(item);
+      editor.textContent = item.reply_status === "Not Prepared" ? "Write reply" : "Open editor";
+      const caseLink = document.createElement("a");
+      caseLink.className = "btn btn-xs";
+      caseLink.href = `/crm/cases/${item.case_id}/`;
+      caseLink.textContent = "Case";
+      container.append(editor);
+      if (["Approved", "Issued"].includes(item.reply_status)) {
+        const letter = document.createElement("a");
+        letter.className = "btn btn-xs";
+        letter.href = `/crm/replies/${item.case_id}/official-letter/`;
+        letter.textContent = "Official letter";
+        container.append(letter);
+      }
+      container.append(caseLink);
+      return container;
+    }
+
+    function updateSelection() {
+      $("selected-count").textContent = String(selectedIds.size);
+      $("bulk-classification").hidden = selectedIds.size === 0;
+      document.querySelectorAll<HTMLInputElement>("[data-select-case]").forEach((input) => {
+        input.checked = selectedIds.has(input.dataset.selectCase || "");
+      });
+      document.querySelectorAll<HTMLInputElement>("[data-select-visible]").forEach((input) => {
+        const selectedVisible = visibleIds.filter((id) => selectedIds.has(id)).length;
+        input.checked = visibleIds.length > 0 && selectedVisible === visibleIds.length;
+        input.indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length;
+      });
+    }
+
+    async function loadQueuePage(pageIndex: number, pageSize: number) {
+      const params = filterParams(pageIndex, pageSize);
+      syncUrl(pageIndex, pageSize);
+      const data = await api(`/api/v1/crm/reply-workspace/cases?${params}`);
+      const rows = (data.items || []) as QueueItem[];
+      visibleIds = rows.map((item) => item.case_id);
+      $("queue-count").textContent = `${data.total} complaint${data.total === 1 ? "" : "s"} · page ${data.page} of ${data.pages}`;
+      window.queueMicrotask(updateSelection);
+      return { rows, total: Number(data.total || 0) };
+    }
+
+    async function configureQueue(initialPageIndex: number, initialPageSize: number) {
+      await table.configure({
+        manualPagination: true,
+        initialPageIndex,
+        initialPageSize,
+        getRowId: (row: QueueItem) => row.case_id,
+        loadPage: loadQueuePage,
+        onRender: () => updateSelection(),
+        columns: [
+          { id: "select", header: selectionHeader, enableSorting: false, meta: { width: "48px", align: "center", className: "selection-cell", headerClassName: "selection-cell" }, cell: ({ row }: any) => selectionCell(row.original) },
+          { accessorKey: "complaint_number", header: "Complaint No.", enableSorting: false, meta: { width: "150px", minWidth: "150px" }, cell: ({ row }: any) => complaintNumberCell(row.original) },
+          { accessorKey: "complaint_preview", header: "Complaint text", enableSorting: false, meta: { minWidth: "310px", maxWidth: "520px" }, cell: ({ row }: any) => complaintTextCell(row.original) },
+          { id: "classification", header: "Classification", enableSorting: false, meta: { width: "190px", minWidth: "180px" }, cell: ({ row }: any) => classificationCell(row.original) },
+          { id: "workflow", header: "Reply status", enableSorting: false, meta: { width: "155px", minWidth: "145px" }, cell: ({ row }: any) => workflowCell(row.original) },
+          { id: "source", header: "Source / updated", enableSorting: false, meta: { width: "165px", minWidth: "150px" }, cell: ({ row }: any) => stack(sourceLabel(row.original.source_system), formatDate(row.original.updated_at)) },
+          { id: "connections", header: "Connections", enableSorting: false, meta: { width: "155px", minWidth: "145px" }, cell: ({ row }: any) => connectionsCell(row.original) },
+          { id: "actions", header: "", enableSorting: false, meta: { width: "145px", minWidth: "140px", align: "right" }, cell: ({ row }: any) => actionsCell(row.original) },
+        ],
+      });
+    }
+
+    async function refreshAll(resetPage = false) {
+      await Promise.all([loadStats(), table.refresh(resetPage)]);
+    }
+
+    function scheduleLoad() {
+      window.clearTimeout(filterTimer);
+      filterTimer = window.setTimeout(() => void refreshAll(true), 300);
+    }
+
+    function setAdvancedFilters(open: boolean) {
+      $("advanced-filters").hidden = !open;
+      $("toggle-more-filters").setAttribute("aria-expanded", String(open));
+      $("toggle-more-filters").textContent = open ? "Fewer filters" : "More filters";
+    }
+
+    function clearFilters() {
+      ["filter-search", "filter-category", "filter-subcategory", "filter-status", "filter-ai", "filter-source", "filter-from", "filter-to"].forEach((id) => {
+        ($(id) as HTMLInputElement | HTMLSelectElement).value = "";
+      });
+      updateSubcategoryOptions("filter");
+      setAdvancedFilters(false);
+      void refreshAll(true);
+    }
+
+    async function applyBulk() {
+      const categoryId = ($("bulk-category") as HTMLSelectElement).value;
+      if (!categoryId) {
+        toast("Choose a category first.", true);
+        return;
+      }
+      const button = $("apply-bulk-classification") as HTMLButtonElement;
+      button.disabled = true;
+      button.textContent = "Applying…";
+      try {
+        const result = await api("/api/v1/crm/reply-workspace/classifications/bulk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            case_ids: [...selectedIds],
+            category_id: categoryId,
+            subcategory_id: ($("bulk-subcategory") as HTMLSelectElement).value || null,
+            synchronize: ($("bulk-sync") as HTMLInputElement).checked,
+          }),
+        });
+        const failed = result.counts?.failed ?? 0;
+        toast(`Classification applied to ${result.requested - failed} complaint(s).${failed ? ` ${failed} failed and remain selected.` : ""}`, Boolean(failed));
+        if (!failed) selectedIds.clear();
+        await refreshAll(false);
+      } catch (error) {
+        toast(error instanceof Error ? error.message : String(error), true);
+      } finally {
+        button.disabled = false;
+        button.textContent = "Apply classification";
+      }
+    }
+
+    async function openComplaintPreview(item: QueueItem) {
+      $("complaint-preview-dialog-title").textContent = `Complaint ${item.complaint_number || item.case_id}`;
+      $("complaint-preview-loading").hidden = false;
+      $("complaint-preview-content").hidden = true;
+      $("preview-full-case").setAttribute("href", `/crm/cases/${item.case_id}/`);
+      $("preview-open-editor").setAttribute("href", editorUrl(item));
+      openDialog("complaint-preview-dialog");
+      try {
+        const data = await api(`/api/v1/crm/reply-workspace/cases/${item.case_id}`);
+        const complaint = data.case;
+        const reply = data.reply;
+        $("complaint-preview-meta").innerHTML = `
+          <span>${esc(sourceLabel(complaint.source_system))}</span>
+          <span>Created ${esc(formatDate(complaint.created_at))}</span>
+          <span>Updated ${esc(formatDate(complaint.updated_at))}</span>
+          ${complaint.paperless_document_id ? `<span>Paperless #${esc(complaint.paperless_document_id)}</span>` : ""}`;
+        $("complaint-preview-classification").textContent = `${complaint.category || "Unclassified"}${complaint.subcategory ? ` · ${complaint.subcategory}` : ""}`;
+        $("complaint-preview-sync").textContent = `Sync: ${complaint.classification_sync_status || "not_synced"}`;
+        $("complaint-preview-status").textContent = reply.reply_status || "Not Prepared";
+        $("complaint-preview-ai").textContent = reply.ai_eligible ? "Eligible for AI archive after approval" : "Not AI eligible";
+        $("complaint-preview-connections").textContent = `${complaint.helpdesk_ticket_id ? `Helpdesk #${complaint.helpdesk_ticket_id}` : "No Helpdesk ticket"}${complaint.paperless_document_id ? ` · Paperless #${complaint.paperless_document_id}` : ""}`;
+        $("complaint-preview-text").textContent = complaint.complaint_text || "No complaint text is stored.";
+        $("complaint-preview-loading").hidden = true;
+        $("complaint-preview-content").hidden = false;
+      } catch (error) {
+        $("complaint-preview-loading").textContent = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    wireDialogs();
+    ["filter-category", "filter-subcategory", "filter-status", "filter-ai", "filter-source", "filter-from", "filter-to"].forEach((id) => $(id).addEventListener("change", () => {
+      if (id === "filter-category") updateSubcategoryOptions("filter");
+      void refreshAll(true);
+    }));
+    $("filter-search").addEventListener("input", scheduleLoad);
+    $("bulk-category").addEventListener("change", () => updateSubcategoryOptions("bulk"));
+    $("refresh-queue").addEventListener("click", () => void refreshAll(false));
+    $("toggle-more-filters").addEventListener("click", () => setAdvancedFilters($("advanced-filters").hidden));
+    $("clear-filters").addEventListener("click", clearFilters);
+    $("apply-bulk-classification").addEventListener("click", () => void applyBulk());
+    $("clear-selection").addEventListener("click", () => { selectedIds.clear(); updateSelection(); });
+
+    void (async () => {
+      const requested = new URLSearchParams(window.location.search);
+      await loadTaxonomy();
+      const initial = hydrateFiltersFromUrl();
+      if (requested.get("category_id")) {
+        ($("filter-category") as HTMLSelectElement).value = requested.get("category_id") || "";
+        updateSubcategoryOptions("filter", requested.get("subcategory_id") || "");
+      }
+      await configureQueue(initial.pageIndex, initial.pageSize);
+      await loadStats();
+    })().catch((error) => toast(error instanceof Error ? error.message : String(error), true));
   </script>
 </CrmLayout>

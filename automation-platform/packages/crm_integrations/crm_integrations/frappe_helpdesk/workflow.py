@@ -163,27 +163,51 @@ class ComplaintHelpdeskWorkflowService:
             select(ComplaintReply).where(ComplaintReply.complaint_case_id == case.id)
         ).first()
         changed = current is None or self._hash_text(current.reply_text) != content_hash
+        pending_local = bool(
+            current
+            and current.source_kind in {"bulk_import", "manual_editor"}
+            and current.sync_status in {"not_synced", "pending", "failed", "conflict"}
+        )
+        conflict = bool(current and pending_local and changed)
+        now = utcnow()
         if current is None:
             current = ComplaintReply(
                 complaint_case_id=case.id,
                 reply_text=reply_text,
                 source_filename=f"frappe-helpdesk/{case.frappe_ticket_id}.txt",
                 source_row=0,
-                version=1,
-                imported_at=utcnow(),
+                source_kind="frappe_helpdesk",
+                workspace_status=approval_status,
+                sync_status="synchronized",
+                imported_at=now,
+                last_synced_at=now,
             )
-        elif changed:
-            current.reply_text = reply_text
+        elif conflict:
+            current.sync_status = "conflict"
+            current.sync_error = (
+                f"The {approval_status.lower()} Helpdesk reply differs from the pending local draft. "
+                "Review both versions before replacing either one."
+            )
+            current.updated_at = now
+        else:
+            if changed:
+                current.reply_text = reply_text
+                current.version += 1
+                current.imported_at = now
             current.source_filename = f"frappe-helpdesk/{case.frappe_ticket_id}.txt"
             current.source_row = 0
-            current.version += 1
-            current.imported_at = utcnow()
-            current.updated_at = utcnow()
+            current.source_kind = "frappe_helpdesk"
+            current.workspace_status = approval_status
+            current.sync_status = "synchronized"
+            current.sync_error = None
+            current.last_synced_at = now
+            current.updated_at = now
         self.session.add(current)
         case.frappe_reply_hash = content_hash
         return {
             "imported": True,
-            "changed": changed,
+            "changed": bool(revision_created or (changed and not conflict)),
+            "conflict": conflict,
             "content_hash": content_hash,
             "reply_version": current.version,
             "revision_created": revision_created,

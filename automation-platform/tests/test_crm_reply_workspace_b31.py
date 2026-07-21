@@ -194,7 +194,10 @@ def test_draft_is_persisted_as_snapshot_but_not_approved_archive() -> None:
         assert persisted is not None
         assert persisted.frappe_reply_approval_status == "Draft"
         assert persisted.frappe_reply_text_snapshot == "This is still a working draft."
-        assert session.exec(select(ComplaintReply)).first() is None
+        workspace = session.exec(select(ComplaintReply)).one()
+        assert workspace.reply_text == "This is still a working draft."
+        assert workspace.workspace_status == "Draft"
+        assert workspace.sync_status == "synchronized"
         assert session.exec(select(ComplaintReplyRevision)).first() is None
         reply_audit = session.exec(
             select(ComplaintAuditEvent).where(
@@ -270,7 +273,11 @@ def test_remote_readback_mismatch_is_a_failure_and_does_not_create_archive() -> 
                 reply_status="Approved",
                 ai_eligible=True,
             )
-        assert session.exec(select(ComplaintReply)).first() is None
+        workspace = session.exec(select(ComplaintReply)).one()
+        assert workspace.reply_text == "Approved text"
+        assert workspace.sync_status == "failed"
+        assert workspace.sync_error
+        assert session.exec(select(ComplaintReplyRevision)).first() is None
         failed = session.exec(
             select(ComplaintAuditEvent).where(
                 ComplaintAuditEvent.event_type == "reply_save_failed"
@@ -365,7 +372,9 @@ def test_rejected_reply_is_verified_but_never_enters_approved_archive() -> None:
         assert persisted is not None
         assert persisted.frappe_reply_approval_status == "Rejected"
         assert persisted.frappe_reply_text_snapshot == "This draft was rejected during review."
-        assert session.exec(select(ComplaintReply)).first() is None
+        workspace = session.exec(select(ComplaintReply)).one()
+        assert workspace.workspace_status == "Rejected"
+        assert workspace.sync_status == "synchronized"
         assert session.exec(select(ComplaintReplyRevision)).first() is None
 
 

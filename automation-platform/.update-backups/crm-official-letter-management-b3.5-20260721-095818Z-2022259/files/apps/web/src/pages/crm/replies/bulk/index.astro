@@ -1,0 +1,230 @@
+---
+import CrmLayout from "../../../../layouts/CrmLayout.astro";
+import DataTable from "../../../../components/DataTable.astro";
+import CheckboxField from "../../../../components/ui/CheckboxField.astro";
+
+const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+---
+
+<CrmLayout
+  title="Bulk Complaint Operations"
+  description="Classify complaints, build category-aware ChatGPT reply packages, validate imported replies and generate formal letters as one traceable batch chain."
+  page="replies"
+>
+  <a class="btn btn-sm" href="/crm/replies/" slot="actions">← Reply Queue</a>
+  <a class="btn btn-sm" href="/crm/replies/bulk/classification/" slot="actions">Classification Review</a>
+  <a class="btn btn-sm" href="/crm/replies/bulk/batches/" slot="actions">All Batches</a>
+
+  <main id="bulk-operations" data-api-base={apiBase} class="crm32-page bulk-operations-page ai-pipeline-page">
+    <nav class="reply-mode-tabs" aria-label="Reply workspace modes">
+      <a href="/crm/replies/">Reply Queue</a>
+      <a class="active" href="/crm/replies/bulk/">Bulk Operations</a>
+      <a href="/crm/replies/bulk/classification/">Classification Review</a>
+      <a href="/crm/replies/bulk/prompt-profiles/">Reply SOP</a>
+    </nav>
+
+    <section class="bulk-operations-hero master-card">
+      <div>
+        <p class="eyebrow">AI-assisted, human-controlled workflow</p>
+        <h2>Classify first, then draft replies from approved context</h2>
+        <p>Existing taxonomy is preferred, controlled tags capture cross-cutting details, low-confidence decisions are reviewed, and every reply package records the SOP version and approved historical examples supplied to ChatGPT.</p>
+      </div>
+      <div class="hero-actions">
+        <a class="btn" href="/crm/replies/bulk/classification/">Review exceptions</a>
+        <a class="btn" href="/crm/replies/bulk/batches/">Browse batch history</a>
+      </div>
+    </section>
+
+    <section class="ai-pipeline-metrics" aria-label="AI complaint workflow summary">
+      <a class="crm-metric-card metric-link" href="/crm/replies/bulk/records/?view=published"><span>Awaiting classification</span><strong id="ai-awaiting-classification">—</strong><small>Create a classification package</small></a>
+      <a class="crm-metric-card metric-link" href="/crm/replies/bulk/classification/"><span>Needs review</span><strong id="ai-needs-review">—</strong><small>Low confidence or taxonomy proposals</small></a>
+      <a class="crm-metric-card metric-link" href="/crm/replies/bulk/records/?view=awaiting"><span>Awaiting reply</span><strong id="ai-awaiting-reply">—</strong><small>Classified complaints without imported replies</small></a>
+      <a class="crm-metric-card metric-link" href="/crm/replies/bulk/batches/?type=formal_letters"><span>Ready workflow</span><strong id="ai-classified">—</strong><small>Complaints with controlled classification</small></a>
+    </section>
+
+    <section class="ai-pipeline-steps" aria-label="Five-step complaint workflow">
+      <article class="master-card ai-step-card">
+        <header><span class="step-number">1</span><div><p class="eyebrow">Classification export batch <span class="sr-only">Export batch</span></p><h2>Classify new complaints</h2></div></header>
+        <p>Create a ZIP containing complaint text, existing category/subcategory guidance, controlled tags, exact classification instructions, a blank template and a completed sample.</p>
+        <div class="button-row">
+          <button id="create-classification-export" class="btn btn-primary" type="button">Export unclassified complaints</button>
+          <button id="create-classification-export-all" class="btn" type="button">Export all published</button>
+        </div>
+        <div class="reference-downloads compact">
+          <span>ChatGPT reference files</span>
+          <a class="btn btn-sm" href={`${apiBase}/api/v1/crm/ai-pipeline/reference/classification-template`}>Template</a>
+          <a class="btn btn-sm" href={`${apiBase}/api/v1/crm/ai-pipeline/reference/classification-sample`}>Completed sample</a>
+          <a class="btn btn-sm" href={`${apiBase}/api/v1/crm/ai-pipeline/reference/classification-instructions`}>Instructions</a>
+          <button id="copy-classification-prompt" class="btn btn-sm" type="button">Copy Classification Prompt</button>
+        </div>
+        <div id="classification-export-result" class="reply-message" hidden></div>
+      </article>
+
+      <article class="master-card ai-step-card">
+        <header><span class="step-number">2</span><div><p class="eyebrow">Classification import and review</p><h2>Accept confident matches, review exceptions</h2></div></header>
+        <p>ChatGPT must prefer the existing taxonomy. High-confidence existing matches can be accepted automatically; new categories, subcategories, tags and uncertain matches remain in a human review queue.</p>
+        <form id="classification-import-form" class="bulk-operation-form">
+          <label class="crm-field" for="classification-parent-batch"><span>Related classification export</span><select id="classification-parent-batch" class="select select-bordered" required><option value="">Select an export batch</option></select></label>
+          <div class="form-grid-two">
+            <label class="crm-field" for="classification-file"><span>Completed classification CSV</span><input id="classification-file" class="file-input file-input-bordered" type="file" accept=".csv,text/csv" required /></label>
+            <label class="crm-field" for="classification-threshold"><span>Automatic acceptance threshold</span><input id="classification-threshold" class="input input-bordered" type="number" min="0" max="1" step="0.01" value="0.85" /></label>
+          </div>
+          <button class="btn btn-primary" type="submit">Validate classification CSV</button>
+        </form>
+        <section id="classification-validation-result" class="batch-validation-result" hidden>
+          <header><div><p class="eyebrow">Validation result</p><h3 id="classification-validation-batch">—</h3></div><a id="classification-open-batch" class="btn btn-sm" href="#">Open batch</a></header>
+          <div class="batch-validation-metrics">
+            <article><span>Total</span><strong id="classification-total">0</strong></article>
+            <article><span>Valid</span><strong id="classification-valid">0</strong></article>
+            <article><span>Errors / missing</span><strong id="classification-failed">0</strong></article>
+            <article><span>Duplicates</span><strong id="classification-duplicates">0</strong></article>
+          </div>
+          <div class="batch-commit-row">
+            <CheckboxField id="allow-partial-classification" label="Commit valid rows only" description="Invalid and missing rows remain visible in the batch." compact />
+            <button id="commit-classification" class="btn btn-primary" type="button">Commit classification batch</button>
+          </div>
+          <div id="classification-commit-result" class="reply-message" hidden></div>
+        </section>
+        <a class="text-link" href="/crm/replies/bulk/classification/">Open classification review queue →</a>
+      </article>
+
+      <article class="master-card ai-step-card ai-step-wide">
+        <header><span class="step-number">3</span><div><p class="eyebrow">Contextual reply export batch</p><h2>Prepare a category-aware ChatGPT reply package</h2></div></header>
+        <p>The package includes the active CM Complaint Reply Master Prompt + SOP, approved taxonomy guidance, controlled tags and a small set of approved or issued historical replies selected by subcategory, category and complaint similarity.</p>
+        <div class="bulk-operation-form">
+          <label class="crm-field" for="reply-context-parent"><span>Optional source classification batch</span><select id="reply-context-parent" class="select select-bordered"><option value="">All classified complaints awaiting replies</option></select></label>
+          <div class="form-grid-two">
+            <label class="crm-field" for="historical-example-limit"><span>Historical examples per complaint</span><input id="historical-example-limit" class="input input-bordered" type="number" min="0" max="10" value="4" /></label>
+            <div class="prompt-version-summary"><span>Active reply SOP</span><strong id="active-prompt-version">Loading…</strong><a href="/crm/replies/bulk/prompt-profiles/">Manage versions</a></div>
+          </div>
+          <CheckboxField id="redact-personal-data" label="Redact CNIC, phone and email from AI export" description="The original complaint remains unchanged inside CRM." checked wide />
+          <button id="create-reply-context-export" class="btn btn-primary" type="button">Create contextual reply package</button>
+        </div>
+        <div class="reference-downloads compact">
+          <a class="btn btn-sm" href={`${apiBase}/api/v1/crm/ai-pipeline/reference/active-reply-sop`}>Download active SOP</a>
+          <a class="btn btn-sm" href={`${apiBase}/api/v1/crm/ai-pipeline/reference/reply-context-instructions`}>Reply instructions</a>
+          <button id="copy-chatgpt-prompt" class="btn btn-sm" type="button">Copy ChatGPT prompt</button>
+        </div>
+        <div id="reply-context-result" class="reply-message" hidden></div>
+        <details class="advanced-operation">
+          <summary>Advanced: direct reply export</summary>
+          <p>Use this compatibility path only when complaints are already classified and you intentionally need the earlier non-contextual reply package.</p>
+          <div class="button-row">
+            <button id="create-direct-reply-export" class="btn btn-sm" type="button">Export awaiting replies directly</button>
+            <button id="create-direct-reply-export-all" class="btn btn-sm" type="button">Export all published directly</button>
+          </div>
+          <div id="direct-reply-export-result" class="reply-message" hidden></div>
+        </details>
+      </article>
+
+      <article class="master-card ai-step-card">
+        <header><span class="step-number">4</span><div><p class="eyebrow">Reply import batch</p><h2>Validate before changing replies</h2></div></header>
+        <p>Upload the two-column ChatGPT reply CSV. The file is validated and stored as a batch before any complaint reply is changed.</p>
+        <form id="import-validation-form" class="bulk-operation-form">
+          <label class="crm-field" for="parent-export-batch"><span>Related reply context export</span><select id="parent-export-batch" class="select select-bordered"><option value="">No related export batch</option></select></label>
+          <label class="crm-field" for="reply-batch-file"><span>Completed reply CSV</span><input id="reply-batch-file" class="file-input file-input-bordered" type="file" accept=".csv,text/csv" required /></label>
+          <button class="btn btn-primary" type="submit">Validate reply CSV</button>
+          <div class="reference-downloads compact">
+            <a class="btn btn-sm" href={`${apiBase}/api/v1/crm/bulk-operations/reference/reply-template`}>Reply template</a>
+            <a class="btn btn-sm" href={`${apiBase}/api/v1/crm/bulk-operations/reference/example-completed`}>Completed reply sample</a>
+          </div>
+        </form>
+        <section id="import-validation-result" class="batch-validation-result" hidden>
+          <header><div><p class="eyebrow">Validation result</p><h3 id="validation-batch-number">—</h3></div><a id="validation-open-batch" class="btn btn-sm" href="#">Open batch</a></header>
+          <div class="batch-validation-metrics">
+            <article><span>Total</span><strong id="validation-total">0</strong></article>
+            <article><span>Valid</span><strong id="validation-valid">0</strong></article>
+            <article><span>Errors / missing</span><strong id="validation-failed">0</strong></article>
+            <article><span>Duplicates</span><strong id="validation-duplicates">0</strong></article>
+          </div>
+          <div id="validation-artifacts" class="button-row"></div>
+          <div class="batch-commit-row">
+            <CheckboxField id="allow-partial-import" label="Import valid rows only" description="Leave invalid and missing rows in the batch as errors." compact />
+            <button id="commit-import" class="btn btn-primary" type="button">Commit import batch</button>
+          </div>
+          <div id="commit-result" class="reply-message" hidden></div>
+        </section>
+      </article>
+
+      <article class="master-card ai-step-card">
+        <header><span class="step-number">5</span><div><p class="eyebrow">Formal-letter batch</p><h2>Generate letters from a controlled source</h2></div></header>
+        <p>Create formal letters from one completed import batch or from replies that have not yet been included in a generated package.</p>
+        <div class="bulk-operation-form">
+          <label class="crm-field" for="letter-source-batch"><span>Source import batch</span><select id="letter-source-batch" class="select select-bordered"><option value="">All replies ready for letters</option></select></label>
+          <button id="create-letter-batch" class="btn btn-primary" type="button">Generate formal-letter batch</button>
+        </div>
+        <div id="letter-batch-result" class="reply-message" hidden></div>
+      </article>
+    </section>
+
+    <section class="bulk-batch-metrics ai-batch-metrics" aria-label="Batch history">
+      <a class="batch-count-link" href="/crm/replies/bulk/batches/?type=classification_export"><span>Classification exports</span><strong id="classification-export-batches">—</strong></a>
+      <a class="batch-count-link" href="/crm/replies/bulk/batches/?type=classification_import"><span>Classification imports</span><strong id="classification-import-batches">—</strong></a>
+      <a class="batch-count-link" href="/crm/replies/bulk/batches/?type=reply_context_export"><span>Reply context packages</span><strong id="reply-context-batches">—</strong></a>
+      <a class="batch-count-link" href="/crm/replies/bulk/batches/?type=reply_import"><span>Reply imports</span><strong id="bulk-import-batches">—</strong></a>
+      <a class="batch-count-link" href="/crm/replies/bulk/batches/?type=formal_letters"><span>Letter batches</span><strong id="bulk-letter-batches">—</strong></a>
+    </section>
+
+    <section class="master-card bulk-recent-card">
+      <header class="crm-card-heading"><div><p class="eyebrow">Recent activity</p><h2>Recent batch chains</h2><p>Open a batch to inspect complaint-level results, prompt/SOP version, downloads and parent/child lineage.</p></div><button id="refresh-batches" class="btn btn-sm" type="button">↻ Refresh</button></header>
+      <DataTable id="recent-batches-table" pageSize={10} pageSizeOptions={[10, 25, 50]} emptyText="No complaint-operation batches have been created." ariaLabel="Recent CRM complaint-operation batches" class="bulk-batches-table" />
+    </section>
+
+    <div id="bulk-toast" class="crm-toast" role="status" aria-live="polite" hidden></div>
+  </main>
+
+  <script>
+    import { badge, stack } from "../../../../scripts/table-cells";
+
+    type Artifact={id:string;kind:string;name:string;download_url:string};
+    type Batch={id:string;batch_number:string;operation_type:string;status:string;parent_batch_id?:string|null;source_filename?:string|null;total_items:number;valid_items:number;successful_items:number;failed_items:number;skipped_items:number;duplicate_items:number;created_by:string;created_at:string;artifacts?:Artifact[];commit_summary?:Record<string,number>;error_summary?:string|null};
+    const root=document.getElementById("bulk-operations") as HTMLElement;
+    const API=root.dataset.apiBase||"";
+    const $=<T extends HTMLElement=HTMLElement>(id:string)=>document.getElementById(id) as T;
+    const table=$("recent-batches-table") as HTMLElement & {configure:(config:any)=>Promise<void>;refresh:(reset?:boolean)=>Promise<void>};
+    let classificationValidation:Batch|null=null;
+    let replyValidation:Batch|null=null;
+
+    function toast(message:string,error=false){const node=$("bulk-toast");node.textContent=message;node.classList.toggle("error",error);node.hidden=false;window.setTimeout(()=>node.hidden=true,5000)}
+    async function api(path:string,options?:RequestInit){const response=await fetch(`${API}${path}`,options);let body:any={};try{body=await response.json()}catch{}if(!response.ok)throw new Error(body.detail||`Request failed (${response.status})`);return body}
+    function label(type:string){return ({classification_export:"Classification export",classification_import:"Classification import",reply_context_export:"Reply context export",reply_export:"Export batch",reply_import:"Reply import",formal_letters:"Formal letters"} as Record<string,string>)[type]||type.replaceAll("_"," ")}
+    function tone(status:string){if(["completed","auto_accepted","approved"].includes(status))return"success";if(["failed","rejected"].includes(status))return"danger";if(["completed_with_errors","review_required"].includes(status))return"warning";return"info"}
+    function dt(value:string){return value?new Intl.DateTimeFormat(undefined,{dateStyle:"medium",timeStyle:"short"}).format(new Date(value)):"—"}
+    function artifactDownload(batch:Batch,kind?:string){const artifact=(batch.artifacts||[]).find(item=>!kind||item.kind===kind);if(!artifact)return null;const a=document.createElement("a");a.className="btn btn-sm";a.href=`${API}${artifact.download_url}`;a.textContent=`Download ${artifact.name}`;return a}
+    function result(nodeId:string,batch:Batch,kind?:string){const node=$(nodeId);node.replaceChildren();const text=document.createElement("span");text.textContent=`${batch.batch_number} · ${batch.status.replaceAll("_"," ")} · ${batch.total_items} item(s)`;node.append(text);const a=artifactDownload(batch,kind);if(a)node.append(a);const open=document.createElement("a");open.className="btn btn-sm";open.href=`/crm/replies/bulk/batches/${batch.id}/`;open.textContent="Open batch";node.append(open);node.hidden=false}
+    async function createClassification(scope:string){try{const batch=await api("/api/v1/crm/ai-pipeline/classification-exports",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({scope})});result("classification-export-result",batch,"classification_package");toast("Classification package created.");await refreshAll()}catch(error){toast(error instanceof Error?error.message:String(error),true)}}
+    $("create-classification-export").addEventListener("click",()=>void createClassification("unclassified"));
+    $("create-classification-export-all").addEventListener("click",()=>void createClassification("all"));
+    $("copy-classification-prompt").addEventListener("click",async()=>{const prompt="Please open and inspect the attached classification ZIP, follow the included instructions and template, classify every valid complaint, prefer existing categories, subcategories and controlled tags, and suggest new taxonomy only when no existing option reasonably fits. Return only one downloadable UTF-8 CSV file named classification-results.csv using the exact output columns from the template. Do not draft replies and do not add markdown or explanations.";try{await navigator.clipboard.writeText(prompt);toast("Classification prompt copied.")}catch{toast("Clipboard access was unavailable. Download the classification instructions instead.",true)}});
+
+    $("classification-import-form").addEventListener("submit",async(event)=>{event.preventDefault();const file=($("classification-file") as HTMLInputElement).files?.[0];const parent=($("classification-parent-batch") as HTMLSelectElement).value;if(!file||!parent)return;const form=new FormData();form.append("file",file);form.append("parent_batch_id",parent);form.append("auto_accept_threshold",($("classification-threshold") as HTMLInputElement).value||"0.85");try{classificationValidation=await api("/api/v1/crm/ai-pipeline/classification-imports/validate",{method:"POST",body:form});$("classification-validation-batch").textContent=classificationValidation.batch_number;$("classification-total").textContent=String(classificationValidation.total_items);$("classification-valid").textContent=String(classificationValidation.valid_items);$("classification-failed").textContent=String(classificationValidation.failed_items);$("classification-duplicates").textContent=String(classificationValidation.duplicate_items);($("classification-open-batch") as HTMLAnchorElement).href=`/crm/replies/bulk/batches/${classificationValidation.id}/`;$("classification-validation-result").hidden=false;toast("Classification CSV validated.")}catch(error){toast(error instanceof Error?error.message:String(error),true)}});
+    $("commit-classification").addEventListener("click",async()=>{if(!classificationValidation)return;try{const batch=await api(`/api/v1/crm/ai-pipeline/classification-imports/${classificationValidation.id}/commit`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({allow_partial:($("allow-partial-classification") as HTMLInputElement).checked})});result("classification-commit-result",batch);toast(`Classification committed: ${batch.commit_summary?.auto_accepted||0} auto-accepted, ${batch.commit_summary?.review_required||0} sent for review.`);await refreshAll()}catch(error){toast(error instanceof Error?error.message:String(error),true)}});
+
+    $("create-reply-context-export").addEventListener("click",async()=>{const parent=($("reply-context-parent") as HTMLSelectElement).value;try{const batch=await api("/api/v1/crm/ai-pipeline/reply-context-exports",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({scope:parent?"classification_batch":"awaiting",parent_batch_id:parent||null,examples_limit:Number(($("historical-example-limit") as HTMLInputElement).value||4),redact_personal_data:($("redact-personal-data") as HTMLInputElement).checked})});result("reply-context-result",batch,"reply_context_package");toast("Contextual reply package created.");await refreshAll()}catch(error){toast(error instanceof Error?error.message:String(error),true)}});
+    async function createDirectReplyExport(scope:string){try{const batch=await api("/api/v1/crm/bulk-operations/export-batches",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({scope})});result("direct-reply-export-result",batch,"export_package");toast("Direct reply export created.");await refreshAll()}catch(error){toast(error instanceof Error?error.message:String(error),true)}}
+    $("create-direct-reply-export").addEventListener("click",()=>void createDirectReplyExport("awaiting"));
+    $("create-direct-reply-export-all").addEventListener("click",()=>void createDirectReplyExport("all"));
+    $("copy-chatgpt-prompt").addEventListener("click",async()=>{const prompt="Use the attached contextual reply ZIP. Follow 03-active-reply-sop.txt and 06-chatgpt-reply-instructions.txt. Return one UTF-8 CSV containing exactly Complaint Number and Reply. Do not add markdown, explanations, code fences or extra columns.";try{await navigator.clipboard.writeText(prompt);toast("ChatGPT prompt copied.")}catch{toast("Clipboard access was unavailable. Download the reply instructions instead.",true)}});
+
+    $("import-validation-form").addEventListener("submit",async(event)=>{event.preventDefault();const file=($("reply-batch-file") as HTMLInputElement).files?.[0];if(!file)return;const form=new FormData();form.append("file",file);const parent=($("parent-export-batch") as HTMLSelectElement).value;if(parent)form.append("parent_batch_id",parent);try{replyValidation=await api("/api/v1/crm/bulk-operations/import-batches/validate",{method:"POST",body:form});$("validation-batch-number").textContent=replyValidation.batch_number;$("validation-total").textContent=String(replyValidation.total_items);$("validation-valid").textContent=String(replyValidation.valid_items);$("validation-failed").textContent=String(replyValidation.failed_items);$("validation-duplicates").textContent=String(replyValidation.duplicate_items);($("validation-open-batch") as HTMLAnchorElement).href=`/crm/replies/bulk/batches/${replyValidation.id}/`;const artifacts=$("validation-artifacts");artifacts.replaceChildren();for(const item of replyValidation.artifacts||[]){if(item.kind!=="validation_errors")continue;const a=document.createElement("a");a.className="btn btn-sm";a.href=`${API}${item.download_url}`;a.textContent="Download validation errors";artifacts.append(a)}$("import-validation-result").hidden=false;toast("Reply CSV validated.")}catch(error){toast(error instanceof Error?error.message:String(error),true)}});
+    $("commit-import").addEventListener("click",async()=>{if(!replyValidation)return;try{const batch=await api(`/api/v1/crm/bulk-operations/import-batches/${replyValidation.id}/commit`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({allow_partial:($("allow-partial-import") as HTMLInputElement).checked})});result("commit-result",batch);toast("Reply import committed.");await refreshAll()}catch(error){toast(error instanceof Error?error.message:String(error),true)}});
+
+    $("create-letter-batch").addEventListener("click",async()=>{const parent=($("letter-source-batch") as HTMLSelectElement).value;try{const batch=await api("/api/v1/crm/bulk-operations/letter-batches",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({parent_batch_id:parent||null,scope:parent?"import_batch":"ready"})});result("letter-batch-result",batch,"letter_package");toast("Formal-letter batch generated.");await refreshAll()}catch(error){toast(error instanceof Error?error.message:String(error),true)}});
+
+    async function batches(type:string,status=""){const p=new URLSearchParams({operation_type:type,page:"1",page_size:"100"});if(status)p.set("status",status);return (await api(`/api/v1/crm/bulk-operations/batches?${p}`)).items||[]}
+    function fill(selectId:string,rows:Batch[],placeholder:string){const select=$(selectId) as HTMLSelectElement;const current=select.value;select.replaceChildren();const empty=document.createElement("option");empty.value="";empty.textContent=placeholder;select.append(empty);for(const row of rows){const option=document.createElement("option");option.value=row.id;option.textContent=`${row.batch_number} · ${row.total_items} item(s)`;select.append(option)}select.value=current}
+    async function refreshSelectors(){const [classificationExports,classificationImports,contextExports,legacyExports,replyImports]=await Promise.all([batches("classification_export"),batches("classification_import"),batches("reply_context_export"),batches("reply_export"),batches("reply_import")]);const completed=(row:Batch)=>["completed","completed_with_errors"].includes(row.status);fill("classification-parent-batch",classificationExports.filter(row=>row.status==="completed"),"Select an export batch");fill("reply-context-parent",classificationImports.filter(completed),"All classified complaints awaiting replies");fill("parent-export-batch",[...contextExports.filter(row=>row.status==="completed"),...legacyExports.filter(row=>row.status==="completed")],"No related export batch");fill("letter-source-batch",replyImports.filter(completed),"All replies ready for letters")}
+    async function refreshStatistics(){const [ai,bulk]=await Promise.all([api("/api/v1/crm/ai-pipeline/statistics"),api("/api/v1/crm/bulk-operations/statistics")]);$("ai-awaiting-classification").textContent=String(ai.awaiting_classification);$("ai-needs-review").textContent=String(ai.needs_review);$("ai-awaiting-reply").textContent=String(ai.awaiting_reply);$("ai-classified").textContent=String(ai.classified_cases);$("active-prompt-version").textContent=`${ai.active_prompt_version} · versioned and snapshotted`;$("classification-export-batches").textContent=String(bulk.classification_export_batches||0);$("classification-import-batches").textContent=String(bulk.classification_import_batches||0);$("reply-context-batches").textContent=String(bulk.reply_context_batches||0);$("bulk-import-batches").textContent=String(bulk.import_batches||0);$("bulk-letter-batches").textContent=String(bulk.letter_batches||0)}
+    async function configureTable(){await table.configure({columns:[
+      {accessorKey:"batch_number",header:"Batch",meta:{minWidth:"220px"},cell:(c:any)=>{const row=c.row.original as Batch;const a=document.createElement("a");a.className="table-primary-link";a.href=`/crm/replies/bulk/batches/${row.id}/`;a.textContent=row.batch_number;return a}},
+      {accessorKey:"operation_type",header:"Operation",meta:{minWidth:"170px"},cell:(c:any)=>stack(label(c.getValue()),c.row.original.source_filename||"")},
+      {accessorKey:"status",header:"Status",meta:{minWidth:"150px"},cell:(c:any)=>badge(String(c.getValue()).replaceAll("_"," "),tone(c.getValue()))},
+      {id:"progress",header:"Items",meta:{minWidth:"135px"},cell:(c:any)=>{const row=c.row.original as Batch;return stack(`${row.successful_items+row.skipped_items+row.failed_items} / ${row.total_items}`,`${row.failed_items} failed`) }},
+      {accessorKey:"created_by",header:"Operator",meta:{minWidth:"125px"}},
+      {accessorKey:"created_at",header:"Created",meta:{minWidth:"165px"},cell:(c:any)=>dt(c.getValue())}
+    ],manualPagination:true,getRowId:(row:Batch)=>row.id,loadPage:async(pageIndex:number,pageSize:number)=>{const p=new URLSearchParams({page:String(pageIndex+1),page_size:String(pageSize)});const data=await api(`/api/v1/crm/bulk-operations/batches?${p}`);return{rows:data.items||[],total:data.total||0}}})}
+    async function refreshAll(){await Promise.all([refreshStatistics(),refreshSelectors(),table.refresh(false)])}
+    $("refresh-batches").addEventListener("click",()=>void refreshAll());
+    void (async()=>{await configureTable();await refreshStatistics();await refreshSelectors()})().catch(error=>toast(error instanceof Error?error.message:String(error),true));
+  </script>
+</CrmLayout>

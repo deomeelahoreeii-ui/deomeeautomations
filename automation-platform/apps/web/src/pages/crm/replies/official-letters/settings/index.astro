@@ -1,0 +1,207 @@
+---
+import CrmLayout from "../../../../../layouts/CrmLayout.astro";
+import CheckboxField from "../../../../../components/ui/CheckboxField.astro";
+const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+---
+<CrmLayout title="Letter Configuration" description="Manage official-letter numbering, recipients, template versions and signature profiles." page="replies">
+  <a class="btn btn-sm" href="/crm/replies/official-letters/" slot="actions">← Official Letters</a>
+  <main id="letter-settings" data-api-base={apiBase} class="crm32-page letter-settings-page">
+    <nav class="reply-mode-tabs" aria-label="Reply workspace modes"><a href="/crm/replies/">Reply Queue</a><a href="/crm/replies/bulk/">Bulk Operations</a><a class="active" href="/crm/replies/official-letters/">Official Letters</a></nav>
+    <section class="official-settings-grid">
+      <form id="defaults-form" class="master-card official-settings-card">
+        <header class="crm-card-heading"><div><p class="eyebrow">Office defaults</p><h2>Numbering and letter identity</h2><p>Defaults are suggested for each letter and remain editable where permitted.</p></div></header>
+        <div class="settings-form-grid">
+          <label class="crm-field full"><span>Office title</span><textarea id="office-title" class="textarea textarea-bordered" rows="3"></textarea></label>
+          <label class="crm-field"><span>Default recipient</span><input id="recipient-name" class="input input-bordered" /></label>
+          <label class="crm-field"><span>Recipient location</span><input id="recipient-location" class="input input-bordered" /></label>
+          <label class="crm-field"><span>Subject prefix</span><input id="subject-prefix" class="input input-bordered" /></label>
+          <label class="crm-field"><span>Numbering prefix</span><input id="numbering-prefix" class="input input-bordered" /></label>
+          <label class="crm-field"><span>Last numeric number</span><input id="last-number" class="input input-bordered" type="number" min="0" /></label>
+          <label class="crm-field"><span>Date format</span><select id="date-format" class="select select-bordered"><option>DD/MM/YYYY</option><option>DD-MM-YYYY</option><option>YYYY-MM-DD</option></select></label>
+          <label class="crm-field full"><span>Default CC entries</span><textarea id="cc-entries" class="textarea textarea-bordered" rows="3"></textarea></label>
+          <label class="crm-field"><span>Default template</span><select id="default-template" class="select select-bordered"></select></label>
+          <label class="crm-field"><span>Default signature</span><select id="default-signature" class="select select-bordered"></select></label>
+          <CheckboxField id="allow-override" label="Allow manual letter number" description="Authorized users can replace the suggested number." checked />
+          <CheckboxField id="require-unique" label="Unique letter number required" description="Always enforced to protect diary and audit integrity." checked disabled />
+        </div>
+        <footer class="settings-card-footer"><span id="settings-suggestion"></span><button class="btn btn-primary" type="submit">Save configuration</button></footer>
+      </form>
+      <section class="master-card official-settings-card">
+        <header class="crm-card-heading"><div><p class="eyebrow">Template versions</p><h2>Official ODT template</h2><p>Upload only a legal-size ODT/OTT containing every required placeholder.</p></div></header>
+        <div id="template-list" class="configuration-list"></div>
+        <form id="template-upload" class="upload-panel"><label class="crm-field"><span>Template name</span><input name="name" class="input input-bordered" value="DEO CRM Official Letter" /></label><label class="crm-field full"><span>Description</span><input name="description" class="input input-bordered" /></label><label class="crm-field full"><span>ODT/OTT file</span><input name="file" class="file-input file-input-bordered" type="file" accept=".odt,.ott" required /></label><label class="form-check form-switch"><input class="form-check-input" type="checkbox" name="make_default" checked /><span class="form-check-label">Make default</span></label><button class="btn" type="submit">Upload template version</button></form>
+      </section>
+      <section class="master-card official-settings-card">
+        <header class="crm-card-heading"><div><p class="eyebrow">Signature profiles</p><h2>Signatory and signature</h2><p>Generated letters retain an immutable signature and designation snapshot.</p></div></header>
+        <div id="signature-list" class="configuration-list"></div>
+        <form id="signature-upload" class="upload-panel"><label class="crm-field"><span>Profile name</span><input name="name" class="input input-bordered" value="DEO M-EE Lahore" /></label><label class="crm-field"><span>Officer name (optional)</span><input name="officer_name" class="input input-bordered" /></label><label class="crm-field"><span>Designation</span><input name="designation" class="input input-bordered" value="DISTRICT EDUCATION OFFICER (M-EE)" /></label><label class="crm-field"><span>Office location</span><input name="office_location" class="input input-bordered" value="LAHORE" /></label><label class="crm-field"><span>Effective from (optional)</span><input name="effective_from" class="input input-bordered" type="date" /></label><label class="crm-field"><span>Effective to (optional)</span><input name="effective_to" class="input input-bordered" type="date" /></label><label class="crm-field full"><span>Signature PNG/JPEG</span><input name="file" class="file-input file-input-bordered" type="file" accept="image/png,image/jpeg" required /></label><label class="form-check form-switch"><input class="form-check-input" type="checkbox" name="make_default" checked /><span class="form-check-label">Make default</span></label><button class="btn" type="submit">Upload signature profile</button></form>
+      </section>
+    </section>
+    <div id="settings-toast" class="crm-toast" role="status" hidden></div>
+  </main>
+  <script>
+    const root = document.getElementById('letter-settings') as HTMLElement;
+    const API = root.dataset.apiBase || '';
+    const $ = (id:string) => document.getElementById(id) as any;
+    let config:any = null;
+
+    function toast(message:string, error=false) {
+      const node = $('settings-toast');
+      node.textContent = message;
+      node.className = `crm-toast${error ? ' error' : ''}`;
+      node.hidden = false;
+      window.setTimeout(() => node.hidden = true, 4500);
+    }
+
+    async function api(path:string, init?:RequestInit) {
+      const headers = new Headers(init?.headers || {});
+      if (init?.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');
+      const response = await fetch(`${API}${path}`, {...init, headers});
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.detail || response.statusText);
+      return body;
+    }
+
+    function configurationRow(title:string, detail:string) {
+      const wrapper = document.createElement('article');
+      wrapper.className = 'configuration-row';
+      const copy = document.createElement('div');
+      const strong = document.createElement('strong');
+      strong.textContent = title;
+      const small = document.createElement('small');
+      small.textContent = detail;
+      copy.append(strong, small);
+      wrapper.append(copy);
+      return wrapper;
+    }
+
+    function renderTemplates() {
+      const rows = config.templates.map((item:any) => {
+        const row = configurationRow(
+          `${item.name} · v${item.version}`,
+          `${item.description || 'No description'} · ${item.is_default ? 'Default' : item.active ? 'Available' : 'Inactive'}`,
+        );
+        const actions = document.createElement('div');
+        actions.className = 'table-actions';
+        const download = document.createElement('a');
+        download.className = 'btn btn-xs';
+        download.href = `${API}${item.download_url}`;
+        download.textContent = 'Download';
+        const active = document.createElement('button');
+        active.type = 'button';
+        active.className = 'btn btn-xs';
+        active.textContent = item.active ? 'Deactivate' : 'Activate';
+        active.disabled = item.is_default;
+        active.title = item.is_default ? 'Choose another default template before deactivating this one.' : '';
+        active.addEventListener('click', async () => {
+          try {
+            await api(`/api/v1/crm/official-letters/templates/${item.id}/active`, {method:'PUT', body:JSON.stringify({active:!item.active})});
+            await load();
+            toast(`Template ${item.active ? 'deactivated' : 'activated'}.`);
+          } catch (error) { toast(error instanceof Error ? error.message : String(error), true); }
+        });
+        actions.append(download, active);
+        row.append(actions);
+        return row;
+      });
+      $('template-list').replaceChildren(...rows);
+    }
+
+    function renderSignatures() {
+      const rows = config.signatures.map((item:any) => {
+        const row = configurationRow(
+          item.name,
+          `${item.designation} · ${item.office_location} · ${item.is_default ? 'Default' : item.active ? 'Available' : 'Inactive'}${item.effective_from || item.effective_to ? ` · ${item.effective_from || 'open'} to ${item.effective_to || 'open'}` : ''}`,
+        );
+        const image = document.createElement('img');
+        image.src = `${API}${item.image_url}`;
+        image.alt = `${item.name} signature`;
+        row.prepend(image);
+        const active = document.createElement('button');
+        active.type = 'button';
+        active.className = 'btn btn-xs';
+        active.textContent = item.active ? 'Deactivate' : 'Activate';
+        active.disabled = item.is_default;
+        active.title = item.is_default ? 'Choose another default signature before deactivating this one.' : '';
+        active.addEventListener('click', async () => {
+          try {
+            await api(`/api/v1/crm/official-letters/signatures/${item.id}/active`, {method:'PUT', body:JSON.stringify({active:!item.active})});
+            await load();
+            toast(`Signature profile ${item.active ? 'deactivated' : 'activated'}.`);
+          } catch (error) { toast(error instanceof Error ? error.message : String(error), true); }
+        });
+        row.append(active);
+        return row;
+      });
+      $('signature-list').replaceChildren(...rows);
+    }
+
+    function render() {
+      const settings = config.settings;
+      $('office-title').value = settings.office_title;
+      $('recipient-name').value = settings.default_recipient_name;
+      $('recipient-location').value = settings.default_recipient_location;
+      $('subject-prefix').value = settings.default_subject_prefix;
+      $('numbering-prefix').value = settings.numbering_prefix;
+      $('last-number').value = settings.last_numeric_number;
+      $('date-format').value = settings.date_format;
+      $('cc-entries').value = settings.default_cc_entries;
+      $('allow-override').checked = settings.allow_manual_override;
+      $('require-unique').checked = true;
+      $('settings-suggestion').textContent = `Next available number: ${settings.suggested_letter_number}`;
+
+      $('default-template').replaceChildren(...config.templates.filter((item:any) => item.active).map((item:any) => new Option(`${item.name} · v${item.version}`, item.id)));
+      $('default-template').value = settings.default_template_id || '';
+      $('default-signature').replaceChildren(...config.signatures.filter((item:any) => item.active).map((item:any) => new Option(`${item.name} · ${item.designation}`, item.id)));
+      $('default-signature').value = settings.default_signature_id || '';
+      renderTemplates();
+      renderSignatures();
+    }
+
+    async function load() {
+      config = await api('/api/v1/crm/official-letters/configuration');
+      render();
+    }
+
+    $('defaults-form').addEventListener('submit', async (event:Event) => {
+      event.preventDefault();
+      try {
+        config = await api('/api/v1/crm/official-letters/configuration', {
+          method:'PUT',
+          body:JSON.stringify({
+            office_title:$('office-title').value,
+            default_recipient_name:$('recipient-name').value,
+            default_recipient_location:$('recipient-location').value,
+            default_subject_prefix:$('subject-prefix').value,
+            default_cc_entries:$('cc-entries').value,
+            date_format:$('date-format').value,
+            numbering_prefix:$('numbering-prefix').value,
+            last_numeric_number:Number($('last-number').value),
+            allow_manual_override:$('allow-override').checked,
+            require_unique_number:true,
+            default_template_id:$('default-template').value,
+            default_signature_id:$('default-signature').value,
+          }),
+        });
+        render();
+        toast('Official letter configuration saved.');
+      } catch (error) { toast(error instanceof Error ? error.message : String(error), true); }
+    });
+
+    for (const id of ['template-upload', 'signature-upload']) {
+      $(id).addEventListener('submit', async (event:Event) => {
+        event.preventDefault();
+        const form = event.currentTarget as HTMLFormElement;
+        const data = new FormData(form);
+        try {
+          await api(id === 'template-upload' ? '/api/v1/crm/official-letters/templates' : '/api/v1/crm/official-letters/signatures', {method:'POST', body:data});
+          toast(id === 'template-upload' ? 'Template version uploaded.' : 'Signature profile uploaded.');
+          form.reset();
+          await load();
+        } catch (error) { toast(error instanceof Error ? error.message : String(error), true); }
+      });
+    }
+
+    void load().catch(error => toast(error instanceof Error ? error.message : String(error), true));
+  </script>
+</CrmLayout>

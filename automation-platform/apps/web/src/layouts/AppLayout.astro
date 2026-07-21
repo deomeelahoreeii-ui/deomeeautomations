@@ -15,7 +15,7 @@ const { title, eyebrow, description, active = "master-data" } = Astro.props;
 ---
 
 <!doctype html>
-<html lang="en" data-theme="automation">
+<html lang="en" data-theme="automation" data-sidebar="expanded">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -24,56 +24,86 @@ const { title, eyebrow, description, active = "master-data" } = Astro.props;
     <title>{title} · Automation Platform</title>
     <script is:inline>
       (() => {
-        const stored = localStorage.getItem("automation-theme");
-        const dark = stored ? stored === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+        const storedTheme = localStorage.getItem("automation-theme");
+        const dark = storedTheme ? storedTheme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
         document.documentElement.dataset.theme = dark ? "automation-dark" : "automation";
+        document.documentElement.dataset.sidebar = localStorage.getItem("automation-sidebar-collapsed") === "true"
+          ? "collapsed"
+          : "expanded";
       })();
     </script>
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="sidebar">
-        <a class="brand" href="/">
-          <span class="brand-mark">D</span>
-          <span><strong>Deomee</strong><small>Automation Platform</small></span>
-        </a>
+    <div class="app-shell" id="app-shell">
+      <aside class="sidebar" id="app-sidebar" aria-label="Platform navigation" tabindex="-1">
+        <div class="sidebar-brand-row">
+          <a class="brand" href="/">
+            <span class="brand-mark">D</span>
+            <span class="brand-copy"><strong>Deomee</strong><small>Automation Platform</small></span>
+          </a>
+          <button
+            class="sidebar-collapse-toggle"
+            id="sidebar-collapse-toggle"
+            type="button"
+            aria-controls="app-sidebar"
+            aria-expanded="true"
+            aria-label="Collapse navigation"
+            title="Collapse navigation"
+          >
+            <span aria-hidden="true">‹</span>
+          </button>
+        </div>
         <nav class="primary-nav" aria-label="Platform modules">
           <p class="nav-label">Operations</p>
-          <a class:list={["nav-item", { active: active === "antidengue" }]} href="/">
-            <span class="nav-icon">◉</span> AntiDengue
+          <a class:list={["nav-item", { active: active === "antidengue" }]} href="/" title="AntiDengue">
+            <span class="nav-icon">◉</span><span class="nav-copy">AntiDengue</span>
           </a>
-          <a class:list={["nav-item", { active: active === "whatsapp" }]} href="/whatsapp/">
-            <span class="nav-icon">●</span> WhatsApp
+          <a class:list={["nav-item", { active: active === "whatsapp" }]} href="/whatsapp/" title="WhatsApp">
+            <span class="nav-icon">●</span><span class="nav-copy">WhatsApp</span>
           </a>
-          <a class:list={["nav-item", { active: active === "crm" }]} href="/crm/intake/">
-            <span class="nav-icon">◆</span> CRM
+          <a class:list={["nav-item", { active: active === "crm" }]} href="/crm/intake/" title="CRM">
+            <span class="nav-icon">◆</span><span class="nav-copy">CRM</span>
           </a>
-          <span class="nav-item muted"><span class="nav-icon">◇</span> PMDU <small>Later</small></span>
+          <span class="nav-item muted" title="PMDU — later"><span class="nav-icon">◇</span><span class="nav-copy">PMDU <small>Later</small></span></span>
           <p class="nav-label nav-label-spaced">Management</p>
-          <a class:list={["nav-item", { active: active === "master-data" }]} href="/master-data/">
-            <span class="nav-icon">▦</span> Master Data
+          <a class:list={["nav-item", { active: active === "master-data" }]} href="/master-data/" title="Master Data">
+            <span class="nav-icon">▦</span><span class="nav-copy">Master Data</span>
           </a>
-          <a class:list={["nav-item", { active: active === "storage" }]} href="/storage/">
-            <span class="nav-icon">▤</span> Storage
+          <a class:list={["nav-item", { active: active === "storage" }]} href="/storage/" title="Storage">
+            <span class="nav-icon">▤</span><span class="nav-copy">Storage</span>
           </a>
-          <a class:list={["nav-item", { active: active === "notifications" }]} href="/notifications/">
-            <span class="nav-icon">◌</span> Notifications
+          <a class:list={["nav-item", { active: active === "notifications" }]} href="/notifications/" title="Notifications">
+            <span class="nav-icon">◌</span><span class="nav-copy">Notifications</span>
           </a>
-          <span class="nav-item muted"><span class="nav-icon">≡</span> All jobs</span>
-          <span class="nav-item muted"><span class="nav-icon">⌁</span> System health</span>
+          <span class="nav-item muted" title="All jobs"><span class="nav-icon">≡</span><span class="nav-copy">All jobs</span></span>
+          <span class="nav-item muted" title="System health"><span class="nav-icon">⌁</span><span class="nav-copy">System health</span></span>
         </nav>
         <div class="sidebar-status">
           <span class="status-dot"></span>
-          <span><strong>API connected</strong><small id="api-status">Platform services available</small></span>
+          <span class="sidebar-status-copy"><strong>API connected</strong><small id="api-status">Platform services available</small></span>
         </div>
       </aside>
+      <button class="sidebar-scrim" id="sidebar-scrim" type="button" aria-label="Close navigation"></button>
 
       <main class="content master-content">
         <header class="topbar master-topbar">
-          <div>
-            <p class="eyebrow">{eyebrow}</p>
-            <h1>{title}</h1>
-            <p>{description}</p>
+          <div class="topbar-title-group">
+            <button
+              class="mobile-nav-toggle"
+              id="mobile-nav-toggle"
+              type="button"
+              aria-controls="app-sidebar"
+              aria-expanded="false"
+              aria-label="Open navigation"
+              title="Open navigation"
+            >
+              <span aria-hidden="true">☰</span>
+            </button>
+            <div>
+              <p class="eyebrow">{eyebrow}</p>
+              <h1>{title}</h1>
+              <p>{description}</p>
+            </div>
           </div>
           <div class="topbar-actions">
             <slot name="actions" />
@@ -84,22 +114,66 @@ const { title, eyebrow, description, active = "master-data" } = Astro.props;
       </main>
     </div>
     <script is:inline>
-      const button = document.getElementById("theme-toggle");
-      const updateLabel = () => {
+      const themeButton = document.getElementById("theme-toggle");
+      const shell = document.getElementById("app-shell");
+      const sidebarButton = document.getElementById("sidebar-collapse-toggle");
+      const mobileButton = document.getElementById("mobile-nav-toggle");
+      const sidebarScrim = document.getElementById("sidebar-scrim");
+      const mobileMedia = matchMedia("(max-width: 720px)");
+
+      const updateThemeLabel = () => {
         const dark = document.documentElement.dataset.theme === "automation-dark";
-        if (button) {
-          button.textContent = dark ? "☀" : "☾";
-          button.setAttribute("aria-label", dark ? "Use light mode" : "Use dark mode");
-          button.setAttribute("title", dark ? "Use light mode" : "Use dark mode");
+        if (themeButton) {
+          themeButton.textContent = dark ? "☀" : "☾";
+          themeButton.setAttribute("aria-label", dark ? "Use light mode" : "Use dark mode");
+          themeButton.setAttribute("title", dark ? "Use light mode" : "Use dark mode");
         }
       };
-      button?.addEventListener("click", () => {
+
+      const updateSidebarLabel = () => {
+        const collapsed = document.documentElement.dataset.sidebar === "collapsed";
+        if (sidebarButton) {
+          sidebarButton.setAttribute("aria-expanded", String(!collapsed));
+          sidebarButton.setAttribute("aria-label", collapsed ? "Expand navigation" : "Collapse navigation");
+          sidebarButton.setAttribute("title", collapsed ? "Expand navigation" : "Collapse navigation");
+          const icon = sidebarButton.querySelector("span");
+          if (icon) icon.textContent = collapsed ? "›" : "‹";
+        }
+      };
+
+      const setMobileOpen = (open) => {
+        shell?.classList.toggle("sidebar-mobile-open", open);
+        mobileButton?.setAttribute("aria-expanded", String(open));
+        mobileButton?.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+        if (open) document.getElementById("app-sidebar")?.focus({ preventScroll: true });
+      };
+
+      themeButton?.addEventListener("click", () => {
         const dark = document.documentElement.dataset.theme !== "automation-dark";
         document.documentElement.dataset.theme = dark ? "automation-dark" : "automation";
         localStorage.setItem("automation-theme", dark ? "dark" : "light");
-        updateLabel();
+        updateThemeLabel();
       });
-      updateLabel();
+
+      sidebarButton?.addEventListener("click", () => {
+        const collapsed = document.documentElement.dataset.sidebar !== "collapsed";
+        document.documentElement.dataset.sidebar = collapsed ? "collapsed" : "expanded";
+        localStorage.setItem("automation-sidebar-collapsed", String(collapsed));
+        updateSidebarLabel();
+      });
+
+      mobileButton?.addEventListener("click", () => setMobileOpen(!shell?.classList.contains("sidebar-mobile-open")));
+      sidebarScrim?.addEventListener("click", () => setMobileOpen(false));
+      document.querySelectorAll("#app-sidebar a").forEach((link) => link.addEventListener("click", () => {
+        if (mobileMedia.matches) setMobileOpen(false);
+      }));
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && shell?.classList.contains("sidebar-mobile-open")) setMobileOpen(false);
+      });
+      mobileMedia.addEventListener("change", () => setMobileOpen(false));
+
+      updateThemeLabel();
+      updateSidebarLabel();
     </script>
   </body>
 </html>
