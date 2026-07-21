@@ -5,7 +5,7 @@ import WhatsAppLayout from "../../../../layouts/WhatsAppLayout.astro";
 const { id = "" } = Astro.params;
 ---
 
-<WhatsAppLayout title="Dispatch Preview" description="Immutable AntiDengue routing snapshot and preflight summary." page="previews">
+<WhatsAppLayout title="Dispatch Preview" description="Immutable WhatsApp routing snapshot and preflight summary." page="previews">
   <a class="btn btn-sm" href="/whatsapp/previews" slot="actions">← All previews</a>
   <span id="preview-context" data-preview-id={id} hidden></span>
   <div class="preview-identity">
@@ -32,7 +32,7 @@ const { id = "" } = Astro.params;
         <div><dt>Audience</dt><dd id="audience-name">—</dd></div>
         <div><dt>Connection</dt><dd id="account-name">—</dd></div>
         <div><dt>Template</dt><dd id="template-name">—</dd></div>
-        <div><dt>Source dry run</dt><dd><a id="source-job" href="/">—</a></dd></div>
+        <div><dt id="source-label">Source</dt><dd><a id="source-link" href="#">—</a></dd></div>
       </dl>
     </article>
 
@@ -50,7 +50,7 @@ const { id = "" } = Astro.params;
 
   <article class="wa-panel preview-next-card">
     <div><p class="eyebrow">Review and approval</p><h2>Send the frozen payloads</h2><p>Inspect the exact messages and attachments, then explicitly approve this immutable batch for live delivery.</p></div>
-    <div class="preview-next-actions"><a class="btn btn-sm" href={`/whatsapp/previews/${id}/deliveries`}>Review deliveries</a><a class="btn btn-sm" href={`/whatsapp/previews/${id}/issues`}>Review issues</a><a class="btn btn-sm" href={`/whatsapp/previews/${id}/artifacts`}>View attachments</a><button class="btn btn-sm btn-primary" id="approve-preview" type="button" hidden>Approve & queue</button><a class="btn btn-sm btn-primary" id="view-queued" href="/whatsapp/deliveries" hidden>View queued deliveries</a></div>
+    <div class="preview-next-actions"><span id="approval-unavailable" class="preview-action-note" hidden></span><a class="btn btn-sm" href={`/whatsapp/previews/${id}/deliveries`}>Review deliveries</a><a class="btn btn-sm" href={`/whatsapp/previews/${id}/issues`}>Review issues</a><a class="btn btn-sm" href={`/whatsapp/previews/${id}/artifacts`}>View attachments</a><button class="btn btn-sm btn-primary" id="approve-preview" type="button" hidden>Approve & queue</button><a class="btn btn-sm btn-primary" id="view-queued" href="/whatsapp/deliveries" hidden>View queued deliveries</a></div>
   </article>
 
   <script>
@@ -59,6 +59,7 @@ const { id = "" } = Astro.params;
     const id = document.getElementById("preview-context")!.dataset.previewId!;
     const el = (key) => document.getElementById(key);
     const formatDate = (value) => value ? new Date(value).toLocaleString() : "—";
+    const shortIdentifier = (value) => typeof value === "string" && value.length ? value.slice(0, 8) : "—";
     try {
       const result = await actions.whatsapp.preview({ id });
       if (result.error) throw result.error;
@@ -76,9 +77,22 @@ const { id = "" } = Astro.params;
         : data.blocked_count
           ? "These deliveries remain frozen but are explicitly excluded from approval"
           : "No delivery exclusions";
-      for (const [key, value] of [["application-name", data.application_name], ["report-type", data.report_type_name], ["wing-name", data.wing_name], ["profile-name", `${data.profile_name} · v${data.profile_version}`], ["audience-name", data.audience_name], ["account-name", data.account_name], ["template-name", data.template_name], ["profile-version", `Version ${data.profile_version}`], ["frozen-at", formatDate(data.frozen_at)]]) el(key).textContent = value;
-      el("content-hash").textContent = data.content_sha256;
-      const source = el("source-job"); source.textContent = data.source_job_id.slice(0, 8); source.href = `/?job_id=${data.source_job_id}`;
+      for (const [key, value] of [["application-name", data.application_name], ["report-type", data.report_type_name], ["wing-name", data.wing_name || "—"], ["profile-name", `${data.profile_name || "—"} · v${data.profile_version ?? "—"}`], ["audience-name", data.audience_name || "—"], ["account-name", data.account_name || "—"], ["template-name", data.template_name || "—"], ["profile-version", `Version ${data.profile_version ?? "—"}`], ["frozen-at", formatDate(data.frozen_at)]]) el(key).textContent = String(value ?? "—");
+      el("content-hash").textContent = data.content_sha256 || "—";
+      const source = el("source-link");
+      if (data.source_kind === "crm_dispatch_batch" && data.source_reference_id) {
+        el("source-label").textContent = "CRM dispatch batch";
+        source.textContent = shortIdentifier(data.source_reference_id);
+        source.href = `/crm/dispatch/batches/${data.source_reference_id}/`;
+      } else if (data.source_job_id) {
+        el("source-label").textContent = "Source dry run";
+        source.textContent = shortIdentifier(data.source_job_id);
+        source.href = `/?job_id=${data.source_job_id}`;
+      } else {
+        el("source-label").textContent = "Source";
+        source.textContent = data.source_kind?.replaceAll("_", " ") || "Unavailable";
+        source.removeAttribute("href");
+      }
       el("stale-warning").hidden = !data.stale;
       el("stale-reasons").textContent = data.stale_reasons?.length
         ? data.stale_reasons.map((item) => item.message).join(" ")
@@ -88,7 +102,7 @@ const { id = "" } = Astro.params;
       if (data.approval) {
         queued.hidden = false;
         queued.textContent = data.approval.status === "completed" ? "View delivery results" : `Dispatch ${data.approval.status}`;
-      } else if (data.status === "ready" && !data.stale && data.delivery_count > 0) {
+      } else if (data.status === "ready" && !data.stale && data.eligible_delivery_count > 0) {
         approve.hidden = false;
         approve.textContent = `Approve & queue ${data.eligible_delivery_count} deliver${data.eligible_delivery_count === 1 ? "y" : "ies"}${data.blocked_count ? ` · exclude ${data.blocked_count}` : ""}`;
         approve.addEventListener("click", async () => {
@@ -112,6 +126,12 @@ const { id = "" } = Astro.params;
             window.location.href = "/whatsapp/deliveries";
           } catch (error) { approve.disabled = false; await showError(error); }
         });
+      } else if (!data.approval && data.eligible_delivery_count === 0) {
+        const note = el("approval-unavailable");
+        note.hidden = false;
+        note.textContent = data.skipped_count
+          ? "No new delivery is eligible. The frozen recipient was already queued or delivered, or was excluded by validation."
+          : "No eligible delivery remains. Resolve the blocked recipient or create a corrected preview.";
       }
     } catch (error) { await showError(error); }
   </script>

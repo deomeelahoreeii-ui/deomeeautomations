@@ -303,8 +303,23 @@ def test_partial_approval_migration_is_the_single_linear_head() -> None:
             revisions[revision] = down_revision if isinstance(down_revision, str) else None
 
     referenced = {value for value in revisions.values() if value}
-    assert sorted(set(revisions) - referenced) == ["fbe5c7d9e286"]
-    assert revisions["fbe5c7d9e286"] == "f9e3a5c7d064"
+    heads = sorted(set(revisions) - referenced)
+    assert len(heads) == 1, f"Expected one linear Alembic head, found: {heads}"
+
+    # This regression belongs to the partial-approval migration itself. Newer
+    # additive migrations are allowed to become the repository head, so verify
+    # that ff29 remains in the single linear chain instead of hard-coding it as
+    # the forever-current head.
+    chain: list[str] = []
+    current: str | None = heads[0]
+    while current is not None:
+        assert current not in chain, f"Alembic revision cycle detected at {current}"
+        chain.append(current)
+        current = revisions.get(current)
+
+    assert "ff29cbe4a5f0" in chain
+    assert revisions["ff29cbe4a5f0"] == "fd07e9a1c408"
+    assert revisions["fd07e9a1c408"] == "fbe5c7d9e286"
     assert revisions["f9e3a5c7d064"] == "f7d1e3a5c842"
     assert revisions["f7d1e3a5c842"] == "f5c9e1a3b620"
     assert revisions["f5c9e1a3b620"] == "f3b7d9e1a408"

@@ -1,0 +1,162 @@
+{
+  "schema_version": 2,
+  "bundle_id": "crm-two-way-compliance-dispatch-b3.6.2.1",
+  "display_name": "CRM Two-Way Compliance Dispatch B3.6.2.1",
+  "version": "B3.6.2.1",
+  "created_at_utc": "2026-07-21T15:26:05.136252Z",
+  "baseline_commit": "uploaded-post-b3.6.1-snapshot",
+  "baseline_database_revision": "ff29cbe4a5f0",
+  "final_database_revision": "f1c3e5a7b902",
+  "database_migration": true,
+  "migration_reversible": "yes; rollback deletes B3.6.2 downward dispatch records, manual compliance uploads and generic dispatch artifacts created after installation",
+  "project_markers": [
+    "pyproject.toml",
+    "alembic.ini",
+    "apps/web/package.json",
+    "apps/api/automation_api/main.py"
+  ],
+  "summary": [
+    "Fix the stale partial-approval migration regression so valid newer additive Alembic heads do not fail the complete suite",
+    "Split CRM dispatch into downward compliance requests and upward compliance submissions",
+    "Allow fresh and pending complaints to be assigned to lower offices before an official reply exists",
+    "Require finalized official-letter complete packets for submission to the CEO or another higher office",
+    "Add complaint-level report, reply, policy and evidence uploads linked to dispatch requests",
+    "Include accepted lower-office files in later complete official-letter PDFs",
+    "Add office-level and allowed-direction controls to reusable WhatsApp destination profiles",
+    "Add deterministic direction-aware routing and manual override safeguards",
+    "Repair routing modal opacity, scrolling and visible save actions",
+    "Add Select All, workflow-specific purposes and direction-aware dispatch history",
+    "Preserve immutable WhatsApp preview, approval, idempotency, queueing and delivery audit infrastructure",
+    "Run complete project tests and Astro build by default with transactional rollback"
+  ],
+  "files": [
+    {
+      "path": "alembic/versions/f1c3e5a7b902_crm_two_way_dispatch_and_case_files.py",
+      "baseline_sha256": null,
+      "baseline_size": null,
+      "final_sha256": "cf3a344a7d87dd96a27d35b62653ee6219a104058071ed054d32b00491938d24",
+      "final_size": 10097,
+      "mode": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/dispatch/batches/[id].astro",
+      "baseline_sha256": "46928a244741322418e5c1f60460651f8b855ca3f0625b16cffa79bf07169634",
+      "baseline_size": 16374,
+      "final_sha256": "3a213ce4728810436328b7d6aa0c929ebcf2575bb15ecbf176eb025b593aeedb",
+      "final_size": 17817,
+      "mode": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/dispatch/index.astro",
+      "baseline_sha256": "7e2418013a802869fe9f76f9f90d29af4957154b0f9d27ee0519658031a07230",
+      "baseline_size": 10738,
+      "final_sha256": "5aa5fb8b905a94e9c7d5a364e575e150d1ad30162fe29740bd8ba6d2186bd2e6",
+      "final_size": 14599,
+      "mode": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/dispatch/routing.astro",
+      "baseline_sha256": "077c6529894d8c432ceb971ad344e462697bc7ac6e980ce03270a5d6555bc1d6",
+      "baseline_size": 25006,
+      "final_sha256": "3fd75bc6b891cf7ca8b891edb71dd498f2993634761bde06eb115cdd8c014266",
+      "final_size": 28272,
+      "mode": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/[id].astro",
+      "baseline_sha256": "56179b6c0228ccf064873d7d951b8f780fdb5c93e65669a731bd3c2e11fe1229",
+      "baseline_size": 41877,
+      "final_sha256": "f06c17c0ccf29d35e696139e1770acb9bca83782aa5fcee5859907f60836ffac",
+      "final_size": 45113,
+      "mode": "0644"
+    },
+    {
+      "path": "apps/web/src/styles/crm.css",
+      "baseline_sha256": "371c6225d2176794c46bb2cbb4bf807174b7cb416292ff6b88fa681b324122e2",
+      "baseline_size": 93957,
+      "final_sha256": "1833d6a34fb4800fb47866302d6f44bc3b79a5709f92ad0bcda380c74472232e",
+      "final_size": 97403,
+      "mode": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/__init__.py",
+      "baseline_sha256": "261cb03693885060f9aecadb931931920c9c6f01f2e9e611e2ac233fc918c4e5",
+      "baseline_size": 1965,
+      "final_sha256": "233cac82c640194ffc5b4704d1e7b56536f73216b4988964ca23a3b4f6653f77",
+      "final_size": 2017,
+      "mode": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/dispatch.py",
+      "baseline_sha256": "4afcf4469ae15c20f63e78670f7fae3281a96fc30436da72d262eed3aa0830ff",
+      "baseline_size": 63013,
+      "final_sha256": "569d088f48a3c4bf9d1fe31e480b3c51ecdac6b6226d43c8ea90e7a13d2cb54d",
+      "final_size": 79710,
+      "mode": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/dispatch_api.py",
+      "baseline_sha256": "2e5eaae537dca79fecf116916e5c108fa3246a4a7ec417e23f247e10ec1fb4f7",
+      "baseline_size": 9434,
+      "final_sha256": "f577742653cc9b0f16d284bb5b23a98e025a2d046ef100a75d62512f205dee6e",
+      "final_size": 11646,
+      "mode": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/models.py",
+      "baseline_sha256": "1ae6fea4f2dd31ebf9f8e67966f5ffde3cd177874d8e0c567ded43c489c62a3d",
+      "baseline_size": 49884,
+      "final_sha256": "6fc5e5fa951fb59aa27c35f52ca4ff11af2d1457f01ef1c942fb14018e5ac94d",
+      "final_size": 52211,
+      "mode": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/official_letters.py",
+      "baseline_sha256": "c36a236729af0f67c44bd755c7ee7cc7c11f1177975f6a6da47e1fa35c53bfe7",
+      "baseline_size": 79212,
+      "final_sha256": "a5c45c54880e6a95329967d6dabcd57452273f5dfed4c376cf3a5270cb26ba95",
+      "final_size": 84409,
+      "mode": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/reply_workspace.py",
+      "baseline_sha256": "d35454c6faebdee9decccc4962812c895c3435921f882d8dcf50781c1ed1c56a",
+      "baseline_size": 49681,
+      "final_sha256": "70a090514db7884376f61b8d57424cd80ae98c93346e5eb21307edbad53b0e29",
+      "final_size": 55807,
+      "mode": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/reply_workspace_api.py",
+      "baseline_sha256": "8b5b8d6d1902c46abecb60b8e7b22194ea60f31562441bb05c570c939db88536",
+      "baseline_size": 6578,
+      "final_sha256": "0c4582c61a82711e1f5a2ecf3a69919573103fdcec25f9c8de2768ba99a57c27",
+      "final_size": 8291,
+      "mode": "0644"
+    },
+    {
+      "path": "tests/test_crm_dispatch_two_way_b362.py",
+      "baseline_sha256": null,
+      "baseline_size": null,
+      "final_sha256": "da5ef6599d600b3c2d47b111f2274105829bd26572675dcfd43d65b79d287fa0",
+      "final_size": 8655,
+      "mode": "0644"
+    },
+    {
+      "path": "tests/test_crm_dispatch_two_way_ui_contract_b362.py",
+      "baseline_sha256": null,
+      "baseline_size": null,
+      "final_sha256": "aa9fa8f9aa6cc5106b79343256deeff70a856db4e792a79fa1c4b61bd1ad7e6f",
+      "final_size": 2972,
+      "mode": "0644"
+    },
+    {
+      "path": "tests/test_preview_partial_approval.py",
+      "baseline_sha256": "5aea847a24c28433a30c59fcd4d7662fd8d708fa12ef079cdcc7e6c32a5f8140",
+      "baseline_size": 14042,
+      "final_sha256": "230161a3cca04f905219093231ae5b55a635c14975523f1bde68726050002083",
+      "final_size": 14657,
+      "mode": "0644"
+    }
+  ]
+}

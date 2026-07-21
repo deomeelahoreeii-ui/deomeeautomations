@@ -9,7 +9,9 @@ const { id } = Astro.params;
 if (!id) return Astro.redirect("/crm/replies/");
 const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
 const requestedReturn = Astro.url.searchParams.get("return") || "";
-const returnTo = requestedReturn.startsWith("/crm/replies") ? requestedReturn : "/crm/replies/";
+const returnTo = requestedReturn.startsWith("/crm/replies") || requestedReturn.startsWith("/crm/dispatch") ? requestedReturn : "/crm/replies/";
+const dispatchBatchId = Astro.url.searchParams.get("dispatch_batch_id") || "";
+const dispatchItemId = Astro.url.searchParams.get("dispatch_item_id") || "";
 ---
 
 <CrmLayout
@@ -20,7 +22,7 @@ const returnTo = requestedReturn.startsWith("/crm/replies") ? requestedReturn : 
   <a class="btn btn-sm" href={returnTo} slot="actions">← Reply Queue</a>
   <a class="btn btn-sm" href="/crm/knowledge/" slot="actions">AI Reply Archive</a>
 
-  <main id="reply-editor" data-api-base={apiBase} data-case-id={id} class="crm32-page reply-editor-page">
+  <main id="reply-editor" data-api-base={apiBase} data-case-id={id} data-dispatch-batch-id={dispatchBatchId} data-dispatch-item-id={dispatchItemId} class="crm32-page reply-editor-page">
     <section class="master-card editor-hero">
       <div class="editor-hero-copy">
         <p class="eyebrow">Complaint reply workspace</p>
@@ -83,6 +85,12 @@ const returnTo = requestedReturn.startsWith("/crm/replies") ? requestedReturn : 
           </section>
 
           <section id="context-evidence" class="editor-context-panel" data-context-panel="evidence" hidden>
+            <div class="reply-evidence-upload">
+              <label class="crm-field"><span>Add lower-office report, reply, policy or evidence</span><input id="case-document-files" class="file-input file-input-bordered" type="file" multiple /></label>
+              <label class="crm-field"><span>File role</span><select id="case-document-role" class="select select-bordered"><option value="report">Field / lower-office report</option><option value="reply">Lower-office reply</option><option value="policy">Policy / circular</option><option value="attachment">Supporting evidence</option></select></label>
+              <button id="upload-case-documents" class="btn btn-primary" type="button">Upload files</button>
+              <p id="case-document-message" class="form-message reply-evidence-upload-message"></p>
+            </div>
             <DataTable id="editor-evidence-table" pageSize={8} emptyText="No evidence documents are linked to this complaint." ariaLabel="Complaint evidence documents" class="editor-context-table" />
           </section>
 
@@ -308,6 +316,8 @@ const returnTo = requestedReturn.startsWith("/crm/replies") ? requestedReturn : 
     const root = document.getElementById("reply-editor") as HTMLElement;
     const API = root.dataset.apiBase || "";
     const caseId = root.dataset.caseId || "";
+    const dispatchBatchId = root.dataset.dispatchBatchId || "";
+    const dispatchItemId = root.dataset.dispatchItemId || "";
     const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
     const evidenceTable = $("editor-evidence-table") as any;
     const revisionsTable = $("editor-revisions-table") as any;
@@ -558,6 +568,7 @@ const returnTo = requestedReturn.startsWith("/crm/replies") ? requestedReturn : 
           { header: "Document", accessorKey: "filename", cell: (context: any) => stack(context.row.original.filename || context.row.original.id, context.row.original.role || "Evidence") },
           { header: "Review", accessorKey: "review_state", cell: (context: any) => badge(context.getValue() || "Unreviewed", statusTone(context.getValue()) === "success" ? "" : "inactive"), meta: { width: "110px" } },
           { header: "Paperless", accessorKey: "paperless_document_id", cell: (context: any) => textNode(context.getValue() ? `#${context.getValue()}` : "—"), meta: { width: "100px" } },
+          { header: "File", id: "file", cell: (context: any) => { const row=context.row.original; if(!row.download_url)return textNode(row.source_kind==='manual_upload'?'Unavailable':'Managed source'); const a=document.createElement('a'); a.className='btn btn-sm'; a.href=`${API}${row.download_url}`; a.textContent='Download'; return a; }, meta: { width: "100px", align: "right" } },
         ],
         data: [],
       });
@@ -668,6 +679,34 @@ const returnTo = requestedReturn.startsWith("/crm/replies") ? requestedReturn : 
         $("editor-warning").textContent = message;
         toast(message || "Unable to load reply editor", true);
       }
+    }
+
+    async function uploadCaseDocuments() {
+      const input = $("case-document-files") as HTMLInputElement;
+      const files = Array.from(input.files || []);
+      const message = $("case-document-message");
+      if (!files.length) { message.textContent = "Choose one or more files to upload."; return; }
+      const button = $("upload-case-documents") as HTMLButtonElement;
+      button.disabled = true;
+      message.textContent = `Uploading ${files.length} file(s)…`;
+      try {
+        for (const file of files) {
+          const form = new FormData();
+          form.append("file", file);
+          form.append("role", ($("case-document-role") as HTMLSelectElement).value);
+          form.append("actor", "web-operator");
+          if (dispatchBatchId) form.append("dispatch_batch_id", dispatchBatchId);
+          if (dispatchItemId) form.append("dispatch_item_id", dispatchItemId);
+          await api(`/api/v1/crm/reply-workspace/cases/${caseId}/documents`, { method: "POST", body: form });
+        }
+        input.value = "";
+        data = await api(`/api/v1/crm/reply-workspace/cases/${caseId}`);
+        await renderTables();
+        message.textContent = `${files.length} file(s) uploaded and linked to this complaint.`;
+        toast("Case files uploaded. Future complete compliance PDFs will include accepted reports and evidence.");
+      } catch (error) {
+        message.textContent = error instanceof Error ? error.message : String(error);
+      } finally { button.disabled = false; }
     }
 
     async function loadAudit() {
@@ -838,6 +877,7 @@ const returnTo = requestedReturn.startsWith("/crm/replies") ? requestedReturn : 
       if (dirty && !saving) { event.preventDefault(); event.returnValue = ""; }
     });
 
+    $("upload-case-documents").addEventListener("click", () => void uploadCaseDocuments());
     void load();
   </script>
 </CrmLayout>

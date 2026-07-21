@@ -32,7 +32,10 @@ class WhatsAppDispatchPreview(SQLModel, table=True):
     application_id: uuid.UUID = Field(
         foreign_key="whatsapp_applications.id", index=True
     )
-    source_job_id: uuid.UUID = Field(foreign_key="jobs.id", index=True)
+    source_job_id: uuid.UUID | None = Field(default=None, foreign_key="jobs.id", index=True)
+    source_kind: str = Field(default="antidengue_job", index=True, max_length=40)
+    source_reference_id: uuid.UUID | None = Field(default=None, index=True)
+    source_revision: int = 1
     dispatch_profile_id: uuid.UUID = Field(
         foreign_key="whatsapp_dispatch_profiles.id", index=True
     )

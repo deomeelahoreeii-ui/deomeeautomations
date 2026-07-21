@@ -569,6 +569,35 @@ def _merge_pdf_files(parts: list[Path], destination: Path) -> str:
     )
 
 
+def _render_complaint_packet_fallback(case: ComplaintCase) -> bytes:
+    output = io.BytesIO()
+    document = SimpleDocTemplate(
+        output,
+        pagesize=legal,
+        leftMargin=0.65 * inch,
+        rightMargin=0.65 * inch,
+        topMargin=0.65 * inch,
+        bottomMargin=0.65 * inch,
+        title=f"Complaint {case.complaint_number or case.id}",
+    )
+    styles = getSampleStyleSheet()
+    heading = ParagraphStyle(
+        "ComplaintPacketHeading", parent=styles["Heading2"], fontName="Helvetica-Bold",
+        fontSize=13, leading=16, spaceAfter=10,
+    )
+    body = ParagraphStyle(
+        "ComplaintPacketBody", parent=styles["BodyText"], fontName="Helvetica",
+        fontSize=10.5, leading=14, alignment=TA_JUSTIFY, spaceAfter=4,
+    )
+    story: list[Any] = [
+        Paragraph(f"Complaint No. {escape(case.complaint_number or str(case.id))}", heading),
+    ]
+    for paragraph in _logical_paragraphs(case.remarks or "No complaint narrative is stored."):
+        story.append(Paragraph(escape(paragraph), body))
+    document.build(story)
+    return output.getvalue()
+
+
 class OfficialLetterService:
     def __init__(self, session: Session, settings: Settings):
         self.session = session
@@ -927,6 +956,102 @@ class OfficialLetterService:
             raise OfficialLetterValidationError("Approve or issue the reply before creating an official letter")
         return revision
 
+    def _case_letters(
+        self,
+        case_id: uuid.UUID,
+        *,
+        status: str | None = None,
+    ) -> list[CrmOfficialLetter]:
+        statement = select(CrmOfficialLetter).where(
+            CrmOfficialLetter.complaint_case_id == case_id
+        )
+        if status:
+            statement = statement.where(CrmOfficialLetter.status == status)
+        return list(
+            self.session.exec(
+                statement.order_by(
+                    CrmOfficialLetter.created_at.desc(),
+                    CrmOfficialLetter.revision.desc(),
+                )
+            ).all()
+        )
+
+    def _current_finalized_letter(
+        self, case_id: uuid.UUID
+    ) -> CrmOfficialLetter | None:
+        return self.session.exec(
+            select(CrmOfficialLetter)
+            .where(
+                CrmOfficialLetter.complaint_case_id == case_id,
+                CrmOfficialLetter.status == "finalized",
+            )
+            .order_by(
+                CrmOfficialLetter.finalized_at.desc(),
+                CrmOfficialLetter.created_at.desc(),
+                CrmOfficialLetter.revision.desc(),
+            )
+        ).first()
+
+    def _active_preview_letter(
+        self, case_id: uuid.UUID
+    ) -> CrmOfficialLetter | None:
+        return self.session.exec(
+            select(CrmOfficialLetter)
+            .where(
+                CrmOfficialLetter.complaint_case_id == case_id,
+                CrmOfficialLetter.status == "preview",
+            )
+            .order_by(
+                CrmOfficialLetter.generated_at.desc(),
+                CrmOfficialLetter.created_at.desc(),
+                CrmOfficialLetter.revision.desc(),
+            )
+        ).first()
+
+    def _discard_preview(
+        self, letter: CrmOfficialLetter, *, reason: str
+    ) -> None:
+        if letter.status != "preview":
+            return
+        letter.status = "discarded"
+        letter.error = reason[:4000]
+        snapshot = dict(letter.configuration_snapshot_json or {})
+        snapshot["discarded"] = {
+            "at": _iso(utcnow()),
+            "reason": reason,
+        }
+        letter.configuration_snapshot_json = snapshot
+        self.session.add(letter)
+
+    def _discard_other_previews(
+        self,
+        case_id: uuid.UUID,
+        *,
+        keep_id: uuid.UUID | None,
+        reason: str,
+    ) -> None:
+        for preview in self._case_letters(case_id, status="preview"):
+            if keep_id is not None and preview.id == keep_id:
+                continue
+            self._discard_preview(preview, reason=reason)
+
+    def _reconcile_active_letter(
+        self,
+        case_id: uuid.UUID,
+        *,
+        approved_revision_id: uuid.UUID,
+    ) -> CrmOfficialLetter | None:
+        current_finalized = self._current_finalized_letter(case_id)
+        preview = self._active_preview_letter(case_id)
+        if preview is not None:
+            expected_supersedes = current_finalized.id if current_finalized else None
+            if (
+                preview.reply_revision_id == approved_revision_id
+                and preview.supersedes_letter_id == expected_supersedes
+            ):
+                return preview
+        return current_finalized
+
     def _resolve_template(self, template_id: uuid.UUID | None) -> CrmOfficialLetterTemplate:
         settings = self.ensure_defaults()
         record = self.session.get(CrmOfficialLetterTemplate, template_id or settings.default_template_id)
@@ -1016,12 +1141,15 @@ class OfficialLetterService:
                     ComplaintDocumentCaseLink.complaint_case_id == case_id,
                     ComplaintDocumentCaseLink.review_state == "accepted",
                     ComplaintDocumentCaseLink.role.in_(
-                        ("main_complaint", "complaint_details", "attachment", "report")
+                        ("main_complaint", "complaint_details", "report", "reply", "policy", "attachment")
                     ),
                 )
                 .order_by(
                     (ComplaintDocumentCaseLink.role == "main_complaint").desc(),
                     (ComplaintDocumentCaseLink.role == "complaint_details").desc(),
+                    (ComplaintDocumentCaseLink.role == "report").desc(),
+                    (ComplaintDocumentCaseLink.role == "reply").desc(),
+                    (ComplaintDocumentCaseLink.role == "policy").desc(),
                     ComplaintDocument.created_at,
                 )
             ).all()
@@ -1042,12 +1170,88 @@ class OfficialLetterService:
     ) -> dict[str, Any]:
         return {
             "id": str(document.id),
-            "processing_item_id": str(document.source_processing_item_id),
+            "processing_item_id": str(document.source_processing_item_id) if document.source_processing_item_id else None,
+            "source_kind": document.source_kind,
             "filename": document.original_filename or f"document-{document.id}",
             "mime_type": document.mime_type,
             "role": link.role,
             "sha256": document.source_sha256,
             "created_at": _iso(document.created_at),
+        }
+
+    def _materialize_document(
+        self, document: ComplaintDocument, destination: Path, storage: S3ObjectStorage
+    ) -> None:
+        if document.source_kind == "manual_upload":
+            if not document.storage_path:
+                raise OfficialLetterError("The manually uploaded case file has no storage path")
+            source = Path(document.storage_path).expanduser().resolve()
+            if not source.is_file():
+                raise OfficialLetterError("The manually uploaded case file is unavailable")
+            shutil.copyfile(source, destination)
+            return
+        if document.source_processing_item_id is None:
+            raise OfficialLetterError("The source processing record is unavailable")
+        item = self.session.get(WhatsAppInboundProcessingItem, document.source_processing_item_id)
+        if item is None:
+            raise OfficialLetterError("The source processing record is unavailable")
+        materialize_source(
+            session=self.session, item=item, destination=destination,
+            settings=self.settings, storage=storage,
+        )
+
+    def compose_case_packet(self, case_id: uuid.UUID) -> tuple[bytes, dict[str, Any]]:
+        case = self.session.get(ComplaintCase, case_id)
+        if case is None:
+            raise OfficialLetterNotFound("Complaint case was not found")
+        documents = self._source_documents(case_id)
+        included: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        with tempfile.TemporaryDirectory(prefix="crm-complaint-packet-") as temp:
+            root = Path(temp)
+            parts: list[Path] = []
+            storage = S3ObjectStorage(self.settings)
+            for position, (document, link) in enumerate(documents, start=1):
+                payload = self._source_document_payload(document, link)
+                try:
+                    suffix = Path(document.original_filename or "").suffix
+                    if not suffix:
+                        mime_suffixes = {
+                            "application/pdf": ".pdf", "image/png": ".png",
+                            "image/jpeg": ".jpg", "image/webp": ".webp",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+                            "application/vnd.oasis.opendocument.text": ".odt",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+                            "text/csv": ".csv", "text/plain": ".txt",
+                        }
+                        suffix = mime_suffixes.get((document.mime_type or "").casefold(), ".bin")
+                    materialized = root / f"source-{position:03d}{suffix}"
+                    self._materialize_document(document, materialized, storage)
+                    converted = root / f"part-{position:03d}.pdf"
+                    _convert_source_to_pdf(materialized, mime_type=document.mime_type, destination=converted)
+                    parts.append(converted)
+                    included.append({**payload, "pages": _pdf_page_count(converted.read_bytes())})
+                except Exception as exc:
+                    skipped.append({**payload, "error": str(exc)[:1000]})
+            if not parts:
+                fallback = root / "complaint.pdf"
+                fallback.write_bytes(_render_complaint_packet_fallback(case))
+                parts.append(fallback)
+                included.append({
+                    "id": None, "filename": "generated-complaint-record.pdf",
+                    "mime_type": PDF_MIME, "role": "main_complaint",
+                    "source_kind": "generated_fallback", "pages": _pdf_page_count(fallback.read_bytes()),
+                })
+            merged = root / "complaint-packet.pdf"
+            merger = _merge_pdf_files(parts, merged)
+            content = merged.read_bytes()
+        return content, {
+            "generated_at": _iso(utcnow()),
+            "merger": merger,
+            "page_count": _pdf_page_count(content),
+            "included_documents": included,
+            "skipped_documents": skipped,
+            "order": [item.get("role") for item in included],
         }
 
     def prepare_case(self, case_id: uuid.UUID) -> dict[str, Any]:
@@ -1056,9 +1260,15 @@ class OfficialLetterService:
         if case is None:
             raise OfficialLetterNotFound("Complaint case was not found")
         revision = self._revision_for_case(case_id)
+        active_letter = self._reconcile_active_letter(
+            case_id, approved_revision_id=revision.id
+        )
         existing = self.session.exec(
             select(CrmOfficialLetter)
-            .where(CrmOfficialLetter.complaint_case_id == case_id)
+            .where(
+                CrmOfficialLetter.complaint_case_id == case_id,
+                CrmOfficialLetter.status != "discarded",
+            )
             .order_by(CrmOfficialLetter.revision.desc())
         ).all()
         config = self.configuration()
@@ -1083,6 +1293,11 @@ class OfficialLetterService:
                 self._source_document_payload(document, link)
                 for document, link in self._source_documents(case_id)
             ],
+            "active_letter": (
+                self._letter_payload(active_letter, include_artifacts=True)
+                if active_letter is not None
+                else None
+            ),
             "letters": [self._letter_payload(item, include_artifacts=True) for item in existing],
         }
 
@@ -1162,11 +1377,38 @@ class OfficialLetterService:
         revision = self._revision_for_case(case_id, reply_revision_id)
         template = self._resolve_template(template_id)
         signature = self._resolve_signature(signature_profile_id, effective_on=letter_date)
+        current_finalized = self._current_finalized_letter(case_id)
+        active_preview = self._active_preview_letter(case_id)
+        if active_preview is not None:
+            expected_supersedes = current_finalized.id if current_finalized else None
+            if (
+                active_preview.reply_revision_id != revision.id
+                or active_preview.supersedes_letter_id != expected_supersedes
+            ):
+                self._discard_preview(
+                    active_preview,
+                    reason=(
+                        "Discarded automatically because the approved reply or current "
+                        "finalized-letter lineage changed."
+                    ),
+                )
+                self.session.flush()
+                active_preview = None
+        if letter_id is None and active_preview is not None:
+            requested_supersedes = supersedes_letter_id or None
+            if active_preview.supersedes_letter_id == requested_supersedes:
+                letter_id = active_preview.id
+        if letter_id is None and current_finalized is not None and supersedes_letter_id is None:
+            raise OfficialLetterValidationError(
+                "A finalized official letter already exists for this complaint. "
+                "Open it and choose Create Revised Letter to prepare a replacement."
+            )
         failed_retry = None
         if letter_id is None:
             failed_retry = self.session.exec(
                 select(CrmOfficialLetter).where(
                     CrmOfficialLetter.complaint_case_id == case_id,
+                    CrmOfficialLetter.reply_revision_id == revision.id,
                     CrmOfficialLetter.letter_number == letter_number.strip(),
                     CrmOfficialLetter.status == "failed",
                 )
@@ -1174,11 +1416,18 @@ class OfficialLetterService:
             if failed_retry is not None:
                 letter_id = failed_retry.id
         self._assert_letter_reference(letter_number, letter_date, exclude_id=letter_id)
+        previous = None
         if supersedes_letter_id:
             previous = self.session.get(CrmOfficialLetter, supersedes_letter_id)
-            if previous is None or previous.complaint_case_id != case_id or previous.status != "finalized":
+            if (
+                previous is None
+                or previous.complaint_case_id != case_id
+                or previous.status != "finalized"
+                or current_finalized is None
+                or previous.id != current_finalized.id
+            ):
                 raise OfficialLetterValidationError(
-                    "A revised letter must supersede a finalized letter for the same complaint"
+                    "A revised letter must supersede the current finalized letter for the same complaint"
                 )
         if not recipient_name.strip() or not recipient_location.strip():
             raise OfficialLetterValidationError("Recipient name and location are required")
@@ -1188,8 +1437,18 @@ class OfficialLetterService:
             letter = self.session.get(CrmOfficialLetter, letter_id)
             if letter is None or letter.complaint_case_id != case_id:
                 raise OfficialLetterNotFound("Official letter draft was not found")
-            if letter.status in {"finalized", "superseded"}:
-                raise OfficialLetterValidationError("A finalized letter cannot be overwritten; create a revised letter")
+            if letter.status in {"finalized", "superseded", "discarded"}:
+                raise OfficialLetterValidationError(
+                    "A finalized or discarded letter cannot be overwritten; open the current letter state or create a revised letter"
+                )
+            if letter.reply_revision_id != revision.id:
+                raise OfficialLetterValidationError(
+                    "The preview belongs to a different approved reply revision"
+                )
+            if letter.supersedes_letter_id != supersedes_letter_id:
+                raise OfficialLetterValidationError(
+                    "The preview does not match the selected official-letter revision workflow"
+                )
         else:
             maximum = self.session.scalar(
                 select(func.max(CrmOfficialLetter.revision)).where(CrmOfficialLetter.complaint_case_id == case_id)
@@ -1257,6 +1516,21 @@ class OfficialLetterService:
         letter.generated_by = actor
         letter.generated_at = now
         letter.finalized_at = now if finalize else None
+        if finalize:
+            self._discard_other_previews(
+                case_id,
+                keep_id=None,
+                reason="Discarded automatically when the official letter was finalized.",
+            )
+            if previous is not None:
+                previous.status = "superseded"
+                self.session.add(previous)
+        else:
+            self._discard_other_previews(
+                case_id,
+                keep_id=letter.id,
+                reason="Discarded automatically because a newer preview replaced it.",
+            )
         letter.configuration_snapshot_json = {
             "template": {"id": str(template.id), "name": template.name, "version": template.version, "sha256": template.sha256},
             "signature": {"id": str(signature.id), "name": signature.name, "officer_name": signature.officer_name, "designation": signature.designation, "office_location": signature.office_location, "sha256": signature.image_sha256},
@@ -1279,11 +1553,6 @@ class OfficialLetterService:
                 actor=actor,
                 changed_at=now,
             )
-            if supersedes_letter_id:
-                previous = self.session.get(CrmOfficialLetter, supersedes_letter_id)
-                if previous and previous.complaint_case_id == case_id and previous.status == "finalized":
-                    previous.status = "superseded"
-                    self.session.add(previous)
         if commit:
             self.session.commit()
             self.session.refresh(letter)
@@ -1318,11 +1587,6 @@ class OfficialLetterService:
             for position, (document, link) in enumerate(documents, start=1):
                 payload = self._source_document_payload(document, link)
                 try:
-                    item = self.session.get(
-                        WhatsAppInboundProcessingItem, document.source_processing_item_id
-                    )
-                    if item is None:
-                        raise OfficialLetterError("The source processing record is unavailable")
                     suffix = Path(document.original_filename or "").suffix
                     if not suffix:
                         mime_suffixes = {
@@ -1335,10 +1599,7 @@ class OfficialLetterService:
                         }
                         suffix = mime_suffixes.get((document.mime_type or "").casefold(), ".bin")
                     materialized = root / f"source-{position:03d}{suffix}"
-                    materialize_source(
-                        session=self.session, item=item, destination=materialized,
-                        settings=self.settings, storage=storage,
-                    )
+                    self._materialize_document(document, materialized, storage)
                     converted = root / f"part-{position:03d}.pdf"
                     _convert_source_to_pdf(
                         materialized, mime_type=document.mime_type, destination=converted
@@ -1387,22 +1648,35 @@ class OfficialLetterService:
         if letter.status == "finalized":
             return self._letter_payload(letter, include_artifacts=True)
         if letter.status != "preview":
-            raise OfficialLetterValidationError("Only a preview letter can be finalized")
+            raise OfficialLetterValidationError("Only the active preview can be finalized")
         self._assert_letter_reference(letter.letter_number, letter.letter_date, exclude_id=letter.id)
+        current_finalized = self._current_finalized_letter(letter.complaint_case_id)
+        if current_finalized is not None:
+            if letter.supersedes_letter_id != current_finalized.id:
+                raise OfficialLetterValidationError(
+                    "A finalized official letter already exists. Create a revised letter from the current finalized record."
+                )
+            current_finalized.status = "superseded"
+            self.session.add(current_finalized)
+        elif letter.supersedes_letter_id is not None:
+            raise OfficialLetterValidationError(
+                "The official letter selected for supersession is no longer current"
+            )
+        now = utcnow()
+        self._discard_other_previews(
+            letter.complaint_case_id,
+            keep_id=letter.id,
+            reason="Discarded automatically when another preview was finalized.",
+        )
         letter.status = "finalized"
-        letter.finalized_at = utcnow()
+        letter.finalized_at = now
         letter.generated_by = actor
         self._remember_shared_reference(
             letter_number=letter.letter_number,
             letter_date=letter.letter_date,
             actor=actor,
-            changed_at=letter.finalized_at,
+            changed_at=now,
         )
-        if letter.supersedes_letter_id:
-            previous = self.session.get(CrmOfficialLetter, letter.supersedes_letter_id)
-            if previous and previous.complaint_case_id == letter.complaint_case_id and previous.status == "finalized":
-                previous.status = "superseded"
-                self.session.add(previous)
         self.session.add(letter)
         self.session.commit()
         return self._letter_payload(letter, include_artifacts=True)
@@ -1451,6 +1725,8 @@ class OfficialLetterService:
         filters = []
         if status:
             filters.append(CrmOfficialLetter.status == status)
+        else:
+            filters.append(CrmOfficialLetter.status != "discarded")
         if search.strip():
             like = f"%{search.strip()}%"
             filters.append(

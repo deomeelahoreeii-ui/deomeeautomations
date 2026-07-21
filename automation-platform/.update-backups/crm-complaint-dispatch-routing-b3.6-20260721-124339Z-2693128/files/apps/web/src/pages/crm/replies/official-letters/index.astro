@@ -1,0 +1,42 @@
+---
+import CrmLayout from "../../../../layouts/CrmLayout.astro";
+import DataTable from "../../../../components/DataTable.astro";
+const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+---
+<CrmLayout title="Official Letters" description="Create, preview and preserve official DEO letters from immutable approved reply revisions." page="replies">
+  <a class="btn btn-sm" href="/crm/replies/" slot="actions">← Reply Queue</a>
+  <a class="btn btn-primary btn-sm" href="/crm/replies/official-letters/settings/" slot="actions">Letter Configuration</a>
+  <main id="official-letters" data-api-base={apiBase} class="crm32-page official-letter-page">
+    <nav class="reply-mode-tabs" aria-label="Reply workspace modes"><a href="/crm/replies/">Reply Queue</a><a href="/crm/replies/bulk/">Bulk Operations</a><a class="active" href="/crm/replies/official-letters/">Official Letters</a></nav>
+    <section class="crm-metric-grid official-letter-metrics">
+      <article class="crm-metric-card"><span>Awaiting letter</span><strong id="metric-awaiting">—</strong><small>Approved replies without finalized letter</small></article>
+      <article class="crm-metric-card"><span>Previews</span><strong id="metric-preview">—</strong><small>Prepared but not finalized</small></article>
+      <article class="crm-metric-card"><span>Finalized</span><strong id="metric-finalized">—</strong><small>Immutable official records</small></article>
+      <article class="crm-metric-card"><span>Failures</span><strong id="metric-failed">—</strong><small>Require regeneration</small></article>
+    </section>
+    <section class="master-card official-letter-register">
+      <header class="crm-card-heading"><div><p class="eyebrow">Official register</p><h2>Generated letters</h2><p>Every letter is linked to the exact approved reply, template version and signature snapshot used.</p></div><button id="refresh-letters" class="btn btn-sm" type="button">↻ Refresh</button></header>
+      <div class="official-letter-toolbar"><label class="crm-field"><span>Search</span><input id="letter-search" class="input input-bordered" placeholder="Letter number or complaint number…" /></label><label class="crm-field"><span>Status</span><select id="letter-status" class="select select-bordered"><option value="">All statuses</option><option value="preview">Preview</option><option value="finalized">Finalized</option><option value="superseded">Superseded</option><option value="failed">Failed</option></select></label></div>
+      <DataTable id="official-letter-table" pageSize={25} pageSizeOptions={[25,50,100]} emptyText="No official letters match the filters." ariaLabel="Official letters register" />
+    </section>
+    <div id="letter-toast" class="crm-toast" role="status" hidden></div>
+  </main>
+  <script>
+    const root=document.getElementById('official-letters'); const API=root?.dataset.apiBase||''; const table=document.getElementById('official-letter-table') as any;
+    const $=(id:string)=>document.getElementById(id) as HTMLElement;
+    const link=(label:string,href:string,primary=false)=>{const a=document.createElement('a');a.className=primary?'btn btn-primary btn-xs':'btn btn-xs';a.href=href;a.textContent=label;return a};
+    const stack=(a:string,b:string)=>{const d=document.createElement('div');d.className='table-stack';const x=document.createElement('strong');x.textContent=a;const y=document.createElement('small');y.textContent=b;d.append(x,y);return d};
+    const badge=(v:string)=>{const s=document.createElement('span');s.className=`crm-status-badge ${v==='finalized'?'success':v==='failed'?'danger':'warning'}`;s.textContent=v;return s};
+    async function api(path:string){const r=await fetch(`${API}${path}`);const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.detail||r.statusText);return b}
+    async function loadStatistics(){const stats=await api('/api/v1/crm/official-letters/statistics');$('metric-preview').textContent=String(stats.previews||0);$('metric-finalized').textContent=String(stats.finalized||0);$('metric-failed').textContent=String(stats.failures||0);$('metric-awaiting').textContent=String(stats.awaiting_letter||0)}
+    async function loadPage(pageIndex:number,pageSize:number){const q=new URLSearchParams({page:String(pageIndex+1),page_size:String(pageSize),search:(document.getElementById('letter-search') as HTMLInputElement).value,status:(document.getElementById('letter-status') as HTMLSelectElement).value});const [result]=await Promise.all([api(`/api/v1/crm/official-letters/letters?${q}`),loadStatistics()]);return{rows:result.items,total:result.total}}
+    void table.configure({manualPagination:true,getRowId:(r:any)=>r.id,columns:[
+      {header:'LETTER',cell:({row}:any)=>stack(row.original.letter_number,new Date(row.original.letter_date).toLocaleDateString())},
+      {header:'COMPLAINT',cell:({row}:any)=>stack(row.original.complaint_number,`Revision ${row.original.revision}`)},
+      {header:'STATUS',cell:({row}:any)=>badge(row.original.status)},
+      {header:'CREATED',cell:({row}:any)=>new Date(row.original.created_at).toLocaleString()},
+      {header:'ACTIONS',cell:({row}:any)=>{const d=document.createElement('div');d.className='table-actions';const pdf=row.original.artifacts?.find((x:any)=>x.kind==='pdf');const complete=row.original.artifacts?.find((x:any)=>x.kind==='complete_pdf');const odt=row.original.artifacts?.find((x:any)=>x.kind==='odt');d.append(link('Open',row.original.letter_url,true));if(pdf)d.append(link('Letter PDF',`${API}${pdf.preview_url}`));if(complete)d.append(link('Complete PDF',`${API}${complete.download_url}`));if(odt)d.append(link('ODT',`${API}${odt.download_url}`));return d}}
+    ],loadPage}).catch((error:unknown)=>{const node=$('letter-toast');node.textContent=error instanceof Error?error.message:String(error);node.className='crm-toast error';node.hidden=false});
+    let timer=0;['letter-search','letter-status'].forEach(id=>$(id).addEventListener('input',()=>{clearTimeout(timer);timer=window.setTimeout(()=>table.refresh(true),250)}));$('refresh-letters').addEventListener('click',()=>table.refresh(false));
+  </script>
+</CrmLayout>

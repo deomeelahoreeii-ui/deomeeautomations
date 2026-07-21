@@ -37,6 +37,33 @@ from automation_core.storage_catalog import ensure_stored_path
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp-previews"])
 
+
+def _artifact_registered_to_source(
+    session: Session,
+    preview: WhatsAppDispatchPreview,
+    artifact: WhatsAppDispatchPreviewArtifact,
+) -> bool:
+    """Validate the frozen file against the source domain that produced it."""
+    if preview.source_kind == "antidengue_job":
+        from automation_core.models import Artifact
+
+        source_artifact = session.get(Artifact, artifact.artifact_id) if artifact.artifact_id else None
+        return bool(source_artifact and preview.source_job_id and source_artifact.job_id == preview.source_job_id)
+    if preview.source_kind == "crm_dispatch_batch":
+        if preview.source_reference_id is None:
+            return False
+        from crm_domain.models import CrmDispatchArtifact
+
+        registered = session.scalar(
+            select(CrmDispatchArtifact.id).where(
+                CrmDispatchArtifact.batch_id == preview.source_reference_id,
+                CrmDispatchArtifact.checksum_sha256 == artifact.checksum_sha256,
+                CrmDispatchArtifact.name == artifact.name,
+            )
+        )
+        return registered is not None
+    return False
+
 @router.get("/previews/{preview_id}/artifacts")
 def preview_artifacts(
     preview_id: uuid.UUID,
@@ -154,11 +181,8 @@ def download_preview_artifact(
     session.add(artifact)
     session.commit()
     preview = session.get(WhatsAppDispatchPreview, preview_id)
-    from automation_core.models import Artifact
-
-    source_artifact = session.get(Artifact, artifact.artifact_id) if artifact.artifact_id else None
-    if preview is None or source_artifact is None or source_artifact.job_id != preview.source_job_id:
-        raise HTTPException(status_code=403, detail="Artifact is not registered to the source dry run")
+    if preview is None or not _artifact_registered_to_source(session, preview, artifact):
+        raise HTTPException(status_code=403, detail="Artifact is not registered to the frozen preview source")
     if not is_managed_preview_artifact(path):
         raise HTTPException(status_code=403, detail="Artifact is outside managed preview storage")
     if not path.is_file():

@@ -4,7 +4,8 @@ import uuid
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
@@ -182,6 +183,46 @@ def save_case_reply(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ReplyWorkspaceError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/cases/{case_id}/documents", status_code=201)
+async def upload_case_document(
+    case_id: uuid.UUID,
+    file: UploadFile = File(...),
+    role: str = Form(default="report"),
+    actor: str = Form(default="web-operator"),
+    dispatch_batch_id: uuid.UUID | None = Form(default=None),
+    dispatch_item_id: uuid.UUID | None = Form(default=None),
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    try:
+        content = await file.read()
+        return _service(session, settings).upload_case_document(
+            case_id, filename=file.filename or "case-file", content=content,
+            content_type=file.content_type, role=role, actor=actor,
+            dispatch_batch_id=dispatch_batch_id, dispatch_item_id=dispatch_item_id,
+        )
+    except ReplyNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ReplyWorkspaceError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/documents/{document_id}/download")
+def download_case_document(
+    document_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> FileResponse:
+    try:
+        document, path = _service(session, settings).case_document_path(document_id)
+        return FileResponse(
+            path, media_type=document.mime_type or "application/octet-stream",
+            filename=document.original_filename or path.name,
+        )
+    except ReplyNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/audit")

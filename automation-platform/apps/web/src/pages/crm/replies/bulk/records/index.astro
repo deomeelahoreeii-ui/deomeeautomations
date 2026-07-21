@@ -7,7 +7,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
 <CrmLayout title="Bulk Reply Records" description="Review published complaints, awaiting replies, imported replies and generated letters in focused tables." page="replies">
   <a class="btn btn-sm" href="/crm/replies/bulk/" slot="actions">← Bulk Operations</a>
   <main id="bulk-records-page" data-api-base={apiBase} class="crm32-page bulk-records-page">
-    <nav class="reply-mode-tabs" aria-label="Reply workspace modes"><a href="/crm/replies/">Reply Queue</a><a class="active" href="/crm/replies/bulk/">Bulk Operations</a><a href="/crm/replies/official-letters/">Official Letters</a></nav>
+    <nav class="reply-mode-tabs" aria-label="Reply workspace modes"><a href="/crm/replies/">Reply Queue</a><a class="active" href="/crm/replies/bulk/">Bulk Operations</a><a href="/crm/replies/official-letters/">Official Letters</a><a href="/crm/dispatch/">Dispatch</a></nav>
     <section class="master-card bulk-records-header">
       <header class="crm-card-heading"><div><p class="eyebrow">Complaint records</p><h2 id="records-title">Published complaints</h2><p id="records-description">Complaint-level status across the bulk reply workflow.</p></div><button id="refresh-records" class="btn btn-sm" type="button">↻ Refresh</button></header>
       <div class="bulk-record-view-tabs"><a data-view="published" href="?view=published">Published</a><a data-view="awaiting" href="?view=awaiting">Awaiting reply</a><a data-view="imported" href="?view=imported">Imported replies</a><a data-view="generated" href="?view=generated">Letters generated</a></div>

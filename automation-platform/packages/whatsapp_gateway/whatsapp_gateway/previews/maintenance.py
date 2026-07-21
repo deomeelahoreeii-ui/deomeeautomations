@@ -40,7 +40,10 @@ def preview_dict(session: Session, preview: WhatsAppDispatchPreview, *, check_fi
         "id": str(preview.id),
         "preview_key": preview.preview_key,
         "application_id": str(preview.application_id),
-        "source_job_id": str(preview.source_job_id),
+        "source_job_id": str(preview.source_job_id) if preview.source_job_id else None,
+        "source_kind": preview.source_kind,
+        "source_reference_id": str(preview.source_reference_id) if preview.source_reference_id else None,
+        "source_revision": preview.source_revision,
         "dispatch_profile_id": str(preview.dispatch_profile_id),
         "status": "stale" if stale else effective_status,
         "display_status": (

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import mimetypes
 import uuid
 from collections import Counter
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any, Iterable
 
 from sqlalchemy import func, or_
@@ -22,6 +25,8 @@ from crm_domain.models import (
     ComplaintSubcategory,
     CrmBulkOperationBatch,
     CrmBulkOperationItem,
+    CrmOfficialLetter,
+    CrmOfficialLetterArtifact,
     FrappeSyncEvent,
 )
 from crm_domain.taxonomy import clean_name
@@ -761,6 +766,128 @@ class ComplaintReplyWorkspaceService:
             return ""
         return f"{root}/documents/{case.canonical_paperless_document_id}/details"
 
+    def upload_case_document(
+        self,
+        case_id: uuid.UUID,
+        *,
+        filename: str,
+        content: bytes,
+        content_type: str | None,
+        role: str,
+        actor: str,
+        dispatch_batch_id: uuid.UUID | None = None,
+        dispatch_item_id: uuid.UUID | None = None,
+    ) -> dict[str, Any]:
+        case = self._require_case(case_id)
+        allowed_roles = {"reply", "report", "policy", "attachment"}
+        if role not in allowed_roles:
+            raise ReplyValidationError("Choose reply, report, policy or attachment as the file role")
+        if not content:
+            raise ReplyValidationError("The uploaded case file is empty")
+        if len(content) > 50 * 1024 * 1024:
+            raise ReplyValidationError("Case files may not exceed 50 MB")
+        safe_name = Path(filename or "case-file").name.replace("\x00", "").strip() or "case-file"
+        digest = hashlib.sha256(content).hexdigest()
+        existing = self.session.exec(
+            select(ComplaintDocument, ComplaintDocumentCaseLink)
+            .join(ComplaintDocumentCaseLink, ComplaintDocumentCaseLink.complaint_document_id == ComplaintDocument.id)
+            .where(
+                ComplaintDocumentCaseLink.complaint_case_id == case.id,
+                ComplaintDocument.source_sha256 == digest,
+            )
+        ).first()
+        if existing:
+            document, link = existing
+            return {
+                "id": str(document.id), "filename": document.original_filename,
+                "role": link.role, "review_state": link.review_state,
+                "paperless_document_id": document.paperless_document_id,
+                "source_kind": document.source_kind,
+                "download_url": f"/api/v1/crm/reply-workspace/documents/{document.id}/download",
+                "duplicate": True,
+            }
+        root = self.settings.artifact_root.expanduser().resolve() / "crm-case-documents" / str(case.id)
+        root.mkdir(parents=True, exist_ok=True)
+        suffix = Path(safe_name).suffix
+        destination = root / f"{uuid.uuid4().hex}{suffix}"
+        destination.write_bytes(content)
+        detected = content_type or mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+        now = utcnow()
+        document = ComplaintDocument(
+            complaint_case_id=case.id,
+            source_processing_item_id=None,
+            source_kind="manual_upload",
+            storage_path=str(destination),
+            uploaded_by=actor,
+            source_dispatch_batch_id=dispatch_batch_id,
+            source_dispatch_item_id=dispatch_item_id,
+            source_sha256=digest,
+            original_filename=safe_name,
+            mime_type=detected,
+            role=role,
+            relationship_confidence=1.0,
+            relationship_reason=f"Manually uploaded by {actor}",
+            review_state="accepted",
+            created_at=now,
+            updated_at=now,
+        )
+        self.session.add(document)
+        self.session.flush()
+        link = ComplaintDocumentCaseLink(
+            complaint_document_id=document.id,
+            complaint_case_id=case.id,
+            role=role,
+            review_state="accepted",
+            confidence=1.0,
+            reason=f"Manually uploaded by {actor}",
+            source_locator="manual_upload",
+        )
+        self.session.add(link)
+        invalidated_packets = 0
+        finalized_letter_ids = select(CrmOfficialLetter.id).where(
+            CrmOfficialLetter.complaint_case_id == case.id,
+            CrmOfficialLetter.status == "finalized",
+        )
+        existing_packets = list(self.session.exec(
+            select(CrmOfficialLetterArtifact).where(
+                CrmOfficialLetterArtifact.official_letter_id.in_(finalized_letter_ids),
+                CrmOfficialLetterArtifact.kind == "complete_pdf",
+            )
+        ).all())
+        for artifact in existing_packets:
+            try:
+                Path(artifact.path).expanduser().resolve().unlink(missing_ok=True)
+            except OSError:
+                pass
+            self.session.delete(artifact)
+            invalidated_packets += 1
+        self._audit(
+            case=case,
+            entity_type="complaint_document",
+            entity_id=str(document.id),
+            event_type="case_file_uploaded",
+            state="succeeded",
+            actor=actor,
+            after={"filename": safe_name, "role": role, "sha256": digest, "source_dispatch_batch_id": str(dispatch_batch_id) if dispatch_batch_id else None, "source_dispatch_item_id": str(dispatch_item_id) if dispatch_item_id else None, "invalidated_complete_pdf_count": invalidated_packets},
+        )
+        self.session.commit()
+        return {
+            "id": str(document.id), "filename": safe_name, "role": role,
+            "review_state": "accepted", "paperless_document_id": None,
+            "source_kind": "manual_upload",
+            "download_url": f"/api/v1/crm/reply-workspace/documents/{document.id}/download",
+            "duplicate": False,
+        }
+
+    def case_document_path(self, document_id: uuid.UUID) -> tuple[ComplaintDocument, Path]:
+        document = self.session.get(ComplaintDocument, document_id)
+        if document is None or document.source_kind != "manual_upload" or not document.storage_path:
+            raise ReplyNotFoundError("The manually uploaded case file was not found")
+        path = Path(document.storage_path).expanduser().resolve()
+        if not path.is_file():
+            raise ReplyNotFoundError("The manually uploaded case file is unavailable")
+        return document, path
+
     def editor(self, case_id: uuid.UUID) -> dict[str, Any]:
         case = self._require_case(case_id)
         category = self.session.get(ComplaintCategory, case.category_id) if case.category_id else None
@@ -963,6 +1090,13 @@ class ComplaintReplyWorkspaceService:
                     "role": link.role,
                     "review_state": link.review_state,
                     "paperless_document_id": document.paperless_document_id,
+                    "source_kind": document.source_kind,
+                    "uploaded_by": document.uploaded_by,
+                    "created_at": document.created_at,
+                    "download_url": (
+                        f"/api/v1/crm/reply-workspace/documents/{document.id}/download"
+                        if document.source_kind == "manual_upload" else None
+                    ),
                 }
                 for document, link in documents
             ],

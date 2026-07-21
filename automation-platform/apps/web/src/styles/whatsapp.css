@@ -463,3 +463,14 @@
 .target-enabled-toggle { display: inline-flex; align-items: center; gap: .45rem; white-space: nowrap; color: var(--muted-color, #74829a); font-size: .72rem; font-weight: 700; cursor: pointer; }
 .target-enabled-toggle:has(input:not(:checked)) { color: #9a5b21; }
 .target-enabled-toggle:has(input:disabled) { opacity: .65; cursor: wait; }
+
+.preview-action-note {
+  max-width: 34rem;
+  padding: .5rem .65rem;
+  border: 1px solid #e9c46a;
+  border-radius: .5rem;
+  background: #fff8e6;
+  color: #7a5600;
+  font-size: .78rem;
+  line-height: 1.35;
+}

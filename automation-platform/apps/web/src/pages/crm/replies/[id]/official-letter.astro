@@ -9,7 +9,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
   <a class="btn btn-sm" href="/crm/replies/official-letters/" slot="actions">Official Letters</a>
   <a class="btn btn-sm" href="/crm/replies/official-letters/settings/" slot="actions">Configuration</a>
   <main id="official-letter-preparer" data-api-base={apiBase} data-case-id={id} class="crm32-page official-letter-preparer">
-    <nav class="reply-mode-tabs" aria-label="Reply workspace modes"><a href="/crm/replies/">Reply Queue</a><a href="/crm/replies/bulk/">Bulk Operations</a><a class="active" href="/crm/replies/official-letters/">Official Letters</a></nav>
+    <nav class="reply-mode-tabs" aria-label="Reply workspace modes"><a href="/crm/replies/">Reply Queue</a><a href="/crm/replies/bulk/">Bulk Operations</a><a class="active" href="/crm/replies/official-letters/">Official Letters</a><a href="/crm/dispatch/">Dispatch</a></nav>
     <section id="letter-warning" class="crm-warning-box" hidden></section>
     <section class="official-letter-workspace">
       <aside class="master-card official-letter-source-card">
@@ -161,6 +161,8 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
 
     function populateLetter(letter:any) {
       $('letter-id').value = letter.id;
+      $('supersedes-letter-id').value = letter.supersedes_letter_id || '';
+      $('reply-revision-id').value = letter.reply_revision_id || $('reply-revision-id').value;
       $('letter-number').value = letter.letter_number;
       $('letter-date').value = letter.letter_date;
       $('recipient-name').value = letter.recipient_name;
@@ -200,6 +202,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
           actions.append(
             action('Preview Complete PDF', `${API}${complete.preview_url}`, true),
             action('Download Complete PDF', `${API}${complete.download_url}`),
+            action('Prepare Dispatch', `/crm/dispatch/?letter_id=${letter.id}`, true),
             command('Rebuild Complete PDF', () => void buildCompletePdf())
           );
         } else {
@@ -240,7 +243,11 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
         data = await api(`/api/v1/crm/official-letters/cases/${caseId}/prepare`);
         render();
         const requested = new URLSearchParams(location.search).get('letter');
-        if (requested) showArtifacts(await api(`/api/v1/crm/official-letters/letters/${requested}`));
+        if (requested) {
+          showArtifacts(await api(`/api/v1/crm/official-letters/letters/${requested}`));
+        } else if (data.active_letter) {
+          showArtifacts(data.active_letter);
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         $('letter-warning').hidden = false;

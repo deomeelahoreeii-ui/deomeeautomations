@@ -55,7 +55,7 @@ const { id = "" } = Astro.params;
       el("detail-message").textContent = item.message;
       const attachments = el("detail-attachments"); attachments.replaceChildren();
       if (!item.attachments.length) attachments.innerHTML = '<p class="empty-state">Message only—no attachments.</p>';
-      for (const file of item.attachments) { const link = document.createElement("a"); link.className = "preview-attachment"; link.href = `${(import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020")}/api/v1/whatsapp/previews/${id}/artifacts/${file.id}/download`; link.target = "_blank"; link.innerHTML = `<strong></strong><small>${formatBytes(file.size_bytes)} · ${file.checksum_sha256.slice(0, 12)}…</small>`; link.querySelector("strong").textContent = file.name; attachments.append(link); }
+      for (const file of (item.attachments || [])) { const link = document.createElement("a"); link.className = "preview-attachment"; link.href = `${(import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020")}/api/v1/whatsapp/previews/${id}/artifacts/${file.id}/download`; link.target = "_blank"; link.innerHTML = `<strong></strong><small>${formatBytes(file.size_bytes)} · ${file.checksum_sha256 ? file.checksum_sha256.slice(0, 12) + "…" : "checksum unavailable"}</small>`; link.querySelector("strong").textContent = file.name; attachments.append(link); }
       const issues = el("detail-issues"); issues.replaceChildren();
       if (!item.issues.length) issues.innerHTML = '<span class="validation-ok">✓ All checks passed</span>';
       for (const issue of item.issues) { const row = document.createElement("div"); row.className = `validation-row ${issue.severity}`; row.innerHTML = `<strong>${issue.code.replaceAll("_", " ")}</strong><span></span>`; row.querySelector("span").textContent = issue.message; issues.append(row); }
@@ -83,7 +83,7 @@ const { id = "" } = Astro.params;
       await table.configure({ manualPagination: true, loadPage, columns: [
         { accessorKey: "sequence", header: "#", enableSorting: false },
         { accessorKey: "target_name", header: "Recipient", enableSorting: false, cell: ({row}) => stack(row.original.target_name, row.original.target_jid) },
-        { accessorKey: "route_scope", header: "Route", enableSorting: false, cell: ({row}) => stack(row.original.route_scope || "Configured scope", `${row.original.route_kind || "route"} · ${row.original.wing_name}`) },
+        { accessorKey: "route_scope", header: "Route", enableSorting: false, cell: ({row}) => stack(row.original.route_scope || "Configured scope", `${row.original.route_kind || "route"} · ${row.original.wing_name || "No wing"}`) },
         { accessorKey: "message", header: "Message", enableSorting: false, cell: ({row}) => String(row.original.message || "").replaceAll("\n", " ").slice(0, 82) },
         { accessorKey: "attachments", header: "Files", enableSorting: false, cell: ({row}) => `${row.original.attachments.length} file${row.original.attachments.length === 1 ? "" : "s"}` },
         { accessorKey: "status", header: "State", enableSorting: false, cell: ({row}) => badge(row.original.status, tone(row.original.status)) },

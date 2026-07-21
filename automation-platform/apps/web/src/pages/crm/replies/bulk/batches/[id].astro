@@ -9,7 +9,7 @@ const batchId = Astro.params.id || "";
   <a class="btn btn-sm" href="/crm/replies/bulk/batches/" slot="actions">← All Batches</a>
   <a class="btn btn-sm" href="/crm/replies/bulk/" slot="actions">Bulk Operations</a>
   <main id="batch-detail-page" data-api-base={apiBase} data-batch-id={batchId} class="crm32-page bulk-batch-detail-page">
-    <nav class="reply-mode-tabs" aria-label="Reply workspace modes"><a href="/crm/replies/">Reply Queue</a><a class="active" href="/crm/replies/bulk/">Bulk Operations</a><a href="/crm/replies/official-letters/">Official Letters</a></nav>
+    <nav class="reply-mode-tabs" aria-label="Reply workspace modes"><a href="/crm/replies/">Reply Queue</a><a class="active" href="/crm/replies/bulk/">Bulk Operations</a><a href="/crm/replies/official-letters/">Official Letters</a><a href="/crm/dispatch/">Dispatch</a></nav>
     <section class="master-card batch-detail-header">
       <div><p class="eyebrow" id="batch-operation-label">Bulk operation</p><h2 id="batch-number">Loading batch…</h2><p id="batch-description">Please wait while the batch record is loaded.</p></div>
       <div class="batch-detail-actions"><button id="retry-batch" class="btn" type="button" hidden>Retry failed letters</button><button id="cancel-batch" class="btn btn-error" type="button" hidden>Cancel batch</button></div>

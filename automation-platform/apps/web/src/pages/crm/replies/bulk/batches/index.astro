@@ -6,7 +6,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
 <CrmLayout title="CRM Bulk Batches" description="Search and inspect classification, contextual reply, import and formal-letter batches." page="replies">
   <a class="btn btn-sm" href="/crm/replies/bulk/" slot="actions">← Bulk Operations</a>
   <main id="batch-list-page" data-api-base={apiBase} class="crm32-page bulk-batch-list-page">
-    <nav class="reply-mode-tabs" aria-label="Reply workspace modes"><a href="/crm/replies/">Reply Queue</a><a class="active" href="/crm/replies/bulk/">Bulk Operations</a><a href="/crm/replies/official-letters/">Official Letters</a></nav>
+    <nav class="reply-mode-tabs" aria-label="Reply workspace modes"><a href="/crm/replies/">Reply Queue</a><a class="active" href="/crm/replies/bulk/">Bulk Operations</a><a href="/crm/replies/official-letters/">Official Letters</a><a href="/crm/dispatch/">Dispatch</a></nav>
     <section class="master-card bulk-list-filters">
       <header class="crm-card-heading"><div><p class="eyebrow">Batch history</p><h2>All bulk-operation batches</h2><p>Filter by operation or state, then open any batch for item-level results and artifacts.</p></div><button id="refresh-list" class="btn btn-sm" type="button">↻ Refresh</button></header>
       <div class="reply-primary-filters">

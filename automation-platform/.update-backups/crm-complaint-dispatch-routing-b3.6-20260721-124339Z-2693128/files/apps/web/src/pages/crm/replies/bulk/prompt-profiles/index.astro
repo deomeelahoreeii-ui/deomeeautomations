@@ -1,0 +1,46 @@
+---
+import CrmLayout from "../../../../../layouts/CrmLayout.astro";
+
+const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
+---
+
+<CrmLayout title="Reply SOP Versions" description="Manage the versioned office instructions embedded in every contextual ChatGPT reply package." page="replies">
+  <a class="btn btn-sm" href="/crm/replies/bulk/" slot="actions">← Bulk Operations</a>
+  <a class="btn btn-sm" href={`${apiBase}/api/v1/crm/ai-pipeline/reference/active-reply-sop`} slot="actions">Download Active SOP</a>
+
+  <main id="prompt-profiles" data-api-base={apiBase} class="crm32-page prompt-profiles-page">
+    <nav class="reply-mode-tabs" aria-label="Reply workspace modes">
+      <a href="/crm/replies/">Reply Queue</a>
+      <a href="/crm/replies/bulk/">Bulk Operations</a>
+      <a href="/crm/replies/bulk/classification/">Classification Review</a>
+      <a href="/crm/replies/official-letters/">Official Letters</a>
+      <a class="active" href="/crm/replies/bulk/prompt-profiles/">Reply SOP</a>
+    </nav>
+
+    <section class="master-card prompt-profile-hero">
+      <div><p class="eyebrow">Versioned operational instructions</p><h2>CM Complaint Reply Master Prompt + SOP</h2><p>The uploaded 2026-06-20 SOP is integrated as the default active version. Every reply context batch snapshots the version ID, SHA-256 and complete content so historical output remains auditable after future updates.</p></div>
+      <div class="prompt-active-chip"><span>Active version</span><strong id="active-version-label">Loading…</strong><small id="active-version-hash">—</small></div>
+    </section>
+
+    <section class="prompt-profile-grid">
+      <article class="master-card prompt-version-list-card"><header class="crm-card-heading"><div><p class="eyebrow">Version history</p><h2>Available SOP versions</h2></div><button id="refresh-profiles" class="btn btn-sm" type="button">↻ Refresh</button></header><div id="prompt-version-list" class="prompt-version-list"><div class="crm-empty-state compact">Loading versions…</div></div></article>
+      <article class="master-card prompt-version-editor-card"><header class="crm-card-heading"><div><p class="eyebrow">Create a new immutable version</p><h2>Update office guidance safely</h2><p>Existing batches keep their original SOP snapshot. A new version becomes active only when explicitly selected.</p></div></header><form id="prompt-version-form" class="bulk-operation-form"><label class="crm-field" for="prompt-version-label"><span>Version label</span><input id="prompt-version-label" class="input input-bordered" type="text" placeholder="2026-07-21" required /></label><label class="crm-field" for="prompt-version-content"><span>Complete SOP / master prompt</span><textarea id="prompt-version-content" class="textarea textarea-bordered prompt-content-editor" rows="24" required></textarea></label><label class="crm-check-field compact" for="activate-new-prompt"><input id="activate-new-prompt" class="checkbox checkbox-sm" type="checkbox" checked /><span class="crm-check-copy"><strong>Activate this version immediately</strong><small>Future reply context packages will use it.</small></span></label><button class="btn btn-primary" type="submit">Create SOP version</button></form></article>
+    </section>
+
+    <div id="prompt-toast" class="crm-toast" role="status" aria-live="polite" hidden></div>
+  </main>
+
+  <script>
+    type Version={id:string;profile_id:string;version_label:string;content_sha256:string;is_active:boolean;effective_from?:string|null;created_by:string;created_at:string;content?:string};
+    type Profile={id:string;slug:string;name:string;description:string;active:boolean;versions:Version[]};
+    const root=document.getElementById("prompt-profiles") as HTMLElement;const API=root.dataset.apiBase||"";const $=<T extends HTMLElement=HTMLElement>(id:string)=>document.getElementById(id) as T;let profile:Profile|null=null;
+    function toast(message:string,error=false){const node=$("prompt-toast");node.textContent=message;node.classList.toggle("error",error);node.hidden=false;setTimeout(()=>node.hidden=true,4500)}
+    async function api(path:string,options?:RequestInit){const response=await fetch(`${API}${path}`,options);let body:any={};try{body=await response.json()}catch{}if(!response.ok)throw new Error(body.detail||`Request failed (${response.status})`);return body}
+    function dt(value?:string|null){return value?new Intl.DateTimeFormat(undefined,{dateStyle:"medium",timeStyle:"short"}).format(new Date(value)):"—"}
+    async function activate(id:string){try{await api(`/api/v1/crm/ai-pipeline/prompt-versions/${id}/activate`,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});toast("SOP version activated.");await load()}catch(error){toast(error instanceof Error?error.message:String(error),true)}}
+    async function edit(version:Version){try{const detail=await api(`/api/v1/crm/ai-pipeline/prompt-versions/${version.id}`);($("prompt-version-content") as HTMLTextAreaElement).value=detail.content||"";($("prompt-version-label") as HTMLInputElement).value="";($("prompt-version-label") as HTMLInputElement).placeholder=`New version after ${version.version_label}`;toast("Version content loaded as the starting point for a new immutable version.")}catch(error){toast(error instanceof Error?error.message:String(error),true)}}
+    function render(data:any){profile=(data.profiles||[])[0]||null;const versions=profile?.versions||[];const active=versions.find(row=>row.is_active);$("active-version-label").textContent=active?.version_label||"No active version";$("active-version-hash").textContent=active?`SHA-256 ${active.content_sha256.slice(0,16)}…`:"—";const list=$("prompt-version-list");list.replaceChildren();for(const version of versions){const article=document.createElement("article");article.className=`prompt-version-item${version.is_active?" active":""}`;const head=document.createElement("div");head.innerHTML=`<span>${version.is_active?"Active":"Version"}</span><strong>${version.version_label}</strong><small>${dt(version.effective_from||version.created_at)} · ${version.created_by}<br>SHA-256 ${version.content_sha256.slice(0,16)}…</small>`;const actions=document.createElement("div");actions.className="button-row";const copy=document.createElement("button");copy.className="btn btn-sm";copy.type="button";copy.textContent="Use as starting point";copy.addEventListener("click",()=>void edit(version));actions.append(copy);if(!version.is_active){const activateButton=document.createElement("button");activateButton.className="btn btn-sm btn-primary";activateButton.type="button";activateButton.textContent="Activate";activateButton.addEventListener("click",()=>void activate(version.id));actions.append(activateButton)}article.append(head,actions);list.append(article)}if(!versions.length)list.innerHTML='<div class="crm-empty-state compact">No SOP versions exist.</div>'}
+    async function load(){render(await api("/api/v1/crm/ai-pipeline/prompt-profiles"));if(!($("prompt-version-content") as HTMLTextAreaElement).value){const active=profile?.versions.find(row=>row.is_active);if(active)await edit(active)}}
+    $("prompt-version-form").addEventListener("submit",async(event)=>{event.preventDefault();if(!profile)return;try{await api(`/api/v1/crm/ai-pipeline/prompt-profiles/${profile.id}/versions`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({version_label:($("prompt-version-label") as HTMLInputElement).value,content:($("prompt-version-content") as HTMLTextAreaElement).value,activate:($("activate-new-prompt") as HTMLInputElement).checked})});toast("New SOP version created.");($("prompt-version-label") as HTMLInputElement).value="";await load()}catch(error){toast(error instanceof Error?error.message:String(error),true)}});$("refresh-profiles").addEventListener("click",()=>void load());void load().catch(error=>toast(error instanceof Error?error.message:String(error),true));
+  </script>
+</CrmLayout>

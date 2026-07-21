@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, CheckConstraint, Column, JSON, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Column, Index, JSON, Text, UniqueConstraint, text
 from sqlmodel import Field, SQLModel
 
 from automation_core.time import utcnow
@@ -189,16 +189,25 @@ class ComplaintDocument(SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint("source_processing_item_id", name="uq_crm_document_processing_item"),
         CheckConstraint(
-            "role IN ('main_complaint', 'complaint_details', 'attachment', 'reply', 'report', 'unclassified')",
+            "role IN ('main_complaint', 'complaint_details', 'attachment', 'reply', 'report', 'policy', 'unclassified')",
             name="ck_crm_complaint_documents_role",
+        ),
+        CheckConstraint(
+            "source_kind IN ('whatsapp_inbound', 'manual_upload')",
+            name="ck_crm_complaint_documents_source_kind",
         ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     complaint_case_id: uuid.UUID | None = Field(default=None, foreign_key="crm_complaint_cases.id", index=True)
-    source_processing_item_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_processing_items.id", index=True)
+    source_processing_item_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_inbound_processing_items.id", index=True)
     source_attachment_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_inbound_attachments.id", index=True)
     source_message_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_inbound_messages.id", index=True)
+    source_kind: str = Field(default="whatsapp_inbound", index=True, max_length=32)
+    storage_path: str | None = Field(default=None, sa_column=Column(Text))
+    uploaded_by: str | None = Field(default=None, index=True, max_length=120)
+    source_dispatch_batch_id: uuid.UUID | None = Field(default=None, foreign_key="crm_dispatch_batches.id", index=True)
+    source_dispatch_item_id: uuid.UUID | None = Field(default=None, foreign_key="crm_dispatch_items.id", index=True)
     source_sha256: str | None = Field(default=None, index=True)
     original_filename: str | None = Field(default=None, index=True)
     mime_type: str | None = Field(default=None, index=True)
@@ -754,8 +763,22 @@ class CrmOfficialLetter(SQLModel, table=True):
             "complaint_case_id", "revision", name="uq_crm_official_letters_case_revision"
         ),
         CheckConstraint(
-            "status IN ('preview', 'finalized', 'superseded', 'failed')",
+            "status IN ('preview', 'finalized', 'superseded', 'failed', 'discarded')",
             name="ck_crm_official_letters_status",
+        ),
+        Index(
+            "uq_crm_official_letters_active_preview",
+            "complaint_case_id",
+            unique=True,
+            postgresql_where=text("status = 'preview'"),
+            sqlite_where=text("status = 'preview'"),
+        ),
+        Index(
+            "uq_crm_official_letters_current_finalized",
+            "complaint_case_id",
+            unique=True,
+            postgresql_where=text("status = 'finalized'"),
+            sqlite_where=text("status = 'finalized'"),
         ),
     )
 
@@ -815,6 +838,169 @@ class CrmOfficialLetterArtifact(SQLModel, table=True):
     size_bytes: int = 0
     sha256: str = Field(index=True, max_length=64)
     created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class CrmDispatchRule(SQLModel, table=True):
+    __tablename__ = "crm_dispatch_rules"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_crm_dispatch_rules_name"),
+        CheckConstraint(
+            "selection_mode IN ('suggested', 'manual_only', 'fallback')",
+            name="ck_crm_dispatch_rules_selection_mode",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    name: str = Field(index=True, max_length=200)
+    description: str | None = Field(default=None, sa_column=Column(Text))
+    priority: int = Field(default=100, index=True)
+    selection_mode: str = Field(default="suggested", index=True, max_length=24)
+    conditions_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    dispatch_profile_ids_json: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    stop_after_match: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, default=True))
+    enabled: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, default=True, index=True))
+    effective_from: datetime | None = Field(default=None, index=True)
+    effective_to: datetime | None = Field(default=None, index=True)
+    version: int = 1
+    created_by: str = Field(default="web-operator", index=True, max_length=120)
+    updated_by: str = Field(default="web-operator", index=True, max_length=120)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class CrmDispatchBatch(SQLModel, table=True):
+    __tablename__ = "crm_dispatch_batches"
+    __table_args__ = (
+        UniqueConstraint("batch_number", name="uq_crm_dispatch_batches_number"),
+        CheckConstraint(
+            "status IN ('draft', 'resolving_routes', 'review_required', 'ready', "
+            "'approved', 'queued', 'sending', 'completed', 'completed_with_errors', "
+            "'failed', 'cancelled', 'stale')",
+            name="ck_crm_dispatch_batches_status",
+        ),
+        CheckConstraint(
+            "direction IN ('downward', 'upward')",
+            name="ck_crm_dispatch_batches_direction",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    batch_number: str = Field(index=True, max_length=80)
+    status: str = Field(default="draft", index=True, max_length=40)
+    direction: str = Field(default="downward", index=True, max_length=20)
+    source_mode: str = Field(default="complaint_cases", index=True, max_length=40)
+    purpose: str = Field(default="compliance_request", index=True, max_length=80)
+    total_items: int = 0
+    ready_items: int = 0
+    blocked_items: int = 0
+    excluded_items: int = 0
+    queued_items: int = 0
+    successful_items: int = 0
+    failed_items: int = 0
+    response_due_at: datetime | None = Field(default=None, index=True)
+    created_by: str = Field(default="web-operator", index=True, max_length=120)
+    approved_by: str | None = Field(default=None, index=True, max_length=120)
+    error_summary: str | None = Field(default=None, sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+    approved_at: datetime | None = Field(default=None, index=True)
+    completed_at: datetime | None = Field(default=None, index=True)
+
+
+class CrmDispatchArtifact(SQLModel, table=True):
+    __tablename__ = "crm_dispatch_artifacts"
+    __table_args__ = (
+        UniqueConstraint("dispatch_item_id", "kind", name="uq_crm_dispatch_artifacts_item_kind"),
+        CheckConstraint(
+            "kind IN ('assignment_packet', 'submission_packet')",
+            name="ck_crm_dispatch_artifacts_kind",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    batch_id: uuid.UUID = Field(foreign_key="crm_dispatch_batches.id", index=True)
+    dispatch_item_id: uuid.UUID = Field(foreign_key="crm_dispatch_items.id", index=True)
+    complaint_case_id: uuid.UUID = Field(foreign_key="crm_complaint_cases.id", index=True)
+    kind: str = Field(index=True, max_length=40)
+    name: str = Field(max_length=255)
+    path: str = Field(sa_column=Column(Text, nullable=False))
+    content_type: str = Field(default="application/pdf", max_length=160)
+    size_bytes: int = 0
+    sha256: str = Field(index=True, max_length=64)
+    page_count: int = 0
+    source_snapshot_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class CrmDispatchItem(SQLModel, table=True):
+    __tablename__ = "crm_dispatch_items"
+    __table_args__ = (
+        UniqueConstraint("batch_id", "complaint_case_id", name="uq_crm_dispatch_items_batch_case"),
+        CheckConstraint(
+            "route_status IN ('ready', 'needs_review', 'conflict', 'blocked', 'excluded')",
+            name="ck_crm_dispatch_items_route_status",
+        ),
+        CheckConstraint(
+            "compliance_status IN ('not_requested', 'requested', 'received', 'under_review', 'incorporated', 'submitted', 'closed')",
+            name="ck_crm_dispatch_items_compliance_status",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    batch_id: uuid.UUID = Field(foreign_key="crm_dispatch_batches.id", index=True)
+    complaint_case_id: uuid.UUID = Field(foreign_key="crm_complaint_cases.id", index=True)
+    official_letter_id: uuid.UUID | None = Field(default=None, foreign_key="crm_official_letters.id", index=True)
+    complete_pdf_artifact_id: uuid.UUID | None = Field(default=None, foreign_key="crm_official_letter_artifacts.id", index=True)
+    packet_artifact_id: uuid.UUID | None = Field(default=None, index=True)
+    complaint_number_snapshot: str = Field(index=True, max_length=80)
+    letter_number_snapshot: str | None = Field(default=None, index=True, max_length=180)
+    letter_date_snapshot: date | None = Field(default=None, index=True)
+    packet_sha256: str = Field(index=True, max_length=64)
+    packet_size_bytes: int = 0
+    packet_page_count: int = 0
+    route_status: str = Field(default="needs_review", index=True, max_length=24)
+    compliance_status: str = Field(default="not_requested", index=True, max_length=24)
+    route_summary_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    excluded: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, default=False, index=True))
+    exclusion_reason: str | None = Field(default=None, sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class CrmDispatchTarget(SQLModel, table=True):
+    __tablename__ = "crm_dispatch_targets"
+    __table_args__ = (
+        UniqueConstraint("dispatch_item_id", "dispatch_profile_id", name="uq_crm_dispatch_targets_item_profile"),
+        CheckConstraint(
+            "selection_source IN ('rule', 'manual', 'fallback')",
+            name="ck_crm_dispatch_targets_selection_source",
+        ),
+        CheckConstraint(
+            "business_status IN ('planned', 'blocked', 'excluded', 'approved', 'queued', "
+            "'sent_pending_confirmation', 'delivered', 'failed', 'timed_out', 'cancelled')",
+            name="ck_crm_dispatch_targets_business_status",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    dispatch_item_id: uuid.UUID = Field(foreign_key="crm_dispatch_items.id", index=True)
+    routing_rule_id: uuid.UUID | None = Field(default=None, foreign_key="crm_dispatch_rules.id", index=True)
+    dispatch_profile_id: uuid.UUID = Field(foreign_key="whatsapp_dispatch_profiles.id", index=True)
+    selection_source: str = Field(default="rule", index=True, max_length=20)
+    manual_override_reason: str | None = Field(default=None, sa_column=Column(Text))
+    recipient_snapshot_json: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    message_snapshot: str = Field(default="", sa_column=Column(Text, nullable=False))
+    message_sha256: str = Field(default="", index=True, max_length=64)
+    preview_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_dispatch_previews.id", index=True)
+    preview_delivery_ids_json: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    whatsapp_delivery_ids_json: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    business_status: str = Field(default="planned", index=True, max_length=40)
+    response_due_at: datetime | None = Field(default=None, index=True)
+    error: str | None = Field(default=None, sa_column=Column(Text))
+    sent_at: datetime | None = Field(default=None, index=True)
+    completed_at: datetime | None = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
 
 
 class FrappeSyncEvent(SQLModel, table=True):

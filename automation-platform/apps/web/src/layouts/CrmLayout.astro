@@ -11,6 +11,7 @@ interface Props {
     | "taxonomy"
     | "knowledge"
     | "helpdesk"
+    | "dispatch"
     | "sheet-filter"
     | "pdf-filter"
     | "sheet-to-pdf";
@@ -27,6 +28,7 @@ const links = [
   ["taxonomy", "Taxonomy", "/crm/taxonomy/"],
   ["knowledge", "AI Reply Archive", "/crm/knowledge/"],
   ["helpdesk", "Helpdesk Sync", "/crm/helpdesk/"],
+  ["dispatch", "Dispatch", "/crm/dispatch/"],
 ] as const;
 
 const bulkToolPages = ["sheet-filter", "pdf-filter", "sheet-to-pdf"] as const;
