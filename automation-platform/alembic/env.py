@@ -60,6 +60,7 @@ from whatsapp_gateway.models import (
     WhatsAppSettings,
     WhatsAppTemplate,
 )
+from whatsapp_gateway.persistence.audience_sources import WhatsAppAudienceSource
 
 config = context.config
 fileConfig(config.config_file_name)

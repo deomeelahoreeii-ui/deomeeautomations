@@ -51,6 +51,32 @@ cd apps/web && npm run dev -- --host 0.0.0.0 --port 4321
 
 Open <http://localhost:4321>.
 
+## Container stack
+
+The complete Compose stack now applies Alembic migrations before starting the
+API, uses separate Celery workers for AntiDengue, preview compilation, CRM, and
+WhatsApp work, and binds every host port to `127.0.0.1` by default.
+
+```bash
+cp .env.example .env
+# Replace the change-me infrastructure and integration credentials.
+docker compose up --build
+```
+
+The browser uses `PUBLIC_API_BASE_URL`, while Astro server actions use the
+container-only `API_INTERNAL_BASE_URL=http://api:8000`. When Frappe or object
+storage runs on the host, configure `FRAPPE_HELPDESK_CONTAINER_URL` or
+`OBJECT_STORAGE_CONTAINER_ENDPOINT_URL` with its container-reachable address.
+
+Flower is opt-in and protected with `FLOWER_BASIC_AUTH`:
+
+```bash
+docker compose --profile observability up -d flower
+```
+
+Operational deployment, health checks, backups, verification commands, and
+restore guidance are documented in [`docs/operations.md`](docs/operations.md).
+
 ## Local ntfy notifications
 
 The first ntfy stage runs as a private Compose service with a persistent message

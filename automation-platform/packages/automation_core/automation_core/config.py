@@ -9,6 +9,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "Automation Platform"
+    log_level: str = "INFO"
+    log_format: str = "json"
 
     database_url: str = "sqlite:///./data/automation-platform.db"
     celery_broker_url: str = "amqp://guest:guest@localhost:5672//"
@@ -128,6 +130,7 @@ class Settings(BaseSettings):
         "http://localhost:4321,http://127.0.0.1:4321,"
         "http://localhost:5173,http://127.0.0.1:5173"
     )
+    api_allowed_hosts: str = "localhost,127.0.0.1,testserver,api"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -191,6 +194,22 @@ class Settings(BaseSettings):
         allowed = {"local", "lan", "tailscale", "cloudflare"}
         if normalized not in allowed:
             raise ValueError(f"ntfy_exposure_mode must be one of: {', '.join(sorted(allowed))}")
+        return normalized
+
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if normalized not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            raise ValueError("log_level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
+        return normalized
+
+    @field_validator("log_format")
+    @classmethod
+    def validate_log_format(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"json", "text"}:
+            raise ValueError("log_format must be json or text")
         return normalized
 
     @field_validator("ntfy_port")
@@ -280,6 +299,10 @@ class Settings(BaseSettings):
             for origin in self.api_cors_origins.split(",")
             if origin.strip()
         ]
+
+    @property
+    def allowed_hosts(self) -> list[str]:
+        return [host.strip() for host in self.api_allowed_hosts.split(",") if host.strip()]
 
 
 @lru_cache

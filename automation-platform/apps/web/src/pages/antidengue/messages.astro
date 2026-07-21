@@ -278,7 +278,10 @@ const acknowledgementDescription = initialCategory === "digest"
       if (!activityReview) return body.replace(/{{\s*report_body\s*}}/g, "[The generated report body appears here]");
       const hasAttachment = assignedProfiles.some((profile) => profile.presentation_policy?.attachment_mode !== "none");
       const source = simple ? simpleSample : hotspotSample;
-      const sample = { ...source, attachment_note: hasAttachment ? source.attachment_note : "" };
+      const sample: Record<string, string> = {
+        ...source,
+        attachment_note: hasAttachment ? source.attachment_note : "",
+      };
       return body.replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_match, key) => sample[key] || (key === "attachment_note" ? "" : `[${key}]`));
     }
 

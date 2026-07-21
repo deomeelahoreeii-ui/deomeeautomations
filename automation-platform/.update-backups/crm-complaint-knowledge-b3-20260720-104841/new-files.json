@@ -1,7 +1,0 @@
-[
-  "apps/web/src/pages/crm/knowledge/index.astro",
-  "packages/crm_domain/crm_domain/knowledge.py",
-  "packages/crm_domain/crm_domain/knowledge_api.py",
-  "packages/crm_domain/crm_domain/knowledge_cli.py",
-  "tests/test_crm_knowledge_archive_b3.py"
-]

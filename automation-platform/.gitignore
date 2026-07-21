@@ -5,8 +5,15 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 data/
 node_modules/
 dist/
 .astro/
 *.egg-info/
+.update-backups/
+# Operational source datasets are managed outside Git. Existing tracked files
+# remain untouched until a separate, coordinated data-retention cleanup.
+raw-data/

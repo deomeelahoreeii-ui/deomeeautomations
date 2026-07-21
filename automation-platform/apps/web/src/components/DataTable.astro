@@ -153,6 +153,8 @@ const {
         data: this.rows,
         columns: config.columns,
         state: {},
+        onStateChange: () => undefined,
+        renderFallbackValue: null,
         onPaginationChange: (updater) => {
           this.pagination = resolveUpdater(updater, this.pagination);
           this.config?.onPageChange?.({ ...this.pagination });
@@ -318,7 +320,8 @@ const {
               button.type = "button";
               button.className = "table-sort";
               button.textContent = `${String(label)} ${header.column.getIsSorted() === "asc" ? "↑" : header.column.getIsSorted() === "desc" ? "↓" : "↕"}`;
-              button.addEventListener("click", header.column.getToggleSortingHandler());
+              const toggleSorting = header.column.getToggleSortingHandler();
+              if (toggleSorting) button.addEventListener("click", toggleSorting);
               cell.append(button);
             } else {
               this.renderValue(cell, label);

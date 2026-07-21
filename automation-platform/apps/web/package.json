@@ -6,22 +6,29 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "check": "npm run typecheck",
+    "astro:check": "astro check",
+    "typecheck": "tsc --noEmit",
+    "preview": "astro preview",
+    "start": "node ./dist/server/entry.mjs",
+    "verify": "npm run check && npm run build"
   },
   "dependencies": {
-    "@astrojs/node": "^11.0.2",
-    "@tailwindcss/vite": "latest",
-    "@tanstack/table-core": "^8.21.3",
-    "@types/howler": "^2.2.13",
-    "astro": "latest",
-    "d3": "^7.9.0",
-    "daisyui": "latest",
-    "howler": "^2.2.4",
-    "sweetalert2": "^11.26.25",
-    "tailwindcss": "latest"
+    "@astrojs/node": "11.0.2",
+    "@tailwindcss/vite": "4.3.2",
+    "@tanstack/table-core": "8.21.3",
+    "astro": "7.1.3",
+    "d3": "7.9.0",
+    "daisyui": "5.6.18",
+    "howler": "2.2.4",
+    "sweetalert2": "11.26.25",
+    "tailwindcss": "4.3.2"
   },
   "devDependencies": {
-    "@types/d3": "^7.4.3",
-    "typescript": "latest"
+    "@astrojs/check": "0.9.9",
+    "@types/d3": "7.4.3",
+    "@types/howler": "2.2.13",
+    "@types/node": "24.13.3",
+    "typescript": "6.0.3"
   }
 }

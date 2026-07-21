@@ -1,3 +1,55 @@
+name: automation-platform
+
+x-app-env-file: &app-env-file
+  - path: .env
+    required: false
+
+x-app-environment: &app-environment
+  DATABASE_URL: postgresql+psycopg://automation:${POSTGRES_PASSWORD:-automation-local-only}@postgres:5432/automation_platform
+  CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-automation}:${RABBITMQ_PASSWORD:-automation-local-only}@rabbitmq:5672//
+  CELERY_RESULT_BACKEND: redis://redis:6379/0
+  WHATSAPP_NATS_URL: nats://nats:4222
+  NTFY_PUBLISH_URL: http://ntfy:80
+  DEOMEE_ROOT: /workspace/deomeeautomations
+  CRM_PROJECT_ROOT: /workspace/deomeeautomations/crm-management-system
+  ARTIFACT_ROOT: /app/data/artifacts
+  LEGACY_UV_BIN: uv
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_FORMAT: ${LOG_FORMAT:-json}
+  FRAPPE_HELPDESK_URL: ${FRAPPE_HELPDESK_CONTAINER_URL:-${FRAPPE_HELPDESK_URL:-http://host.docker.internal:8082}}
+  OBJECT_STORAGE_ENDPOINT_URL: ${OBJECT_STORAGE_CONTAINER_ENDPOINT_URL:-${OBJECT_STORAGE_ENDPOINT_URL:-http://host.docker.internal:9000}}
+
+x-python-service: &python-service
+  image: automation-platform-python:0.1.0
+  build:
+    context: .
+    dockerfile: infra/docker/python.Dockerfile
+    args:
+      APP_UID: ${APP_UID:-1000}
+      APP_GID: ${APP_GID:-1000}
+      INSTALL_OCR: "false"
+  env_file: *app-env-file
+  environment: *app-environment
+  volumes:
+    - ..:/workspace/deomeeautomations
+    - api-data:/app/data
+  extra_hosts:
+    - host.docker.internal:host-gateway
+  restart: unless-stopped
+  stop_grace_period: 30s
+
+x-worker-service: &worker-service
+  <<: *python-service
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    rabbitmq:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    nats:
+      condition: service_healthy
+
 services:
   nats:
     image: nats:2.12.11-alpine
@@ -30,8 +82,6 @@ services:
       NTFY_AUTH_DEFAULT_ACCESS: deny-all
       NTFY_ENABLE_LOGIN: "true"
     ports:
-      # Localhost is the secure default. Set NTFY_BIND_ADDRESS to the laptop's
-      # LAN IP only when LAN clients should connect directly.
       - "${NTFY_BIND_ADDRESS:-127.0.0.1}:${NTFY_PORT:-2586}:80"
     volumes:
       - ntfy-data:/var/lib/ntfy
@@ -43,15 +93,16 @@ services:
       start_period: 5s
 
   postgres:
-    image: postgres:latest
+    image: postgres:17.6-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: automation_platform
       POSTGRES_USER: automation
-      POSTGRES_PASSWORD: automation
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-automation-local-only}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U automation -d automation_platform"]
       interval: 5s
@@ -59,10 +110,14 @@ services:
       retries: 20
 
   rabbitmq:
-    image: rabbitmq:management
+    image: rabbitmq:4.1.4-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-automation}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-automation-local-only}
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "127.0.0.1:${RABBITMQ_PORT:-5672}:5672"
+      - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
@@ -72,9 +127,11 @@ services:
       retries: 20
 
   redis:
-    image: redis:latest
+    image: redis:8.2.1-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -83,120 +140,109 @@ services:
       timeout: 5s
       retries: 20
 
-  api:
-    image: automation-platform-python:latest
-    build:
-      context: .
-      dockerfile: infra/docker/python.Dockerfile
-    command: uv run uvicorn automation_api.main:app --host 0.0.0.0 --port 8000
-    environment:
-      DATABASE_URL: postgresql+psycopg://automation:automation@postgres:5432/automation_platform
-      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      DEOMEE_ROOT: /workspace/deomeeautomations
-      CRM_PROJECT_ROOT: /workspace/deomeeautomations/crm-management-system
-      ARTIFACT_ROOT: /app/data/artifacts
-      LEGACY_UV_BIN: uv
-      API_CORS_ORIGINS: http://localhost:4321
-      NTFY_ENABLED: ${NTFY_ENABLED:-false}
-      NTFY_PUBLISH_URL: http://ntfy:80
-      NTFY_PUBLIC_BASE_URL: ${NTFY_PUBLIC_BASE_URL:-http://localhost:2586}
-      NTFY_EXPOSURE_MODE: ${NTFY_EXPOSURE_MODE:-local}
-      NTFY_TOKEN: ${NTFY_TOKEN:-}
-      NTFY_TIMEOUT_SECONDS: ${NTFY_TIMEOUT_SECONDS:-5}
-      ANTIDENGUE_NTFY_ENABLED: ${ANTIDENGUE_NTFY_ENABLED:-false}
-      ANTIDENGUE_NTFY_TOPIC: ${ANTIDENGUE_NTFY_TOPIC:-automation-antidengue}
-    ports:
-      - "8020:8000"
-    volumes:
-      - ..:/workspace/deomeeautomations
-      - api-data:/app/data
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()\""
-        ]
-      interval: 5s
-      timeout: 5s
-      retries: 20
+  migrate:
+    <<: *python-service
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
     depends_on:
       postgres:
         condition: service_healthy
+
+  api:
+    <<: *python-service
+    command: ["uvicorn", "automation_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+    environment:
+      <<: *app-environment
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS:-http://localhost:4321,http://127.0.0.1:4321}
+      API_ALLOWED_HOSTS: ${API_ALLOWED_HOSTS:-localhost,127.0.0.1,api}
+      NTFY_PUBLIC_BASE_URL: ${NTFY_PUBLIC_BASE_URL:-http://localhost:2586}
+    ports:
+      - "127.0.0.1:${API_PORT:-8020}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz').read()\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      nats:
         condition: service_healthy
       ntfy:
         condition: service_healthy
 
   worker:
-    image: automation-platform-python:latest
+    <<: *worker-service
+    command: ["celery", "-A", "automation_worker.main.celery_app", "worker", "--queues=antidengue", "--concurrency=1", "--hostname=antidengue@%h", "--without-gossip", "--without-mingle", "--loglevel=INFO"]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A automation_worker.main.celery_app inspect ping --destination=antidengue@$$HOSTNAME --timeout=5 | grep -q pong"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 20s
+
+  worker-preview:
+    <<: *worker-service
+    command: ["celery", "-A", "automation_worker.main.celery_app", "worker", "--queues=antidengue-preview-v2", "--concurrency=1", "--hostname=preview@%h", "--without-gossip", "--without-mingle", "--loglevel=INFO"]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A automation_worker.main.celery_app inspect ping --destination=preview@$$HOSTNAME --timeout=5 | grep -q pong"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 20s
+
+  worker-crm:
+    <<: *worker-service
+    image: automation-platform-python-ocr:0.1.0
     build:
       context: .
       dockerfile: infra/docker/python.Dockerfile
-    command: uv run celery -A automation_worker.main.celery_app worker --queues=antidengue,antidengue-preview-v2,crm,whatsapp --loglevel=INFO
+      args:
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
+        INSTALL_OCR: "true"
+    command: ["celery", "-A", "automation_worker.main.celery_app", "worker", "--queues=crm", "--concurrency=1", "--hostname=crm@%h", "--without-gossip", "--without-mingle", "--loglevel=INFO"]
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "python -c \"from sqlmodel import Session; from automation_core.database import engine; from automation_core.worker_runtime import require_compatible_workers; from whatsapp_gateway.previews.compiler.capabilities import local_compiler_runtime; s=Session(engine); require_compatible_workers(s, local_compiler_runtime()); s.close()\""
-        ]
-      interval: 15s
-      timeout: 10s
-      retries: 6
-      start_period: 15s
-    environment:
-      DATABASE_URL: postgresql+psycopg://automation:automation@postgres:5432/automation_platform
-      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      DEOMEE_ROOT: /workspace/deomeeautomations
-      CRM_PROJECT_ROOT: /workspace/deomeeautomations/crm-management-system
-      ARTIFACT_ROOT: /app/data/artifacts
-      LEGACY_UV_BIN: uv
-    volumes:
-      - ..:/workspace/deomeeautomations
-      - api-data:/app/data
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      test: ["CMD-SHELL", "celery -A automation_worker.main.celery_app inspect ping --destination=crm@$$HOSTNAME --timeout=5 | grep -q pong"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 20s
+
+  worker-whatsapp:
+    <<: *worker-service
+    image: automation-platform-python-ocr:0.1.0
+    build:
+      context: .
+      dockerfile: infra/docker/python.Dockerfile
+      args:
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
+        INSTALL_OCR: "true"
+    command: ["celery", "-A", "automation_worker.main.celery_app", "worker", "--queues=whatsapp", "--concurrency=1", "--hostname=whatsapp@%h", "--without-gossip", "--without-mingle", "--loglevel=INFO"]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A automation_worker.main.celery_app inspect ping --destination=whatsapp@$$HOSTNAME --timeout=5 | grep -q pong"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 20s
 
   scheduler:
-    image: automation-platform-python:latest
-    build:
-      context: .
-      dockerfile: infra/docker/python.Dockerfile
-    command: uv run python -m antidengue_automation.scheduler_service
+    <<: *python-service
+    command: ["python", "-m", "antidengue_automation.scheduler_service"]
     environment:
-      DATABASE_URL: postgresql+psycopg://automation:automation@postgres:5432/automation_platform
-      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      DEOMEE_ROOT: /workspace/deomeeautomations
-      CRM_PROJECT_ROOT: /workspace/deomeeautomations/crm-management-system
-      ARTIFACT_ROOT: /app/data/artifacts
-      LEGACY_UV_BIN: uv
+      <<: *app-environment
       ANTIDENGUE_SCHEDULER_ENABLED: ${ANTIDENGUE_SCHEDULER_ENABLED:-true}
       ANTIDENGUE_SCHEDULER_INTERVAL_SECONDS: ${ANTIDENGUE_SCHEDULER_INTERVAL_SECONDS:-10}
-      NTFY_ENABLED: ${NTFY_ENABLED:-false}
-      # Containers publish over the private Compose network. Subscribers use
-      # NTFY_PUBLIC_BASE_URL, which can later be LAN, Tailscale, or Cloudflare.
-      NTFY_PUBLISH_URL: http://ntfy:80
       NTFY_PUBLIC_BASE_URL: ${NTFY_PUBLIC_BASE_URL:-http://localhost:2586}
-      NTFY_EXPOSURE_MODE: ${NTFY_EXPOSURE_MODE:-local}
-      NTFY_TOKEN: ${NTFY_TOKEN:-}
-      NTFY_TIMEOUT_SECONDS: ${NTFY_TIMEOUT_SECONDS:-5}
-      ANTIDENGUE_NTFY_ENABLED: ${ANTIDENGUE_NTFY_ENABLED:-false}
-      ANTIDENGUE_NTFY_TOPIC: ${ANTIDENGUE_NTFY_TOPIC:-automation-antidengue}
-    volumes:
-      - ..:/workspace/deomeeautomations
-      - api-data:/app/data
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
       redis:
@@ -205,16 +251,11 @@ services:
         condition: service_healthy
 
   flower:
-    image: automation-platform-python:latest
-    build:
-      context: .
-      dockerfile: infra/docker/python.Dockerfile
-    command: uv run celery -A automation_worker.main.celery_app flower --port=5555
-    environment:
-      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    <<: *python-service
+    command: ["celery", "-A", "automation_worker.main.celery_app", "flower", "--port=5555", "--basic-auth=${FLOWER_BASIC_AUTH:-automation:automation-local-only}"]
+    profiles: ["observability"]
     ports:
-      - "5555:5555"
+      - "127.0.0.1:${FLOWER_PORT:-5555}:5555"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -225,13 +266,24 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://127.0.0.1:8020}
     environment:
-      PUBLIC_API_BASE_URL: http://localhost:8020
+      API_INTERNAL_BASE_URL: http://api:8000
+      HOST: 0.0.0.0
+      PORT: 4321
     ports:
-      - "4321:4321"
+      - "127.0.0.1:${WEB_PORT:-4321}:4321"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4321/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     depends_on:
       api:
         condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   nats-data:

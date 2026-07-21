@@ -4,8 +4,10 @@ from celery import Celery
 from celery.signals import heartbeat_sent, worker_ready
 
 from automation_core.config import get_settings
+from automation_core.logging_config import configure_service_logging
 
 settings = get_settings()
+logger = configure_service_logging(level=settings.log_level, log_format=settings.log_format)
 
 transport_options: dict[str, str] = {}
 if settings.celery_broker_url.startswith("filesystem://"):
@@ -78,9 +80,16 @@ def _announce_worker_database(sender=None, **_kwargs):  # type: ignore[no-untype
     global _registered_worker_name
     identity = database_identity()
     _registered_worker_name = str(getattr(sender, "hostname", "") or "automation-worker")
-    print(
-        f"Automation Celery worker database={identity['fingerprint']} ({identity['display']})",
-        flush=True,
+    logger.info(
+        "worker.started",
+        extra={
+            "context": {
+                "service": "celery-worker",
+                "worker_name": _registered_worker_name,
+                "database_fingerprint": identity["fingerprint"],
+                "queues": _consumed_queues(sender),
+            }
+        },
     )
     try:
         from sqlmodel import Session
@@ -106,7 +115,10 @@ def _announce_worker_database(sender=None, **_kwargs):  # type: ignore[no-untype
                 database_fingerprint=identity["fingerprint"],
             )
     except Exception as exc:
-        print(f"Worker capability registration failed: {type(exc).__name__}: {exc}", flush=True)
+        logger.exception(
+            "worker.capability_registration.failed",
+            extra={"context": {"error_type": type(exc).__name__}},
+        )
 
 
 @heartbeat_sent.connect
@@ -122,4 +134,7 @@ def _refresh_worker_runtime(**_kwargs):  # type: ignore[no-untyped-def]
         with Session(engine) as session:
             touch_worker_runtime(session, _registered_worker_name)
     except Exception as exc:
-        print(f"Worker capability heartbeat failed: {type(exc).__name__}: {exc}", flush=True)
+        logger.exception(
+            "worker.capability_heartbeat.failed",
+            extra={"context": {"error_type": type(exc).__name__}},
+        )

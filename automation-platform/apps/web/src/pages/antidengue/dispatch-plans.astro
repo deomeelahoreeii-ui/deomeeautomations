@@ -48,8 +48,11 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       return { key: "ready", tone: "ready", title: "Ready to review", detail: item.warnings ? `Review ${item.warnings} warning${item.warnings === 1 ? "" : "s"}, then explicitly approve the frozen payloads.` : "Review the exact recipients, messages and attachments before approval." };
     }
 
-    function uniqueIssueMessages(item: any) {
-      return [...new Set((item.issues || []).map((issue: any) => issue.message).filter(Boolean))].slice(0, 2);
+    function uniqueIssueMessages(item: any): string[] {
+      const messages = (item.issues || [])
+        .map((issue: any) => issue.message)
+        .filter((message: unknown): message is string => typeof message === "string" && Boolean(message));
+      return [...new Set<string>(messages)].slice(0, 2);
     }
 
     function actionLink(text: string, href: string, primary = false) {

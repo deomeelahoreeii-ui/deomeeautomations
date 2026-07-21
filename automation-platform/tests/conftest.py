@@ -30,6 +30,7 @@ import automation_core.models  # noqa: E402,F401
 import crm_domain.models  # noqa: E402,F401
 import master_data.models  # noqa: E402,F401
 import whatsapp_gateway.models  # noqa: E402,F401
+import whatsapp_gateway.persistence.audience_sources  # noqa: E402,F401
 from automation_core.database import engine  # noqa: E402
 from sqlmodel import SQLModel  # noqa: E402
 

@@ -1,27 +1,6 @@
-import { ActionError, defineAction } from "astro:actions";
+import { defineAction } from "astro:actions";
 import { z } from "astro/zod";
-
-const API_BASE = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
-
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
-    ...init,
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    const detail = Array.isArray(body.detail)
-      ? body.detail.map((item: any) => item.msg || item.message || JSON.stringify(item)).join("; ")
-      : typeof body.detail === "string"
-        ? body.detail
-        : body.detail?.message || response.statusText;
-    throw new ActionError({
-      code: response.status === 404 ? "NOT_FOUND" : "BAD_REQUEST",
-      message: detail,
-    });
-  }
-  return response.json() as Promise<T>;
-}
+import { api } from "./api";
 
 const schoolInput = z.object({
   id: z.string().optional(),

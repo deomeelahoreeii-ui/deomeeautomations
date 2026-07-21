@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import signal
-import sys
 import time
 
 from sqlalchemy import text
@@ -17,16 +16,22 @@ from antidengue_automation.notifications import publish_pending_ntfy
 from automation_core.config import get_settings
 from automation_core.database import engine
 from automation_core.database_identity import database_identity
+from automation_core.logging_config import configure_service_logging
 from automation_core.task_outbox import publish_pending_tasks
 from automation_core.time import utcnow
 
 _STOP = False
+_settings = get_settings()
+logger = configure_service_logging(level=_settings.log_level, log_format=_settings.log_format)
 
 
 def _request_stop(signum: int, _frame) -> None:
     global _STOP
     _STOP = True
-    print(f"AntiDengue scheduler received signal {signum}; stopping.", flush=True)
+    logger.info(
+        "scheduler.stop.requested",
+        extra={"context": {"service": "antidengue-scheduler", "signal": signum}},
+    )
 
 
 def run_tick() -> dict[str, int]:
@@ -65,7 +70,10 @@ def run_tick() -> dict[str, int]:
             except Exception as exc:
                 # Notification transport is downstream and must never block or
                 # roll back report/preview/dispatch orchestration.
-                print(f"AntiDengue notification delivery failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+                logger.exception(
+                    "scheduler.notification.failed",
+                    extra={"context": {"error_type": type(exc).__name__}},
+                )
                 notifications = {"sent": 0, "failed": 1}
             return {
                 "created": len(created),
@@ -86,7 +94,7 @@ def main() -> int:
     parser.add_argument("--interval", type=float, default=None, help="Polling interval in seconds")
     parser.add_argument("--once", action="store_true", help="Run one scheduler tick and exit")
     args = parser.parse_args()
-    settings = get_settings()
+    settings = _settings
     interval = float(args.interval if args.interval is not None else settings.antidengue_scheduler_interval_seconds)
     if interval < 1:
         parser.error("--interval must be at least 1 second")
@@ -94,29 +102,36 @@ def main() -> int:
     signal.signal(signal.SIGINT, _request_stop)
     signal.signal(signal.SIGTERM, _request_stop)
     identity = database_identity()
-    print(
-        "AntiDengue scheduler started: "
-        f"interval={interval:g}s, timezone=Asia/Karachi, "
-        f"database={identity['fingerprint']} ({identity['display']})",
-        flush=True,
+    logger.info(
+        "scheduler.started",
+        extra={
+            "context": {
+                "service": "antidengue-scheduler",
+                "interval_seconds": interval,
+                "timezone": "Asia/Karachi",
+                "database_fingerprint": identity["fingerprint"],
+            }
+        },
     )
     while not _STOP:
         try:
             stats = run_tick()
             if any(stats.values()):
-                print(
-                    "AntiDengue scheduler change: "
-                    + ", ".join(f"{key}={value}" for key, value in stats.items() if value),
-                    flush=True,
+                logger.info(
+                    "scheduler.tick.changed",
+                    extra={"context": {key: value for key, value in stats.items() if value}},
                 )
         except Exception as exc:
-            print(f"AntiDengue scheduler tick failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            logger.exception(
+                "scheduler.tick.failed",
+                extra={"context": {"error_type": type(exc).__name__}},
+            )
         if args.once:
             break
         deadline = time.monotonic() + interval
         while not _STOP and time.monotonic() < deadline:
             time.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
-    print("AntiDengue scheduler stopped.", flush=True)
+    logger.info("scheduler.stopped", extra={"context": {"service": "antidengue-scheduler"}})
     return 0
 
 

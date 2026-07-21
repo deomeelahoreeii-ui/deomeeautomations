@@ -44,6 +44,9 @@ from whatsapp_gateway.preview_service import (
     cleanup_unreferenced_preview_files,
     delete_preview_records,
 )
+from whatsapp_gateway.schemas import AudienceMemberInput
+
+
 def _validate_group_route(
     session: Session,
     data: AudienceMemberInput,

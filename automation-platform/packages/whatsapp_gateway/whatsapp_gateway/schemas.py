@@ -45,6 +45,8 @@ from whatsapp_gateway.preview_service import (
     delete_preview_records,
 )
 class TestMessageInput(BaseModel):
+    __test__ = False
+
     target: str = PydanticField(min_length=10, max_length=80)
     recipient_name: str = PydanticField(default="Test recipient", max_length=200)
     message: str = PydanticField(min_length=1, max_length=3500)

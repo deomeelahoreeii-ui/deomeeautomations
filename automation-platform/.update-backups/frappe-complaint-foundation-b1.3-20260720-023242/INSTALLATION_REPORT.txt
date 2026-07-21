@@ -1,9 +1,0 @@
-Bundle: Frappe Complaint Foundation B1.3
-Installed: 2026-07-20T02:34:09+05:00
-Project: /home/ahmad/code/deomeeautomations/automation-platform
-Backup: /home/ahmad/code/deomeeautomations/automation-platform/.update-backups/frappe-complaint-foundation-b1.3-20260720-023242
-Database migration: unchanged at b1f4a7c9d203
-Frappe schema changes: none
-Existing imported tickets: preserved
-Complaint import performed: no
-Primary correction: preview and execution now use one signed exact case selection

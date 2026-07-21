@@ -1,0 +1,105 @@
+name: Automation Platform CI
+
+on:
+  pull_request:
+    paths:
+      - "automation-platform/**"
+      - ".github/workflows/automation-platform-ci.yml"
+  push:
+    branches: [main, master]
+    paths:
+      - "automation-platform/**"
+      - ".github/workflows/automation-platform-ci.yml"
+
+concurrency:
+  group: automation-platform-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: automation-platform
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_DB: automation_platform_test
+          POSTGRES_USER: automation
+          POSTGRES_PASSWORD: automation-test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U automation -d automation_platform_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg://automation:automation-test@127.0.0.1:5432/automation_platform_test
+      ANTIDENGUE_SCHEDULER_ENABLED: "false"
+      NTFY_ENABLED: "false"
+      OBJECT_STORAGE_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.19"
+          enable-cache: true
+          cache-dependency-glob: automation-platform/uv.lock
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install locked dependencies
+        run: uv sync --locked --group dev
+      - name: Lint correctness rules
+        run: uv run ruff check apps packages tests scripts alembic
+      - name: Apply every PostgreSQL migration
+        run: uv run alembic upgrade head
+      - name: Verify every migration head is applied
+        run: uv run alembic current --check-heads
+      - name: Run tests with coverage
+        run: uv run pytest --cov --cov-report=term --cov-report=xml --cov-fail-under=60
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage
+          path: automation-platform/coverage.xml
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: automation-platform/apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.15.0"
+          cache: npm
+          cache-dependency-path: automation-platform/apps/web/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Validate TypeScript
+        run: npm run check
+      - name: Build production server
+        run: npm run build
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: automation-platform
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose model
+        run: docker compose config -q
+      - name: Build production images
+        run: docker compose build api web worker-crm

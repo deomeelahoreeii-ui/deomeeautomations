@@ -1,8 +1,0 @@
-[
-  "automation-platform/apps/web/src/pages/antidengue/messages.astro",
-  "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/compiler/consolidated_plan.py",
-  "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/compiler/dynamic_plan_members.py",
-  "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/compiler/plan_members.py",
-  "automation-platform/packages/whatsapp_gateway/whatsapp_gateway/previews/compiler/zero_result_acknowledgements.py",
-  "automation-platform/tests/test_preview_partial_approval.py"
-]

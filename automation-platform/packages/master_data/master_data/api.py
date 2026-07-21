@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
 from automation_core.database import engine, get_session
+from automation_core.time import utcnow
 from master_data.models import (
     MasterContact,
     MasterDataAudit,
