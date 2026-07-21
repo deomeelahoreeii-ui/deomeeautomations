@@ -3,25 +3,26 @@ import CrmLayout from "../../../../../layouts/CrmLayout.astro";
 import CheckboxField from "../../../../../components/ui/CheckboxField.astro";
 const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
 ---
-<CrmLayout title="Letter Configuration" description="Manage the shared official-letter reference, recipients, template versions and signature profiles." page="replies">
+<CrmLayout title="Letter Configuration" description="Manage official-letter numbering, recipients, template versions and signature profiles." page="replies">
   <a class="btn btn-sm" href="/crm/replies/official-letters/" slot="actions">← Official Letters</a>
   <main id="letter-settings" data-api-base={apiBase} class="crm32-page letter-settings-page">
     <nav class="reply-mode-tabs" aria-label="Reply workspace modes"><a href="/crm/replies/">Reply Queue</a><a href="/crm/replies/bulk/">Bulk Operations</a><a class="active" href="/crm/replies/official-letters/">Official Letters</a></nav>
     <section class="official-settings-grid">
       <form id="defaults-form" class="master-card official-settings-card">
-        <header class="crm-card-heading"><div><p class="eyebrow">Office defaults</p><h2>Shared letter reference and identity</h2><p>The same letter number and date are used for every new complaint letter until an authorized user changes them.</p></div></header>
+        <header class="crm-card-heading"><div><p class="eyebrow">Office defaults</p><h2>Numbering and letter identity</h2><p>Defaults are suggested for each letter and remain editable where permitted.</p></div></header>
         <div class="settings-form-grid">
           <label class="crm-field full"><span>Office title</span><textarea id="office-title" class="textarea textarea-bordered" rows="3"></textarea></label>
           <label class="crm-field"><span>Default recipient</span><input id="recipient-name" class="input input-bordered" /></label>
           <label class="crm-field"><span>Recipient location</span><input id="recipient-location" class="input input-bordered" /></label>
           <label class="crm-field"><span>Subject prefix</span><input id="subject-prefix" class="input input-bordered" /></label>
-          <label class="crm-field"><span>Current letter number</span><input id="current-letter-number" class="input input-bordered" required /></label>
-          <label class="crm-field"><span>Current letter date</span><input id="current-letter-date" class="input input-bordered" type="date" required /></label>
+          <label class="crm-field"><span>Numbering prefix</span><input id="numbering-prefix" class="input input-bordered" /></label>
+          <label class="crm-field"><span>Last numeric number</span><input id="last-number" class="input input-bordered" type="number" min="0" /></label>
           <label class="crm-field"><span>Date format</span><select id="date-format" class="select select-bordered"><option>DD/MM/YYYY</option><option>DD-MM-YYYY</option><option>YYYY-MM-DD</option></select></label>
           <label class="crm-field full"><span>Default CC entries</span><textarea id="cc-entries" class="textarea textarea-bordered" rows="3"></textarea></label>
           <label class="crm-field"><span>Default template</span><select id="default-template" class="select select-bordered"></select></label>
           <label class="crm-field"><span>Default signature</span><select id="default-signature" class="select select-bordered"></select></label>
-          <CheckboxField id="allow-override" label="Allow per-letter override" description="When enabled, an authorized user may change the shared number or date while preparing a letter. Finalizing that letter makes the changed values the new shared defaults." checked />
+          <CheckboxField id="allow-override" label="Allow manual letter number" description="Authorized users can replace the suggested number." checked />
+          <CheckboxField id="require-unique" label="Unique letter number required" description="Always enforced to protect diary and audit integrity." checked disabled />
         </div>
         <footer class="settings-card-footer"><span id="settings-suggestion"></span><button class="btn btn-primary" type="submit">Save configuration</button></footer>
       </form>
@@ -141,12 +142,13 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
       $('recipient-name').value = settings.default_recipient_name;
       $('recipient-location').value = settings.default_recipient_location;
       $('subject-prefix').value = settings.default_subject_prefix;
-      $('current-letter-number').value = settings.current_letter_number;
-      $('current-letter-date').value = settings.current_letter_date;
+      $('numbering-prefix').value = settings.numbering_prefix;
+      $('last-number').value = settings.last_numeric_number;
       $('date-format').value = settings.date_format;
       $('cc-entries').value = settings.default_cc_entries;
       $('allow-override').checked = settings.allow_manual_override;
-      $('settings-suggestion').textContent = `Shared reference for new letters: ${settings.current_letter_number} dated ${settings.current_letter_date}`;
+      $('require-unique').checked = true;
+      $('settings-suggestion').textContent = `Next available number: ${settings.suggested_letter_number}`;
 
       $('default-template').replaceChildren(...config.templates.filter((item:any) => item.active).map((item:any) => new Option(`${item.name} · v${item.version}`, item.id)));
       $('default-template').value = settings.default_template_id || '';
@@ -173,10 +175,10 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
             default_subject_prefix:$('subject-prefix').value,
             default_cc_entries:$('cc-entries').value,
             date_format:$('date-format').value,
-            current_letter_number:$('current-letter-number').value,
-            current_letter_date:$('current-letter-date').value,
+            numbering_prefix:$('numbering-prefix').value,
+            last_numeric_number:Number($('last-number').value),
             allow_manual_override:$('allow-override').checked,
-            require_unique_number:false,
+            require_unique_number:true,
             default_template_id:$('default-template').value,
             default_signature_id:$('default-signature').value,
           }),

@@ -30,10 +30,8 @@ class ConfigurationInput(BaseModel):
     date_format: str = Field(default="DD/MM/YYYY", max_length=40)
     numbering_prefix: str = Field(default="PMDU/CRM", max_length=120)
     last_numeric_number: int = Field(default=1510, ge=0)
-    current_letter_number: str = Field(default="1511/PMDU/CRM", max_length=180)
-    current_letter_date: date = Field(default_factory=date.today)
     allow_manual_override: bool = True
-    require_unique_number: bool = False
+    require_unique_number: bool = True
     default_template_id: uuid.UUID | None = None
     default_signature_id: uuid.UUID | None = None
     actor: str = Field(default="web-operator", max_length=120)
@@ -255,21 +253,6 @@ def generate_letter(
         _raise(exc)
 
 
-@router.post("/letters/{letter_id}/complete-pdf")
-def create_complete_pdf(
-    letter_id: uuid.UUID,
-    payload: ActorInput,
-    session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
-) -> dict[str, Any]:
-    try:
-        return _service(session, settings).compose_complete_pdf(
-            letter_id, actor=payload.actor
-        )
-    except OfficialLetterError as exc:
-        _raise(exc)
-
-
 @router.post("/letters/{letter_id}/finalize")
 def finalize_letter(
     letter_id: uuid.UUID,
@@ -344,7 +327,7 @@ def preview_artifact(
 ) -> FileResponse:
     try:
         record, path = _service(session, settings).artifact_path(artifact_id)
-        if record.kind not in {"pdf", "complete_pdf"}:
+        if record.kind != "pdf":
             raise OfficialLetterValidationError("Only PDF artifacts can be previewed")
         return FileResponse(path, media_type="application/pdf", headers={"Content-Disposition": "inline"})
     except OfficialLetterError as exc:

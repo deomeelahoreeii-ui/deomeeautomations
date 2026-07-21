@@ -20,13 +20,13 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
         <div id="source-history" class="official-source-panel configuration-list" hidden></div>
       </aside>
       <section class="master-card official-letter-form-card">
-        <header class="crm-card-heading"><div><p class="eyebrow">Letter details</p><h2>Number, date, recipient and signatory</h2><p>The number and date are shared defaults and stay the same across complaint letters. Changing them here and finalizing the letter makes the new values the defaults for subsequent letters. A complete PDF can then place the official letter before the original complaint and accepted attachments.</p></div><span id="letter-status" class="crm-status-badge warning">Draft configuration</span></header>
+        <header class="crm-card-heading"><div><p class="eyebrow">Letter details</p><h2>Number, date, recipient and signatory</h2><p>Preview first. Finalizing locks the number, source revision, template and signature snapshot.</p></div><span id="letter-status" class="crm-status-badge warning">Draft configuration</span></header>
         <form id="letter-form" class="official-letter-form">
           <input id="reply-revision-id" type="hidden" />
           <input id="letter-id" type="hidden" /><input id="supersedes-letter-id" type="hidden" />
           <div class="official-letter-form-grid">
-            <label class="crm-field"><span>Shared letter number</span><input id="letter-number" class="input input-bordered" required /><small>Reused for all new letters until changed.</small></label>
-            <label class="crm-field"><span>Shared letter date</span><input id="letter-date" class="input input-bordered" type="date" required /><small>Reused for all new letters until changed.</small></label>
+            <label class="crm-field"><span>Letter number</span><input id="letter-number" class="input input-bordered" required /></label>
+            <label class="crm-field"><span>Letter date</span><input id="letter-date" class="input input-bordered" type="date" required /></label>
             <label class="crm-field"><span>Recipient</span><input id="recipient-name" class="input input-bordered" required /></label>
             <label class="crm-field"><span>Recipient location</span><input id="recipient-location" class="input input-bordered" required /></label>
             <label class="crm-field"><span>Subject prefix</span><input id="subject-prefix" class="input input-bordered" required /></label>
@@ -39,7 +39,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
         <section id="letter-artifacts" class="official-letter-artifacts" hidden><div><strong id="artifact-heading">Preview generated</strong><small id="artifact-note"></small></div><div id="artifact-actions" class="table-actions"></div></section>
       </section>
     </section>
-    <section id="preview-card" class="master-card official-letter-preview-card" hidden><header class="crm-card-heading"><div><p class="eyebrow">Browser preview</p><h2 id="preview-title">Official letter PDF</h2><p id="preview-description">Review the legal-size output before finalizing the official record.</p></div><button id="close-preview" class="btn btn-sm" type="button">Hide preview</button></header><iframe id="letter-preview-frame" title="Official letter PDF preview"></iframe></section>
+    <section id="preview-card" class="master-card official-letter-preview-card" hidden><header class="crm-card-heading"><div><p class="eyebrow">Browser preview</p><h2>Official letter PDF</h2><p>Review the legal-size output before finalizing the official record.</p></div><button id="close-preview" class="btn btn-sm" type="button">Hide preview</button></header><iframe id="letter-preview-frame" title="Official letter PDF preview"></iframe></section>
     <div id="letter-toast" class="crm-toast" role="status" hidden></div>
   </main>
   <script>
@@ -73,15 +73,6 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
       link.href = href;
       link.textContent = label;
       return link;
-    }
-
-    function command(label:string, handler:() => void, primary=false) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = primary ? 'btn btn-primary btn-sm' : 'btn btn-sm';
-      button.textContent = label;
-      button.addEventListener('click', handler);
-      return button;
     }
 
     function setFormDisabled(disabled:boolean) {
@@ -179,60 +170,22 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
       $('letter-artifacts').hidden = false;
       $('artifact-heading').textContent = letter.status === 'finalized' ? 'Official letter finalized' : letter.status === 'superseded' ? 'Superseded official letter' : 'Preview generated';
       const warnings = letter.warnings || [];
-      const sourceCount = data?.source_documents?.length || 0;
-      $('artifact-note').textContent = `Letter ${letter.letter_number} · revision ${letter.revision}${sourceCount ? ` · ${sourceCount} accepted source document(s)` : ' · no accepted source documents'}${warnings.length ? ` · ${warnings.join(' ')}` : ''}`;
+      $('artifact-note').textContent = `Letter ${letter.letter_number} · revision ${letter.revision}${warnings.length ? ` · ${warnings.join(' ')}` : ''}`;
       const actions = $('artifact-actions');
       actions.replaceChildren();
       const pdf = letter.artifacts?.find((item:any) => item.kind === 'pdf');
-      const complete = letter.artifacts?.find((item:any) => item.kind === 'complete_pdf');
       const odt = letter.artifacts?.find((item:any) => item.kind === 'odt');
       if (pdf) {
-        actions.append(action('Preview Letter PDF', `${API}${pdf.preview_url}`, true), action('Download Letter PDF', `${API}${pdf.download_url}`));
+        actions.append(action('Preview PDF', `${API}${pdf.preview_url}`, true), action('Download PDF', `${API}${pdf.download_url}`));
         $('letter-preview-frame').src = `${API}${pdf.preview_url}`;
-        $('preview-title').textContent = 'Official letter PDF';
-        $('preview-description').textContent = 'Review the legal-size official letter output.';
         $('preview-card').hidden = false;
       }
       if (odt) actions.append(action('Download ODT', `${API}${odt.download_url}`));
       const immutable = ['finalized', 'superseded'].includes(letter.status);
-      if (immutable) {
-        if (complete) {
-          actions.append(
-            action('Preview Complete PDF', `${API}${complete.preview_url}`, true),
-            action('Download Complete PDF', `${API}${complete.download_url}`),
-            command('Rebuild Complete PDF', () => void buildCompletePdf())
-          );
-        } else {
-          actions.append(command('Build Complete PDF', () => void buildCompletePdf(), true));
-        }
-      }
       setFormDisabled(immutable);
       $('finalize-letter').disabled = letter.status !== 'preview';
       $('finalize-letter').hidden = immutable;
       $('create-revision').hidden = letter.status !== 'finalized';
-    }
-
-    async function buildCompletePdf() {
-      if (!current || !['finalized', 'superseded'].includes(current.status)) return;
-      const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('#artifact-actions button'));
-      buttons.forEach(button => button.disabled = true);
-      try {
-        const result = await api(`/api/v1/crm/official-letters/letters/${current.id}/complete-pdf`, {method:'POST', body:JSON.stringify({})});
-        showArtifacts(result);
-        const complete = result.artifacts?.find((item:any) => item.kind === 'complete_pdf');
-        if (complete) {
-          $('letter-preview-frame').src = `${API}${complete.preview_url}`;
-          $('preview-title').textContent = 'Complete official record PDF';
-          $('preview-description').textContent = 'Official letter first, followed by the original complaint and accepted attachments.';
-          $('preview-card').hidden = false;
-        }
-        const skipped = result.complete_pdf?.skipped_documents?.length || 0;
-        toast(skipped ? `Complete PDF created. ${skipped} source document(s) could not be included.` : 'Complete PDF created in official-letter, complaint and attachment order.');
-      } catch (error) {
-        toast(error instanceof Error ? error.message : String(error), true);
-      } finally {
-        buttons.forEach(button => button.disabled = false);
-      }
     }
 
     async function load() {
@@ -270,7 +223,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
       try {
         const result = await api(`/api/v1/crm/official-letters/letters/${current.id}/finalize`, {method:'POST', body:JSON.stringify({})});
         showArtifacts(result);
-        toast('Official letter finalized. Its number and date are now the shared defaults for subsequent letters.');
+        toast('Official letter finalized.');
         data = await api(`/api/v1/crm/official-letters/cases/${caseId}/prepare`);
         renderHistory();
       } catch (error) { toast(error instanceof Error ? error.message : String(error), true); }

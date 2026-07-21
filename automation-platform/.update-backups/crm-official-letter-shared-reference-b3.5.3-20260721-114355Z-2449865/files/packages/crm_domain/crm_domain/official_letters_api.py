@@ -30,10 +30,8 @@ class ConfigurationInput(BaseModel):
     date_format: str = Field(default="DD/MM/YYYY", max_length=40)
     numbering_prefix: str = Field(default="PMDU/CRM", max_length=120)
     last_numeric_number: int = Field(default=1510, ge=0)
-    current_letter_number: str = Field(default="1511/PMDU/CRM", max_length=180)
-    current_letter_date: date = Field(default_factory=date.today)
     allow_manual_override: bool = True
-    require_unique_number: bool = False
+    require_unique_number: bool = True
     default_template_id: uuid.UUID | None = None
     default_signature_id: uuid.UUID | None = None
     actor: str = Field(default="web-operator", max_length=120)

@@ -90,15 +90,14 @@ def test_taxonomy_is_split_tree_detail_table_and_safe_dialog_forms() -> None:
     assert "form-check" not in source
 
 
-def test_reply_queue_is_tanstack_driven_with_number_preview_and_dedicated_editor_action() -> None:
+def test_reply_queue_is_tanstack_driven_with_separate_number_and_preview() -> None:
     source = QUEUE.read_text(encoding="utf-8")
     for token in (
         "DataTable",
         'id="reply-queue-table"',
         'header: "Complaint No."',
-        'button.title = "Preview complaint"',
-        'button.addEventListener("click", () => void openComplaintPreview(item))',
-        'editor.href = editorUrl(item)',
+        'header: "Complaint text"',
+        'button.textContent = "View"',
         'id="complaint-preview-dialog"',
         "manualPagination: true",
         "pageSizeOptions={[25, 50, 100]}",
@@ -108,7 +107,6 @@ def test_reply_queue_is_tanstack_driven_with_number_preview_and_dedicated_editor
         "Apply classification",
     ):
         assert token in source
-    assert 'header: "Complaint text"' not in source
 
 
 def test_reply_editor_keeps_page_workspace_and_uses_context_tables_and_state_actions() -> None:

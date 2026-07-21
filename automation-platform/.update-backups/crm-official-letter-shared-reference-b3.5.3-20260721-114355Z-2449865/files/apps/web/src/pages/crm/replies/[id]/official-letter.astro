@@ -20,13 +20,13 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
         <div id="source-history" class="official-source-panel configuration-list" hidden></div>
       </aside>
       <section class="master-card official-letter-form-card">
-        <header class="crm-card-heading"><div><p class="eyebrow">Letter details</p><h2>Number, date, recipient and signatory</h2><p>The number and date are shared defaults and stay the same across complaint letters. Changing them here and finalizing the letter makes the new values the defaults for subsequent letters. A complete PDF can then place the official letter before the original complaint and accepted attachments.</p></div><span id="letter-status" class="crm-status-badge warning">Draft configuration</span></header>
+        <header class="crm-card-heading"><div><p class="eyebrow">Letter details</p><h2>Number, date, recipient and signatory</h2><p>Preview first. Finalizing locks the number, source revision, template and signature snapshot. A complete PDF can then place the official letter before the original complaint and accepted attachments.</p></div><span id="letter-status" class="crm-status-badge warning">Draft configuration</span></header>
         <form id="letter-form" class="official-letter-form">
           <input id="reply-revision-id" type="hidden" />
           <input id="letter-id" type="hidden" /><input id="supersedes-letter-id" type="hidden" />
           <div class="official-letter-form-grid">
-            <label class="crm-field"><span>Shared letter number</span><input id="letter-number" class="input input-bordered" required /><small>Reused for all new letters until changed.</small></label>
-            <label class="crm-field"><span>Shared letter date</span><input id="letter-date" class="input input-bordered" type="date" required /><small>Reused for all new letters until changed.</small></label>
+            <label class="crm-field"><span>Letter number</span><input id="letter-number" class="input input-bordered" required /></label>
+            <label class="crm-field"><span>Letter date</span><input id="letter-date" class="input input-bordered" type="date" required /></label>
             <label class="crm-field"><span>Recipient</span><input id="recipient-name" class="input input-bordered" required /></label>
             <label class="crm-field"><span>Recipient location</span><input id="recipient-location" class="input input-bordered" required /></label>
             <label class="crm-field"><span>Subject prefix</span><input id="subject-prefix" class="input input-bordered" required /></label>
@@ -270,7 +270,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
       try {
         const result = await api(`/api/v1/crm/official-letters/letters/${current.id}/finalize`, {method:'POST', body:JSON.stringify({})});
         showArtifacts(result);
-        toast('Official letter finalized. Its number and date are now the shared defaults for subsequent letters.');
+        toast('Official letter finalized.');
         data = await api(`/api/v1/crm/official-letters/cases/${caseId}/prepare`);
         renderHistory();
       } catch (error) { toast(error instanceof Error ? error.message : String(error), true); }

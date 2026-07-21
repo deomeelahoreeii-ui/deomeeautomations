@@ -738,13 +738,9 @@ class OfficialLetterService:
             "date_format": record.date_format,
             "numbering_prefix": record.numbering_prefix,
             "last_numeric_number": record.last_numeric_number,
-            "current_letter_number": record.current_letter_number,
-            "current_letter_date": _iso(record.current_letter_date),
-            # Backward-compatible key used by the preparation page. It now means
-            # the shared reference, not an automatically incremented number.
-            "suggested_letter_number": record.current_letter_number,
+            "suggested_letter_number": f"{record.last_numeric_number + 1}/{record.numbering_prefix}" if record.numbering_prefix else str(record.last_numeric_number + 1),
             "allow_manual_override": record.allow_manual_override,
-            "require_unique_number": False,
+            "require_unique_number": record.require_unique_number,
             "default_template_id": str(record.default_template_id) if record.default_template_id else None,
             "default_signature_id": str(record.default_signature_id) if record.default_signature_id else None,
             "updated_by": record.updated_by,
@@ -802,31 +798,11 @@ class OfficialLetterService:
             raise OfficialLetterValidationError(
                 "Unsupported date format. Choose DD/MM/YYYY, DD-MM-YYYY or YYYY-MM-DD"
             )
-        if "current_letter_number" in payload:
-            number = str(payload["current_letter_number"]).strip()
-            if not number:
-                raise OfficialLetterValidationError("Current letter number is required")
-            record.current_letter_number = number
-            leading, separator, suffix = number.partition("/")
-            if leading.strip().isdigit():
-                record.last_numeric_number = int(leading.strip())
-            if separator and suffix.strip():
-                record.numbering_prefix = suffix.strip()
-        elif "last_numeric_number" in payload or "numbering_prefix" in payload:
-            prefix = record.numbering_prefix.strip()
-            record.current_letter_number = (
-                f"{record.last_numeric_number}/{prefix}" if prefix else str(record.last_numeric_number)
+        if "require_unique_number" in payload and not bool(payload["require_unique_number"]):
+            raise OfficialLetterValidationError(
+                "Official letter numbers must remain unique for audit and diary integrity"
             )
-        if "current_letter_date" in payload:
-            value = payload["current_letter_date"]
-            try:
-                record.current_letter_date = value if isinstance(value, date) else date.fromisoformat(str(value))
-            except ValueError as exc:
-                raise OfficialLetterValidationError("Current letter date must be a valid date") from exc
-        # Reference numbers may intentionally be shared by multiple complaint
-        # letters issued under the same office diary entry. Record identity is
-        # protected by the letter UUID and complaint/revision constraints.
-        record.require_unique_number = False
+        record.require_unique_number = True
         if payload.get("default_template_id"):
             template = self.session.get(CrmOfficialLetterTemplate, uuid.UUID(str(payload["default_template_id"])))
             if not template or not template.active:
@@ -949,28 +925,18 @@ class OfficialLetterService:
         return record
 
     def suggest_letter_number(self, *, start: int | None = None) -> str:
-        # ``start`` is retained for API compatibility with older bulk callers.
-        # The office uses one shared diary/reference number until an operator
-        # changes it, so no automatic increment or uniqueness scan is performed.
-        del start
-        return self.ensure_defaults().current_letter_number.strip()
-
-    def _remember_shared_reference(
-        self, *, letter_number: str, letter_date: date, actor: str, changed_at: datetime
-    ) -> None:
         settings = self.ensure_defaults()
-        number = letter_number.strip()
-        settings.current_letter_number = number
-        settings.current_letter_date = letter_date
-        settings.require_unique_number = False
-        leading, separator, suffix = number.partition("/")
-        if leading.strip().isdigit():
-            settings.last_numeric_number = int(leading.strip())
-        if separator and suffix.strip():
-            settings.numbering_prefix = suffix.strip()
-        settings.updated_by = actor
-        settings.updated_at = changed_at
-        self.session.add(settings)
+        candidate = max(settings.last_numeric_number + 1, start or 0)
+        prefix = settings.numbering_prefix.strip()
+        for _ in range(100_000):
+            number = f"{candidate}/{prefix}" if prefix else str(candidate)
+            exists = self.session.exec(
+                select(CrmOfficialLetter.id).where(CrmOfficialLetter.letter_number == number)
+            ).first()
+            if exists is None:
+                return number
+            candidate += 1
+        raise OfficialLetterError("Unable to find an available official letter number")
 
     def statistics(self) -> dict[str, int]:
         approved_case_ids = set(
@@ -1075,7 +1041,7 @@ class OfficialLetterService:
             },
             "defaults": {
                 **config["settings"],
-                "letter_date": _iso(settings.current_letter_date),
+                "letter_date": date.today().isoformat(),
             },
             "templates": [item for item in config["templates"] if item["active"]],
             "signatures": [item for item in config["signatures"] if item["active"]],
@@ -1086,20 +1052,20 @@ class OfficialLetterService:
             "letters": [self._letter_payload(item, include_artifacts=True) for item in existing],
         }
 
-    def _assert_letter_reference(
-        self, number: str, letter_date: date, *, exclude_id: uuid.UUID | None = None
-    ) -> None:
-        del exclude_id
+    def _assert_letter_number(self, number: str, *, exclude_id: uuid.UUID | None = None) -> None:
         settings = self.ensure_defaults()
         if not number.strip():
             raise OfficialLetterValidationError("Letter number is required")
         if not settings.allow_manual_override:
-            expected_number = settings.current_letter_number.strip()
-            expected_date = settings.current_letter_date
-            if number.strip() != expected_number or letter_date != expected_date:
-                raise OfficialLetterValidationError(
-                    f"Letter reference must remain {expected_number} dated {expected_date.isoformat()}"
-                )
+            expected = self._settings_payload(settings)["suggested_letter_number"]
+            if number.strip() != expected:
+                raise OfficialLetterValidationError(f"Letter number must be {expected}")
+        if settings.require_unique_number:
+            statement = select(CrmOfficialLetter).where(CrmOfficialLetter.letter_number == number.strip())
+            if exclude_id:
+                statement = statement.where(CrmOfficialLetter.id != exclude_id)
+            if self.session.exec(statement).first():
+                raise OfficialLetterValidationError("This official letter number is already in use")
 
     def _write_letter_artifact(self, letter: CrmOfficialLetter, *, kind: str, name: str, content_type: str, content: bytes) -> CrmOfficialLetterArtifact:
         directory = self.letters_root / str(letter.id)
@@ -1173,7 +1139,7 @@ class OfficialLetterService:
             ).first()
             if failed_retry is not None:
                 letter_id = failed_retry.id
-        self._assert_letter_reference(letter_number, letter_date, exclude_id=letter_id)
+        self._assert_letter_number(letter_number, exclude_id=letter_id)
         if supersedes_letter_id:
             previous = self.session.get(CrmOfficialLetter, supersedes_letter_id)
             if previous is None or previous.complaint_case_id != case_id or previous.status != "finalized":
@@ -1273,12 +1239,13 @@ class OfficialLetterService:
         self._write_letter_artifact(letter, kind="odt", name=f"{base}.odt", content_type=ODT_MIME, content=odt)
         self._write_letter_artifact(letter, kind="pdf", name=f"{base}.pdf", content_type="application/pdf", content=pdf)
         if finalize:
-            self._remember_shared_reference(
-                letter_number=letter.letter_number,
-                letter_date=letter.letter_date,
-                actor=actor,
-                changed_at=now,
-            )
+            settings = self.ensure_defaults()
+            leading = letter.letter_number.split("/", 1)[0].strip()
+            if leading.isdigit() and int(leading) > settings.last_numeric_number:
+                settings.last_numeric_number = int(leading)
+                settings.updated_by = actor
+                settings.updated_at = now
+                self.session.add(settings)
             if supersedes_letter_id:
                 previous = self.session.get(CrmOfficialLetter, supersedes_letter_id)
                 if previous and previous.complaint_case_id == case_id and previous.status == "finalized":
@@ -1388,16 +1355,17 @@ class OfficialLetterService:
             return self._letter_payload(letter, include_artifacts=True)
         if letter.status != "preview":
             raise OfficialLetterValidationError("Only a preview letter can be finalized")
-        self._assert_letter_reference(letter.letter_number, letter.letter_date, exclude_id=letter.id)
+        self._assert_letter_number(letter.letter_number, exclude_id=letter.id)
         letter.status = "finalized"
         letter.finalized_at = utcnow()
         letter.generated_by = actor
-        self._remember_shared_reference(
-            letter_number=letter.letter_number,
-            letter_date=letter.letter_date,
-            actor=actor,
-            changed_at=letter.finalized_at,
-        )
+        settings = self.ensure_defaults()
+        leading = letter.letter_number.split("/", 1)[0].strip()
+        if leading.isdigit() and int(leading) > settings.last_numeric_number:
+            settings.last_numeric_number = int(leading)
+            settings.updated_by = actor
+            settings.updated_at = utcnow()
+            self.session.add(settings)
         if letter.supersedes_letter_id:
             previous = self.session.get(CrmOfficialLetter, letter.supersedes_letter_id)
             if previous and previous.complaint_case_id == letter.complaint_case_id and previous.status == "finalized":

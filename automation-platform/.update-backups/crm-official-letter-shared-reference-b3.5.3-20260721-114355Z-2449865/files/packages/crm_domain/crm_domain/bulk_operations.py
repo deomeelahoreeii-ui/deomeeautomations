@@ -8,7 +8,7 @@ import re
 import uuid
 import zipfile
 from collections import Counter
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -981,12 +981,11 @@ class CrmBulkOperationService:
             "PDF File", "PDF SHA-256",
         ])
         success = failed = 0
-        shared_letter_number = str(defaults["current_letter_number"]).strip()
-        shared_letter_date = date.fromisoformat(str(defaults["current_letter_date"]))
+        next_number = int(defaults["last_numeric_number"]) + 1
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for case, revision in rows:
                 number = case.complaint_number or str(case.id)
-                letter_number = shared_letter_number
+                letter_number = official.suggest_letter_number(start=next_number)
                 item = CrmBulkOperationItem(
                     batch_id=batch.id,
                     complaint_case_id=case.id,
@@ -1004,7 +1003,7 @@ class CrmBulkOperationService:
                     result = official.generate(
                         case.id,
                         letter_number=letter_number,
-                        letter_date=shared_letter_date,
+                        letter_date=now.date(),
                         recipient_name=defaults["default_recipient_name"],
                         recipient_location=defaults["default_recipient_location"],
                         subject_prefix=defaults["default_subject_prefix"],
@@ -1047,6 +1046,8 @@ class CrmBulkOperationService:
                         result["id"], result["letter_number"], result["letter_date"],
                         odt_relative, odt_record.sha256, pdf_relative, pdf_record.sha256,
                     ])
+                    leading = result["letter_number"].split("/", 1)[0].strip()
+                    next_number = int(leading) + 1 if leading.isdigit() else next_number + 1
                     success += 1
                 except (OfficialLetterError, KeyError, ValueError) as exc:
                     item.status = "failed"
@@ -1065,8 +1066,6 @@ class CrmBulkOperationService:
                     "generated": success,
                     "failed": failed,
                     "approved_revisions_only": True,
-                    "shared_letter_number": shared_letter_number,
-                    "shared_letter_date": shared_letter_date.isoformat(),
                     "created_at": now.isoformat(),
                 }, indent=2),
             )

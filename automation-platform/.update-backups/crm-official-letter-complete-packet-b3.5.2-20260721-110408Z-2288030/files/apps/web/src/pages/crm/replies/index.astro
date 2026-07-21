@@ -76,7 +76,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
             <h2>Pending complaint replies</h2>
             <p id="queue-count">Loading complaints…</p>
           </div>
-          <span class="reply-table-hint">Select a complaint number to preview the full complaint. Use <b>Open editor</b> to review its reply.</span>
+          <span class="reply-table-hint">Complaint text is kept to one line. Use <b>View</b> for the complete record.</span>
         </header>
         <DataTable
           id="reply-queue-table"
@@ -330,19 +330,32 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
 
     function complaintNumberCell(item: QueueItem): DocumentFragment {
       const fragment = document.createDocumentFragment();
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "table-inline-link complaint-number-link";
-      button.textContent = item.complaint_number || item.case_id;
-      button.title = "Preview complaint";
-      button.addEventListener("click", () => void openComplaintPreview(item));
-      fragment.append(button);
+      const link = document.createElement("a");
+      link.className = "table-link complaint-number-link";
+      link.href = editorUrl(item);
+      link.textContent = item.complaint_number || item.case_id;
+      fragment.append(link);
       if (item.archive_ready) {
         const small = document.createElement("small");
         small.textContent = "Approved revision archived";
         fragment.append(small);
       }
       return fragment;
+    }
+
+    function complaintTextCell(item: QueueItem): HTMLElement {
+      const container = document.createElement("div");
+      container.className = "complaint-snippet-cell";
+      const text = document.createElement("span");
+      text.textContent = item.complaint_preview || "No complaint text";
+      text.title = item.complaint_preview || "No complaint text";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "table-inline-link";
+      button.textContent = "View";
+      button.addEventListener("click", () => void openComplaintPreview(item));
+      container.append(text, button);
+      return container;
     }
 
     function classificationCell(item: QueueItem): DocumentFragment {
@@ -444,12 +457,13 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
         onRender: () => updateSelection(),
         columns: [
           { id: "select", header: selectionHeader, enableSorting: false, meta: { width: "48px", align: "center", className: "selection-cell", headerClassName: "selection-cell" }, cell: ({ row }: any) => selectionCell(row.original) },
-          { accessorKey: "complaint_number", header: "Complaint No.", enableSorting: false, meta: { width: "190px", minWidth: "180px" }, cell: ({ row }: any) => complaintNumberCell(row.original) },
-          { id: "classification", header: "Classification", enableSorting: false, meta: { width: "220px", minWidth: "200px" }, cell: ({ row }: any) => classificationCell(row.original) },
+          { accessorKey: "complaint_number", header: "Complaint No.", enableSorting: false, meta: { width: "150px", minWidth: "150px" }, cell: ({ row }: any) => complaintNumberCell(row.original) },
+          { accessorKey: "complaint_preview", header: "Complaint text", enableSorting: false, meta: { minWidth: "310px", maxWidth: "520px" }, cell: ({ row }: any) => complaintTextCell(row.original) },
+          { id: "classification", header: "Classification", enableSorting: false, meta: { width: "190px", minWidth: "180px" }, cell: ({ row }: any) => classificationCell(row.original) },
           { id: "workflow", header: "Reply status", enableSorting: false, meta: { width: "155px", minWidth: "145px" }, cell: ({ row }: any) => workflowCell(row.original) },
           { id: "source", header: "Source / updated", enableSorting: false, meta: { width: "165px", minWidth: "150px" }, cell: ({ row }: any) => stack(sourceLabel(row.original.source_system), formatDate(row.original.updated_at)) },
           { id: "connections", header: "Connections", enableSorting: false, meta: { width: "155px", minWidth: "145px" }, cell: ({ row }: any) => connectionsCell(row.original) },
-          { id: "actions", header: "Actions", enableSorting: false, meta: { width: "205px", minWidth: "190px", align: "right" }, cell: ({ row }: any) => actionsCell(row.original) },
+          { id: "actions", header: "", enableSorting: false, meta: { width: "145px", minWidth: "140px", align: "right" }, cell: ({ row }: any) => actionsCell(row.original) },
         ],
       });
     }

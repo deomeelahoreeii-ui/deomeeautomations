@@ -1,0 +1,76 @@
+{
+  "schema_version": 2,
+  "bundle_id": "crm-official-letter-shared-reference-b3.5.3",
+  "bundle_version": "B3.5.3",
+  "target_root": "/home/ahmad/code/deomeeautomations/automation-platform",
+  "created_at_utc": "2026-07-21T11:43:55.852014Z",
+  "status": "applied",
+  "database_revision_before": "f9e3a5c7d064",
+  "entries": [
+    {
+      "path": "packages/crm_domain/crm_domain/models.py",
+      "existed": true,
+      "sha256_before": "16396cdefc6b7f9fd6d91fb0ffbf7039af982acbf212055681ab20178c556db5",
+      "mode_before": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/official_letters.py",
+      "existed": true,
+      "sha256_before": "a7b3d5232720796f4d52061914f9f4b345e9c6dd689f10bbe785912adb0296c7",
+      "mode_before": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/official_letters_api.py",
+      "existed": true,
+      "sha256_before": "d1b571bf8af937c35f213c9440949fa1a0e2bebdce08f66d41baf31cf93be771",
+      "mode_before": "0644"
+    },
+    {
+      "path": "packages/crm_domain/crm_domain/bulk_operations.py",
+      "existed": true,
+      "sha256_before": "bef41b1f5ec721dfd9327f6a1847f018f4991b8fd0192f3b3b127c41d9363728",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/official-letters/settings/index.astro",
+      "existed": true,
+      "sha256_before": "bc39b822d08ea30290c675fd2440d89c86de5bcfc721698eb8eeef0d2685052a",
+      "mode_before": "0644"
+    },
+    {
+      "path": "apps/web/src/pages/crm/replies/[id]/official-letter.astro",
+      "existed": true,
+      "sha256_before": "5b0b9b4241819cacc1cf7e327324d99fa78a1ec486565b1b68875d0881177f29",
+      "mode_before": "0644"
+    },
+    {
+      "path": "alembic/versions/fbe5c7d9e286_crm_shared_official_letter_reference.py",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    },
+    {
+      "path": "tests/test_crm_official_letters_b35.py",
+      "existed": true,
+      "sha256_before": "d885e3f0f72f58b3bae8bdfa9eaca59ae58d99629981559b03f231ee5542dce2",
+      "mode_before": "0644"
+    },
+    {
+      "path": "tests/test_preview_partial_approval.py",
+      "existed": true,
+      "sha256_before": "2fa2d0cfeec6ac76c099a89b10fe6b937571d254db4f92d38ce98639d0e938b2",
+      "mode_before": "0644"
+    },
+    {
+      "path": "tests/test_crm_official_letter_shared_reference_b353.py",
+      "existed": false,
+      "sha256_before": null,
+      "mode_before": null
+    }
+  ],
+  "installed_at_utc": "2026-07-21T11:43:55.874182Z",
+  "database_revision_after": "fbe5c7d9e286",
+  "verified_at_utc": "2026-07-21T11:46:10.950983Z",
+  "test_mode": "complete",
+  "frontend_build_ran": true
+}

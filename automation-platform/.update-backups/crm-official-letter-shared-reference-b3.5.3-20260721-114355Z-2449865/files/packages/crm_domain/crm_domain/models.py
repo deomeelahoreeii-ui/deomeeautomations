@@ -679,13 +679,11 @@ class CrmOfficialLetterSettings(SQLModel, table=True):
     date_format: str = Field(default="DD/MM/YYYY", max_length=40)
     numbering_prefix: str = Field(default="PMDU/CRM", max_length=120)
     last_numeric_number: int = 1510
-    current_letter_number: str = Field(default="1511/PMDU/CRM", max_length=180)
-    current_letter_date: date = Field(default_factory=date.today, index=True)
     allow_manual_override: bool = Field(
         default=True, sa_column=Column(Boolean, nullable=False, default=True)
     )
     require_unique_number: bool = Field(
-        default=False, sa_column=Column(Boolean, nullable=False, default=False)
+        default=True, sa_column=Column(Boolean, nullable=False, default=True)
     )
     default_template_id: uuid.UUID | None = Field(default=None, index=True)
     default_signature_id: uuid.UUID | None = Field(default=None, index=True)
@@ -750,6 +748,7 @@ class CrmOfficialLetterSignatureProfile(SQLModel, table=True):
 class CrmOfficialLetter(SQLModel, table=True):
     __tablename__ = "crm_official_letters"
     __table_args__ = (
+        UniqueConstraint("letter_number", name="uq_crm_official_letters_number"),
         UniqueConstraint(
             "complaint_case_id", "revision", name="uq_crm_official_letters_case_revision"
         ),

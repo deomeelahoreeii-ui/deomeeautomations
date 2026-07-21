@@ -202,8 +202,8 @@ const returnTo = requestedReturn.startsWith("/crm/replies") ? requestedReturn : 
             <small id="last-pull">Last verified pull: —</small>
           </div>
           <div class="editor-actions">
-            <details id="editor-more-actions" class="crm-action-menu editor-more-actions">
-              <summary class="btn" aria-label="More reply actions" aria-expanded="false">More actions ▾</summary>
+            <details class="crm-action-menu editor-more-actions">
+              <summary class="btn" aria-label="More reply actions">More actions ▾</summary>
               <div class="crm-action-popover">
                 <button id="save-current" type="button">Save Selected Status</button>
                 <button id="create-revision" type="button">Create revised draft</button>
@@ -750,12 +750,6 @@ const returnTo = requestedReturn.startsWith("/crm/replies") ? requestedReturn : 
       }
     }
 
-    function closeMoreActions() {
-      const menu = $("editor-more-actions") as HTMLDetailsElement;
-      menu.open = false;
-      menu.querySelector("summary")?.setAttribute("aria-expanded", "false");
-    }
-
     function switchContext(name: string) {
       document.querySelectorAll<HTMLButtonElement>("[data-context-tab]").forEach((node) => {
         const active = node.dataset.contextTab === name;
@@ -787,14 +781,13 @@ const returnTo = requestedReturn.startsWith("/crm/replies") ? requestedReturn : 
     });
     $("editor-subcategory").addEventListener("change", () => { renderGuidance(); markDirty(); });
     $("save-classification").addEventListener("click", () => void saveClassification());
-    $("save-current").addEventListener("click", () => { closeMoreActions(); void saveReply(( $("reply-status") as HTMLSelectElement).value); });
+    $("save-current").addEventListener("click", () => void saveReply(($("reply-status") as HTMLSelectElement).value));
     $("save-draft").addEventListener("click", () => void saveReply("Draft"));
     $("submit-approval").addEventListener("click", () => void saveReply("Pending Approval"));
     $("reject-reply").addEventListener("click", () => void saveReply("Rejected"));
     $("approve-reply").addEventListener("click", () => void saveReply("Approved"));
     $("issue-reply").addEventListener("click", () => void saveReply("Issued"));
     $("create-revision").addEventListener("click", () => {
-      closeMoreActions();
       ($("reply-status") as HTMLSelectElement).value = "Draft";
       ($("ai-eligible") as HTMLInputElement).checked = false;
       enforceRules();
@@ -823,16 +816,6 @@ const returnTo = requestedReturn.startsWith("/crm/replies") ? requestedReturn : 
       toast("Helpdesk text loaded into the editor. Save to confirm this choice.");
     });
     $("read-full-complaint").addEventListener("click", () => openDialog("full-complaint-dialog"));
-    const moreActions = $("editor-more-actions") as HTMLDetailsElement;
-    moreActions.addEventListener("toggle", () => {
-      moreActions.querySelector("summary")?.setAttribute("aria-expanded", String(moreActions.open));
-    });
-    document.addEventListener("click", (event) => {
-      if (moreActions.open && !moreActions.contains(event.target as Node)) closeMoreActions();
-    });
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && moreActions.open) closeMoreActions();
-    });
     document.querySelectorAll<HTMLButtonElement>("[data-context-tab]").forEach((node) => node.addEventListener("click", () => switchContext(node.dataset.contextTab || "complaint")));
     window.addEventListener("beforeunload", (event) => {
       if (dirty && !saving) { event.preventDefault(); event.returnValue = ""; }

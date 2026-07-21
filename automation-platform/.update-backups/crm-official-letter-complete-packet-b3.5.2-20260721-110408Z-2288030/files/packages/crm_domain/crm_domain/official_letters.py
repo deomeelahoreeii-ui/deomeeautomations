@@ -19,21 +19,16 @@ from lxml import etree
 from PIL import Image as PillowImage
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
-from reportlab.lib.pagesizes import A4, legal, landscape
+from reportlab.lib.pagesizes import legal
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.lib.utils import ImageReader
-from reportlab.pdfgen import canvas
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlmodel import Session, func, select
 
 from automation_core.config import Settings
-from automation_core.object_storage import S3ObjectStorage
 from automation_core.time import utcnow
 from crm_domain.models import (
     ComplaintCase,
-    ComplaintDocument,
-    ComplaintDocumentCaseLink,
     ComplaintReplyRevision,
     CrmOfficialLetter,
     CrmOfficialLetterArtifact,
@@ -41,8 +36,6 @@ from crm_domain.models import (
     CrmOfficialLetterSignatureProfile,
     CrmOfficialLetterTemplate,
 )
-from whatsapp_gateway.inbound.processing_support import materialize_source
-from whatsapp_gateway.models import WhatsAppInboundProcessingItem
 
 ODT_MIME = "application/vnd.oasis.opendocument.text"
 REQUIRED_MARKERS = {
@@ -62,9 +55,6 @@ TEXT_NS = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
 DRAW_NS = "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
 XLINK_NS = "http://www.w3.org/1999/xlink"
 NS = {"text": TEXT_NS, "draw": DRAW_NS, "xlink": XLINK_NS}
-FO_NS = "urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
-STYLE_NS = "urn:oasis:names:tc:opendocument:xmlns:style:1.0"
-PDF_MIME = "application/pdf"
 
 
 class OfficialLetterError(RuntimeError):
@@ -141,48 +131,7 @@ def _set_paragraph_text(node: etree._Element, value: str) -> None:
         node.text = value
 
 
-def _logical_paragraphs(value: str) -> list[str]:
-    """Collapse wrapped text and repeated blank lines into real document paragraphs."""
-    normalized = value.replace("\r\n", "\n").replace("\r", "\n")
-    paragraphs: list[str] = []
-    current: list[str] = []
-    for raw in normalized.split("\n"):
-        line = " ".join(raw.split()).strip()
-        if line:
-            current.append(line)
-            continue
-        if current:
-            paragraphs.append(" ".join(current))
-            current = []
-    if current:
-        paragraphs.append(" ".join(current))
-    return paragraphs or [""]
-
-
-def _compact_paragraph_style(root: etree._Element, paragraph: etree._Element) -> None:
-    """Tighten the template paragraph style without changing its font or alignment."""
-    style_name = paragraph.get(f"{{{TEXT_NS}}}style-name")
-    if not style_name:
-        return
-    matches = root.xpath(
-        f"//style:style[@style:name='{style_name}']",
-        namespaces={**NS, "style": STYLE_NS},
-    )
-    if not matches:
-        return
-    style = matches[0]
-    properties = style.find(f"{{{STYLE_NS}}}paragraph-properties")
-    if properties is None:
-        properties = etree.SubElement(style, f"{{{STYLE_NS}}}paragraph-properties")
-    properties.set(f"{{{FO_NS}}}margin-top", "0in")
-    properties.set(f"{{{FO_NS}}}margin-bottom", "0.035in")
-    properties.set(f"{{{FO_NS}}}line-height", "110%")
-    properties.set(f"{{{STYLE_NS}}}contextual-spacing", "true")
-
-
-def _replace_block_marker(
-    root: etree._Element, marker: str, value: str, *, compact: bool = False
-) -> bool:
+def _replace_block_marker(root: etree._Element, marker: str, value: str) -> bool:
     for paragraph in root.xpath("//text:p", namespaces=NS):
         if _paragraph_text(paragraph) != marker:
             continue
@@ -190,33 +139,14 @@ def _replace_block_marker(
         if parent is None:
             return False
         index = parent.index(paragraph)
-        if compact:
-            _compact_paragraph_style(root, paragraph)
-        paragraphs = _logical_paragraphs(value)
+        lines = value.replace("\r\n", "\n").replace("\r", "\n").split("\n") or [""]
         parent.remove(paragraph)
-        for offset, text in enumerate(paragraphs):
+        for offset, line in enumerate(lines):
             clone = deepcopy(paragraph)
-            _set_paragraph_text(clone, text)
+            _set_paragraph_text(clone, line or " ")
             parent.insert(index + offset, clone)
         return True
     return False
-
-
-def _signature_with_safe_margin(content: bytes, *, fraction: float = 0.08) -> bytes:
-    """Add transparent breathing room so strokes touching an uploaded edge are not clipped."""
-    try:
-        with PillowImage.open(io.BytesIO(content)) as source:
-            source.load()
-            image = source.convert("RGBA")
-    except Exception as exc:
-        raise OfficialLetterValidationError("Signature image is unreadable") from exc
-    pad_x = max(8, int(round(image.width * fraction)))
-    pad_y = max(8, int(round(image.height * fraction)))
-    padded = PillowImage.new("RGBA", (image.width + (2 * pad_x), image.height + (2 * pad_y)), (255, 255, 255, 0))
-    padded.paste(image, (pad_x, pad_y), image)
-    output = io.BytesIO()
-    padded.save(output, format="PNG", optimize=True)
-    return output.getvalue()
 
 
 def _replace_inline_marker(root: etree._Element, marker: str, value: str) -> int:
@@ -279,12 +209,12 @@ def render_official_letter_odt(
         content = source_archive.read("content.xml")
         root = etree.fromstring(content)
         block_values = {
-            "{{complaint_details}}": (values["complaint_details"], True),
-            "{{approved_reply}}": (values["approved_reply"], True),
-            "{{cc_entries}}": (values["cc_entries"], False),
+            "{{complaint_details}}": values["complaint_details"],
+            "{{approved_reply}}": values["approved_reply"],
+            "{{cc_entries}}": values["cc_entries"],
         }
-        for marker, (value, compact) in block_values.items():
-            if not _replace_block_marker(root, marker, value, compact=compact):
+        for marker, value in block_values.items():
+            if not _replace_block_marker(root, marker, value):
                 raise OfficialLetterValidationError(f"Template marker {marker} is not a standalone paragraph")
         for key, value in values.items():
             marker = "{{" + key + "}}"
@@ -296,7 +226,6 @@ def render_official_letter_odt(
         if unresolved:
             raise OfficialLetterValidationError("Unresolved template placeholders: " + ", ".join(unresolved))
         rendered_xml = etree.tostring(root, xml_declaration=True, encoding="UTF-8")
-        safe_signature = _signature_with_safe_margin(signature_bytes)
         with ZipFile(output, "w") as target_archive:
             # The ODF specification requires mimetype to be the first, uncompressed entry.
             target_archive.writestr("mimetype", source_archive.read("mimetype"), compress_type=ZIP_STORED)
@@ -306,12 +235,12 @@ def render_official_letter_odt(
                 if item.filename == "content.xml":
                     payload = rendered_xml
                 elif item.filename == signature_target_path:
-                    payload = safe_signature
+                    payload = signature_bytes
                 else:
                     payload = source_archive.read(item.filename)
                 target_archive.writestr(item.filename, payload, compress_type=ZIP_DEFLATED)
             if signature_target_path not in source_archive.namelist():
-                target_archive.writestr(signature_target_path, safe_signature, compress_type=ZIP_DEFLATED)
+                target_archive.writestr(signature_target_path, signature_bytes, compress_type=ZIP_DEFLATED)
     return output.getvalue()
 
 
@@ -353,9 +282,9 @@ def _render_fallback_pdf(
         parent=styles["BodyText"],
         fontName="Times-Roman",
         fontSize=10.5,
-        leading=12.5,
+        leading=14,
         alignment=TA_JUSTIFY,
-        spaceAfter=2,
+        spaceAfter=5,
     )
     bold = ParagraphStyle("OfficialBold", parent=body, fontName="Times-Bold", alignment=TA_LEFT)
     center_bold = ParagraphStyle(
@@ -366,7 +295,7 @@ def _render_fallback_pdf(
     )
 
     def paras(text: str, style: ParagraphStyle = body) -> list[Paragraph]:
-        return [Paragraph(escape(paragraph), style) for paragraph in _logical_paragraphs(text)]
+        return [Paragraph(escape(line) if line else "&nbsp;", style) for line in text.splitlines()]
 
     logo_bytes = _extract_template_logo(template)
     logo = None
@@ -407,8 +336,7 @@ def _render_fallback_pdf(
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]))
     story.extend([content_table, Spacer(1, 0.16 * inch)])
-    safe_signature = _signature_with_safe_margin(signature_bytes)
-    signature = Image(io.BytesIO(safe_signature), width=1.55 * inch, height=0.9 * inch)
+    signature = Image(io.BytesIO(signature_bytes), width=1.55 * inch, height=0.9 * inch)
     sign_table = Table([["", signature], ["", Paragraph(f"<b>{escape(values['signatory_designation'])}</b><br/><b>{escape(values['signatory_location'])}</b>", small_center)]], colWidths=[4.35 * inch, 2.75 * inch])
     sign_table.setStyle(TableStyle([("ALIGN", (1, 0), (1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
     story.extend([sign_table, Spacer(1, 0.1 * inch), Paragraph("<b>CC.</b>", bold)])
@@ -456,117 +384,6 @@ def render_official_letter_pdf(
             except (OSError, subprocess.TimeoutExpired):
                 pass
     return _render_fallback_pdf(template=template, values=values, signature_bytes=signature_bytes), "reportlab-fallback"
-
-
-def _render_image_as_pdf(source: Path, destination: Path) -> Path:
-    try:
-        with PillowImage.open(source) as image:
-            image.load()
-            width, height = image.size
-            orientation = landscape(A4) if width > height else A4
-            page_width, page_height = orientation
-            margin = 0.45 * inch
-            available_width = page_width - (2 * margin)
-            available_height = page_height - (2 * margin)
-            scale = min(available_width / max(width, 1), available_height / max(height, 1))
-            render_width = width * scale
-            render_height = height * scale
-            x = (page_width - render_width) / 2
-            y = (page_height - render_height) / 2
-            pdf = canvas.Canvas(str(destination), pagesize=orientation)
-            pdf.drawImage(
-                ImageReader(image.convert("RGB")),
-                x, y, width=render_width, height=render_height, preserveAspectRatio=True,
-            )
-            pdf.showPage()
-            pdf.save()
-    except Exception as exc:
-        raise OfficialLetterError(f"Unable to convert image attachment {source.name} to PDF") from exc
-    return destination
-
-
-def _libreoffice_file_to_pdf(source: Path, destination: Path) -> Path:
-    executable = shutil.which("libreoffice") or shutil.which("soffice")
-    if not executable:
-        raise OfficialLetterError(
-            f"LibreOffice is required to convert attachment {source.name} to PDF"
-        )
-    output_dir = destination.parent
-    profile = output_dir / f"lo-profile-{uuid.uuid4().hex}"
-    command = [
-        executable,
-        f"-env:UserInstallation={profile.as_uri()}",
-        "--headless",
-        "--convert-to",
-        "pdf",
-        "--outdir",
-        str(output_dir),
-        str(source),
-    ]
-    try:
-        completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=90)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise OfficialLetterError(f"Unable to convert attachment {source.name} to PDF") from exc
-    converted = output_dir / f"{source.stem}.pdf"
-    if completed.returncode != 0 or not converted.exists() or not converted.stat().st_size:
-        detail = (completed.stderr or completed.stdout or "conversion failed").strip()
-        raise OfficialLetterError(f"Unable to convert attachment {source.name} to PDF: {detail[:500]}")
-    if converted != destination:
-        converted.replace(destination)
-    return destination
-
-
-def _convert_source_to_pdf(
-    source: Path, *, mime_type: str | None, destination: Path
-) -> Path:
-    mime = (mime_type or "").casefold()
-    suffix = source.suffix.casefold()
-    if mime == PDF_MIME or suffix == ".pdf":
-        shutil.copyfile(source, destination)
-        return destination
-    if mime.startswith("image/") or suffix in {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp"}:
-        return _render_image_as_pdf(source, destination)
-    if mime.startswith("text/") or suffix in {
-        ".odt", ".ott", ".doc", ".docx", ".rtf", ".txt",
-        ".xls", ".xlsx", ".ods", ".csv", ".ppt", ".pptx", ".odp",
-    }:
-        return _libreoffice_file_to_pdf(source, destination)
-    raise OfficialLetterValidationError(
-        f"Attachment {source.name} cannot be included because its file type is unsupported"
-    )
-
-
-def _merge_pdf_files(parts: list[Path], destination: Path) -> str:
-    if not parts:
-        raise OfficialLetterValidationError("There are no PDF files to combine")
-    if len(parts) == 1:
-        shutil.copyfile(parts[0], destination)
-        return "copy"
-    pdfunite = shutil.which("pdfunite")
-    if pdfunite:
-        completed = subprocess.run(
-            [pdfunite, *[str(item) for item in parts], str(destination)],
-            check=False, capture_output=True, text=True, timeout=120,
-        )
-        if completed.returncode == 0 and destination.exists() and destination.stat().st_size:
-            return "pdfunite"
-        destination.unlink(missing_ok=True)
-    ghostscript = shutil.which("gs")
-    if ghostscript:
-        completed = subprocess.run(
-            [
-                ghostscript, "-dBATCH", "-dNOPAUSE", "-q",
-                "-sDEVICE=pdfwrite", f"-sOutputFile={destination}",
-                *[str(item) for item in parts],
-            ],
-            check=False, capture_output=True, text=True, timeout=180,
-        )
-        if completed.returncode == 0 and destination.exists() and destination.stat().st_size:
-            return "ghostscript"
-        destination.unlink(missing_ok=True)
-    raise OfficialLetterError(
-        "Unable to combine the official letter and complaint documents. Install pdfunite or Ghostscript."
-    )
 
 
 class OfficialLetterService:
@@ -738,13 +555,9 @@ class OfficialLetterService:
             "date_format": record.date_format,
             "numbering_prefix": record.numbering_prefix,
             "last_numeric_number": record.last_numeric_number,
-            "current_letter_number": record.current_letter_number,
-            "current_letter_date": _iso(record.current_letter_date),
-            # Backward-compatible key used by the preparation page. It now means
-            # the shared reference, not an automatically incremented number.
-            "suggested_letter_number": record.current_letter_number,
+            "suggested_letter_number": f"{record.last_numeric_number + 1}/{record.numbering_prefix}" if record.numbering_prefix else str(record.last_numeric_number + 1),
             "allow_manual_override": record.allow_manual_override,
-            "require_unique_number": False,
+            "require_unique_number": record.require_unique_number,
             "default_template_id": str(record.default_template_id) if record.default_template_id else None,
             "default_signature_id": str(record.default_signature_id) if record.default_signature_id else None,
             "updated_by": record.updated_by,
@@ -802,31 +615,11 @@ class OfficialLetterService:
             raise OfficialLetterValidationError(
                 "Unsupported date format. Choose DD/MM/YYYY, DD-MM-YYYY or YYYY-MM-DD"
             )
-        if "current_letter_number" in payload:
-            number = str(payload["current_letter_number"]).strip()
-            if not number:
-                raise OfficialLetterValidationError("Current letter number is required")
-            record.current_letter_number = number
-            leading, separator, suffix = number.partition("/")
-            if leading.strip().isdigit():
-                record.last_numeric_number = int(leading.strip())
-            if separator and suffix.strip():
-                record.numbering_prefix = suffix.strip()
-        elif "last_numeric_number" in payload or "numbering_prefix" in payload:
-            prefix = record.numbering_prefix.strip()
-            record.current_letter_number = (
-                f"{record.last_numeric_number}/{prefix}" if prefix else str(record.last_numeric_number)
+        if "require_unique_number" in payload and not bool(payload["require_unique_number"]):
+            raise OfficialLetterValidationError(
+                "Official letter numbers must remain unique for audit and diary integrity"
             )
-        if "current_letter_date" in payload:
-            value = payload["current_letter_date"]
-            try:
-                record.current_letter_date = value if isinstance(value, date) else date.fromisoformat(str(value))
-            except ValueError as exc:
-                raise OfficialLetterValidationError("Current letter date must be a valid date") from exc
-        # Reference numbers may intentionally be shared by multiple complaint
-        # letters issued under the same office diary entry. Record identity is
-        # protected by the letter UUID and complaint/revision constraints.
-        record.require_unique_number = False
+        record.require_unique_number = True
         if payload.get("default_template_id"):
             template = self.session.get(CrmOfficialLetterTemplate, uuid.UUID(str(payload["default_template_id"])))
             if not template or not template.active:
@@ -949,28 +742,18 @@ class OfficialLetterService:
         return record
 
     def suggest_letter_number(self, *, start: int | None = None) -> str:
-        # ``start`` is retained for API compatibility with older bulk callers.
-        # The office uses one shared diary/reference number until an operator
-        # changes it, so no automatic increment or uniqueness scan is performed.
-        del start
-        return self.ensure_defaults().current_letter_number.strip()
-
-    def _remember_shared_reference(
-        self, *, letter_number: str, letter_date: date, actor: str, changed_at: datetime
-    ) -> None:
         settings = self.ensure_defaults()
-        number = letter_number.strip()
-        settings.current_letter_number = number
-        settings.current_letter_date = letter_date
-        settings.require_unique_number = False
-        leading, separator, suffix = number.partition("/")
-        if leading.strip().isdigit():
-            settings.last_numeric_number = int(leading.strip())
-        if separator and suffix.strip():
-            settings.numbering_prefix = suffix.strip()
-        settings.updated_by = actor
-        settings.updated_at = changed_at
-        self.session.add(settings)
+        candidate = max(settings.last_numeric_number + 1, start or 0)
+        prefix = settings.numbering_prefix.strip()
+        for _ in range(100_000):
+            number = f"{candidate}/{prefix}" if prefix else str(candidate)
+            exists = self.session.exec(
+                select(CrmOfficialLetter.id).where(CrmOfficialLetter.letter_number == number)
+            ).first()
+            if exists is None:
+                return number
+            candidate += 1
+        raise OfficialLetterError("Unable to find an available official letter number")
 
     def statistics(self) -> dict[str, int]:
         approved_case_ids = set(
@@ -1002,54 +785,6 @@ class OfficialLetterService:
             "failures": counts["failed"],
         }
 
-    def _source_documents(
-        self, case_id: uuid.UUID
-    ) -> list[tuple[ComplaintDocument, ComplaintDocumentCaseLink]]:
-        rows = list(
-            self.session.exec(
-                select(ComplaintDocument, ComplaintDocumentCaseLink)
-                .join(
-                    ComplaintDocumentCaseLink,
-                    ComplaintDocumentCaseLink.complaint_document_id == ComplaintDocument.id,
-                )
-                .where(
-                    ComplaintDocumentCaseLink.complaint_case_id == case_id,
-                    ComplaintDocumentCaseLink.review_state == "accepted",
-                    ComplaintDocumentCaseLink.role.in_(
-                        ("main_complaint", "complaint_details", "attachment", "report")
-                    ),
-                )
-                .order_by(
-                    (ComplaintDocumentCaseLink.role == "main_complaint").desc(),
-                    (ComplaintDocumentCaseLink.role == "complaint_details").desc(),
-                    ComplaintDocument.created_at,
-                )
-            ).all()
-        )
-        unique: list[tuple[ComplaintDocument, ComplaintDocumentCaseLink]] = []
-        seen: set[str] = set()
-        for document, link in rows:
-            key = document.source_sha256 or str(document.id)
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append((document, link))
-        return unique
-
-    @staticmethod
-    def _source_document_payload(
-        document: ComplaintDocument, link: ComplaintDocumentCaseLink
-    ) -> dict[str, Any]:
-        return {
-            "id": str(document.id),
-            "processing_item_id": str(document.source_processing_item_id),
-            "filename": document.original_filename or f"document-{document.id}",
-            "mime_type": document.mime_type,
-            "role": link.role,
-            "sha256": document.source_sha256,
-            "created_at": _iso(document.created_at),
-        }
-
     def prepare_case(self, case_id: uuid.UUID) -> dict[str, Any]:
         settings = self.ensure_defaults()
         case = self.session.get(ComplaintCase, case_id)
@@ -1075,31 +810,27 @@ class OfficialLetterService:
             },
             "defaults": {
                 **config["settings"],
-                "letter_date": _iso(settings.current_letter_date),
+                "letter_date": date.today().isoformat(),
             },
             "templates": [item for item in config["templates"] if item["active"]],
             "signatures": [item for item in config["signatures"] if item["active"]],
-            "source_documents": [
-                self._source_document_payload(document, link)
-                for document, link in self._source_documents(case_id)
-            ],
             "letters": [self._letter_payload(item, include_artifacts=True) for item in existing],
         }
 
-    def _assert_letter_reference(
-        self, number: str, letter_date: date, *, exclude_id: uuid.UUID | None = None
-    ) -> None:
-        del exclude_id
+    def _assert_letter_number(self, number: str, *, exclude_id: uuid.UUID | None = None) -> None:
         settings = self.ensure_defaults()
         if not number.strip():
             raise OfficialLetterValidationError("Letter number is required")
         if not settings.allow_manual_override:
-            expected_number = settings.current_letter_number.strip()
-            expected_date = settings.current_letter_date
-            if number.strip() != expected_number or letter_date != expected_date:
-                raise OfficialLetterValidationError(
-                    f"Letter reference must remain {expected_number} dated {expected_date.isoformat()}"
-                )
+            expected = self._settings_payload(settings)["suggested_letter_number"]
+            if number.strip() != expected:
+                raise OfficialLetterValidationError(f"Letter number must be {expected}")
+        if settings.require_unique_number:
+            statement = select(CrmOfficialLetter).where(CrmOfficialLetter.letter_number == number.strip())
+            if exclude_id:
+                statement = statement.where(CrmOfficialLetter.id != exclude_id)
+            if self.session.exec(statement).first():
+                raise OfficialLetterValidationError("This official letter number is already in use")
 
     def _write_letter_artifact(self, letter: CrmOfficialLetter, *, kind: str, name: str, content_type: str, content: bytes) -> CrmOfficialLetterArtifact:
         directory = self.letters_root / str(letter.id)
@@ -1124,18 +855,6 @@ class OfficialLetterService:
         record.created_at = utcnow()
         self.session.add(record)
         return record
-
-    def _delete_letter_artifact(self, letter_id: uuid.UUID, kind: str) -> None:
-        record = self.session.exec(
-            select(CrmOfficialLetterArtifact).where(
-                CrmOfficialLetterArtifact.official_letter_id == letter_id,
-                CrmOfficialLetterArtifact.kind == kind,
-            )
-        ).first()
-        if record is None:
-            return
-        Path(record.path).unlink(missing_ok=True)
-        self.session.delete(record)
 
     def generate(
         self,
@@ -1173,7 +892,7 @@ class OfficialLetterService:
             ).first()
             if failed_retry is not None:
                 letter_id = failed_retry.id
-        self._assert_letter_reference(letter_number, letter_date, exclude_id=letter_id)
+        self._assert_letter_number(letter_number, exclude_id=letter_id)
         if supersedes_letter_id:
             previous = self.session.get(CrmOfficialLetter, supersedes_letter_id)
             if previous is None or previous.complaint_case_id != case_id or previous.status != "finalized":
@@ -1268,17 +987,17 @@ class OfficialLetterService:
         }
         self.session.add(letter)
         self.session.flush()
-        self._delete_letter_artifact(letter.id, "complete_pdf")
         base = _safe_filename(f"{letter.complaint_number_snapshot} - DEO Official Letter")
         self._write_letter_artifact(letter, kind="odt", name=f"{base}.odt", content_type=ODT_MIME, content=odt)
         self._write_letter_artifact(letter, kind="pdf", name=f"{base}.pdf", content_type="application/pdf", content=pdf)
         if finalize:
-            self._remember_shared_reference(
-                letter_number=letter.letter_number,
-                letter_date=letter.letter_date,
-                actor=actor,
-                changed_at=now,
-            )
+            settings = self.ensure_defaults()
+            leading = letter.letter_number.split("/", 1)[0].strip()
+            if leading.isdigit() and int(leading) > settings.last_numeric_number:
+                settings.last_numeric_number = int(leading)
+                settings.updated_by = actor
+                settings.updated_at = now
+                self.session.add(settings)
             if supersedes_letter_id:
                 previous = self.session.get(CrmOfficialLetter, supersedes_letter_id)
                 if previous and previous.complaint_case_id == case_id and previous.status == "finalized":
@@ -1289,97 +1008,6 @@ class OfficialLetterService:
             self.session.refresh(letter)
         return self._letter_payload(letter, include_artifacts=True)
 
-    def compose_complete_pdf(
-        self, letter_id: uuid.UUID, *, actor: str, commit: bool = True
-    ) -> dict[str, Any]:
-        letter = self.session.get(CrmOfficialLetter, letter_id)
-        if letter is None:
-            raise OfficialLetterNotFound("Official letter was not found")
-        if letter.status not in {"finalized", "superseded"}:
-            raise OfficialLetterValidationError(
-                "Finalize the official letter before creating the complete PDF"
-            )
-        official_artifact = self.session.exec(
-            select(CrmOfficialLetterArtifact).where(
-                CrmOfficialLetterArtifact.official_letter_id == letter.id,
-                CrmOfficialLetterArtifact.kind == "pdf",
-            )
-        ).first()
-        if official_artifact is None:
-            raise OfficialLetterValidationError("The finalized official-letter PDF is unavailable")
-        _record, official_path = self.artifact_path(official_artifact.id)
-        documents = self._source_documents(letter.complaint_case_id)
-        included: list[dict[str, Any]] = []
-        skipped: list[dict[str, Any]] = []
-        with tempfile.TemporaryDirectory(prefix="crm-complete-letter-") as temp:
-            root = Path(temp)
-            parts: list[Path] = [official_path]
-            storage = S3ObjectStorage(self.settings)
-            for position, (document, link) in enumerate(documents, start=1):
-                payload = self._source_document_payload(document, link)
-                try:
-                    item = self.session.get(
-                        WhatsAppInboundProcessingItem, document.source_processing_item_id
-                    )
-                    if item is None:
-                        raise OfficialLetterError("The source processing record is unavailable")
-                    suffix = Path(document.original_filename or "").suffix
-                    if not suffix:
-                        mime_suffixes = {
-                            "application/pdf": ".pdf", "image/png": ".png",
-                            "image/jpeg": ".jpg", "image/webp": ".webp",
-                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-                            "application/vnd.oasis.opendocument.text": ".odt",
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
-                            "text/csv": ".csv", "text/plain": ".txt",
-                        }
-                        suffix = mime_suffixes.get((document.mime_type or "").casefold(), ".bin")
-                    materialized = root / f"source-{position:03d}{suffix}"
-                    materialize_source(
-                        session=self.session, item=item, destination=materialized,
-                        settings=self.settings, storage=storage,
-                    )
-                    converted = root / f"part-{position:03d}.pdf"
-                    _convert_source_to_pdf(
-                        materialized, mime_type=document.mime_type, destination=converted
-                    )
-                    parts.append(converted)
-                    included.append({**payload, "pages": _pdf_page_count(converted.read_bytes())})
-                except Exception as exc:
-                    skipped.append({**payload, "error": str(exc)[:1000]})
-            merged = root / "complete.pdf"
-            merger = _merge_pdf_files(parts, merged)
-            content = merged.read_bytes()
-        base = _safe_filename(
-            f"{letter.complaint_number_snapshot} - Complete Official Letter Record"
-        )
-        artifact = self._write_letter_artifact(
-            letter, kind="complete_pdf", name=f"{base}.pdf",
-            content_type=PDF_MIME, content=content,
-        )
-        snapshot = dict(letter.configuration_snapshot_json or {})
-        warnings = list(snapshot.get("warnings") or [])
-        if skipped:
-            warning = f"{len(skipped)} source document(s) could not be included in the complete PDF."
-            if warning not in warnings:
-                warnings.append(warning)
-        snapshot["warnings"] = warnings
-        snapshot["complete_pdf"] = {
-            "generated_at": _iso(utcnow()),
-            "generated_by": actor,
-            "merger": merger,
-            "page_count": _pdf_page_count(content),
-            "included_documents": included,
-            "skipped_documents": skipped,
-            "order": ["official_letter", *[item["role"] for item in included]],
-        }
-        letter.configuration_snapshot_json = snapshot
-        self.session.add(letter)
-        if commit:
-            self.session.commit()
-            self.session.refresh(artifact)
-        return self._letter_payload(letter, include_artifacts=True)
-
     def finalize(self, letter_id: uuid.UUID, *, actor: str) -> dict[str, Any]:
         letter = self.session.get(CrmOfficialLetter, letter_id)
         if letter is None:
@@ -1388,16 +1016,17 @@ class OfficialLetterService:
             return self._letter_payload(letter, include_artifacts=True)
         if letter.status != "preview":
             raise OfficialLetterValidationError("Only a preview letter can be finalized")
-        self._assert_letter_reference(letter.letter_number, letter.letter_date, exclude_id=letter.id)
+        self._assert_letter_number(letter.letter_number, exclude_id=letter.id)
         letter.status = "finalized"
         letter.finalized_at = utcnow()
         letter.generated_by = actor
-        self._remember_shared_reference(
-            letter_number=letter.letter_number,
-            letter_date=letter.letter_date,
-            actor=actor,
-            changed_at=letter.finalized_at,
-        )
+        settings = self.ensure_defaults()
+        leading = letter.letter_number.split("/", 1)[0].strip()
+        if leading.isdigit() and int(leading) > settings.last_numeric_number:
+            settings.last_numeric_number = int(leading)
+            settings.updated_by = actor
+            settings.updated_at = utcnow()
+            self.session.add(settings)
         if letter.supersedes_letter_id:
             previous = self.session.get(CrmOfficialLetter, letter.supersedes_letter_id)
             if previous and previous.complaint_case_id == letter.complaint_case_id and previous.status == "finalized":
@@ -1413,10 +1042,7 @@ class OfficialLetterService:
             "content_type": artifact.content_type, "size_bytes": artifact.size_bytes,
             "sha256": artifact.sha256, "created_at": _iso(artifact.created_at),
             "download_url": f"/api/v1/crm/official-letters/artifacts/{artifact.id}/download",
-            "preview_url": (
-                f"/api/v1/crm/official-letters/artifacts/{artifact.id}/preview"
-                if artifact.kind in {"pdf", "complete_pdf"} else None
-            ),
+            "preview_url": f"/api/v1/crm/official-letters/artifacts/{artifact.id}/preview" if artifact.kind == "pdf" else None,
         }
 
     def _letter_payload(self, record: CrmOfficialLetter, *, include_artifacts: bool = False) -> dict[str, Any]:
@@ -1435,7 +1061,6 @@ class OfficialLetterService:
             "letter_url": f"/crm/replies/{record.complaint_case_id}/official-letter/?letter={record.id}",
             "warnings": list((record.configuration_snapshot_json or {}).get("warnings") or []),
             "pdf_page_count": (record.configuration_snapshot_json or {}).get("pdf_page_count"),
-            "complete_pdf": (record.configuration_snapshot_json or {}).get("complete_pdf"),
         }
         if include_artifacts:
             artifacts = self.session.exec(

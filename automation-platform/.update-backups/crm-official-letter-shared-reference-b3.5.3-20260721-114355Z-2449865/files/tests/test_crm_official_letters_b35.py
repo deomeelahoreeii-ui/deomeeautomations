@@ -27,7 +27,6 @@ from crm_domain.official_letters import (
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "alembic/versions/f9e3a5c7d064_crm_official_letter_management.py"
-SHARED_REFERENCE_MIGRATION = ROOT / "alembic/versions/fbe5c7d9e286_crm_shared_official_letter_reference.py"
 EDITOR = ROOT / "apps/web/src/pages/crm/replies/[id].astro"
 PREPARE = ROOT / "apps/web/src/pages/crm/replies/[id]/official-letter.astro"
 REGISTER = ROOT / "apps/web/src/pages/crm/replies/official-letters/index.astro"
@@ -148,57 +147,23 @@ def test_unapproved_reply_cannot_create_official_letter(tmp_path: Path) -> None:
             OfficialLetterService(session, settings(tmp_path)).prepare_case(case.id)
 
 
-def test_shared_number_and_date_are_allowed_across_complaint_letters(tmp_path: Path) -> None:
+def test_duplicate_number_and_finalized_overwrite_are_blocked(tmp_path: Path) -> None:
     db = engine()
     with Session(db) as session:
-        first_case, first_revision = seed(session)
-        assert first_revision
-        second_case = ComplaintCase(
-            complaint_number="104-6131660",
-            state="published",
-            remarks="A second complaint under the same office diary reference.",
-            category="Administrative",
-            sub_category="Others",
-        )
-        session.add(second_case)
-        session.flush()
-        second_revision = ComplaintReplyRevision(
-            complaint_case_id=second_case.id,
-            reply_text="Respected Worthy Chief Executive Officer (DEA),\n\nSecond approved reply.",
-            content_hash="b" * 64,
-            approval_status="Approved",
-            source_reference="HD-0002",
-        )
-        session.add(second_revision)
-        session.commit()
+        case, revision = seed(session)
+        assert revision
         service = OfficialLetterService(session, settings(tmp_path))
-        common = dict(
-            letter_number="1595/PMDU/CRM",
-            letter_date=date(2026, 7, 21),
-            recipient_name="The Chief Executive Officer (DEA),",
-            recipient_location="Lahore",
-            subject_prefix="COMPLAINT NO.",
-            cc_entries="Office Record.",
-            template_id=None,
-            signature_profile_id=None,
-            actor="test",
-            finalize=True,
+        kwargs = dict(
+            letter_number="1511/PMDU/CRM", letter_date=date.today(),
+            recipient_name="The Chief Executive Officer (DEA),", recipient_location="Lahore",
+            subject_prefix="COMPLAINT NO.", cc_entries="Office Record.", template_id=None,
+            signature_profile_id=None, reply_revision_id=revision.id, actor="test", finalize=True,
         )
-        first = service.generate(first_case.id, reply_revision_id=first_revision.id, **common)
-        second = service.generate(second_case.id, reply_revision_id=second_revision.id, **common)
-        assert first["letter_number"] == second["letter_number"] == "1595/PMDU/CRM"
-        assert first["letter_date"] == second["letter_date"] == "2026-07-21"
-        assert len(session.exec(select(CrmOfficialLetter)).all()) == 2
-        prepared = service.prepare_case(second_case.id)
-        assert prepared["defaults"]["suggested_letter_number"] == "1595/PMDU/CRM"
-        assert prepared["defaults"]["letter_date"] == "2026-07-21"
+        first = service.generate(case.id, **kwargs)
+        with pytest.raises(OfficialLetterValidationError, match="already in use"):
+            service.generate(case.id, **kwargs)
         with pytest.raises(OfficialLetterValidationError, match="cannot be overwritten"):
-            service.generate(
-                first_case.id,
-                letter_id=uuid.UUID(first["id"]),
-                reply_revision_id=first_revision.id,
-                **{**common, "letter_number": "1596/PMDU/CRM"},
-            )
+            service.generate(case.id, letter_id=uuid.UUID(first["id"]), **{**kwargs, "letter_number": "1512/PMDU/CRM"})
 
 
 
@@ -227,8 +192,7 @@ def test_revised_letter_supersedes_finalized_record_and_statistics_are_exact(tmp
         assert previous and previous.status == "superseded"
         stats = service.statistics()
         assert stats == {"awaiting_letter": 0, "previews": 0, "finalized": 1, "superseded": 1, "failures": 0}
-        assert service.suggest_letter_number() == "1512/PMDU/CRM"
-        assert service.configuration()["settings"]["current_letter_date"] == "2026-07-22"
+        assert service.suggest_letter_number() == "1513/PMDU/CRM"
 
 
 def test_configured_date_format_signature_effectivity_and_split_markers(tmp_path: Path) -> None:
@@ -241,9 +205,7 @@ def test_configured_date_format_signature_effectivity_and_split_markers(tmp_path
         config = service.update_configuration({
             **config["settings"],
             "date_format": "YYYY-MM-DD",
-            "current_letter_number": "1595/PMDU/CRM",
-            "current_letter_date": "2026-07-21",
-            "require_unique_number": False,
+            "require_unique_number": True,
         }, actor="test")
         result = service.generate(
             case.id, letter_number="1511/PMDU/CRM", letter_date=date(2026, 7, 21),
@@ -256,13 +218,8 @@ def test_configured_date_format_signature_effectivity_and_split_markers(tmp_path
             content = archive.read("content.xml").decode("utf-8")
         assert "2026-07-21" in content
         assert result["pdf_page_count"] >= 1
-        updated = service.update_configuration(
-            {"current_letter_number": "1596/PMDU/CRM", "current_letter_date": "2026-07-22"},
-            actor="test",
-        )
-        assert updated["settings"]["current_letter_number"] == "1596/PMDU/CRM"
-        assert updated["settings"]["current_letter_date"] == "2026-07-22"
-        assert updated["settings"]["require_unique_number"] is False
+        with pytest.raises(OfficialLetterValidationError, match="must remain unique"):
+            service.update_configuration({"require_unique_number": False}, actor="test")
 
 
 def test_uploaded_jpeg_signature_is_normalized_to_png(tmp_path: Path) -> None:
@@ -295,7 +252,6 @@ def test_ui_api_migration_and_bulk_contracts() -> None:
     queue = QUEUE.read_text()
     archive = ARCHIVE.read_text()
     migration = MIGRATION.read_text()
-    shared_migration = SHARED_REFERENCE_MIGRATION.read_text()
     bulk = (ROOT / "packages/crm_domain/crm_domain/bulk_operations.py").read_text()
     main = (ROOT / "apps/api/automation_api/main.py").read_text()
     assert "Create Official Letter" in editor
@@ -303,20 +259,14 @@ def test_ui_api_migration_and_bulk_contracts() -> None:
         assert token in prepare
     for token in ("Official register", "Letter Configuration", "official-letter-table"):
         assert token in register
-    for token in ("Template versions", "Signature profiles", "Current letter number", "Current letter date", "Effective from"):
+    for token in ("Template versions", "Signature profiles", "Unique letter number required", "Effective from"):
         assert token in settings_page
-    assert "Unique letter number required" not in settings_page
     assert "Official letter" in queue
     assert "Official letter" in archive
     assert 'revision: str = "f9e3a5c7d064"' in migration
     assert 'down_revision: Union[str, None] = "f7d1e3a5c842"' in migration
     assert "crm_official_letters" in migration
     assert "crm_official_letter_artifacts" in migration
-    assert 'revision: str = "fbe5c7d9e286"' in shared_migration
-    assert 'down_revision: Union[str, None] = "f9e3a5c7d064"' in shared_migration
-    assert "current_letter_number" in shared_migration
-    assert "current_letter_date" in shared_migration
-    assert "drop_constraint" in shared_migration
     assert "crm_official_letters_router" in main
     assert '/statistics' in (ROOT / "packages/crm_domain/crm_domain/official_letters_api.py").read_text()
     assert "OfficialLetterService" in bulk
