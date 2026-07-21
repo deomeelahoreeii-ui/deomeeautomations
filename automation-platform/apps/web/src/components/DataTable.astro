@@ -78,9 +78,11 @@ const {
     loadPage?: (pageIndex: number, pageSize: number, sorting: SortingState) => Promise<PageResult>;
     initialPageIndex?: number;
     initialPageSize?: number;
+    initialSorting?: SortingState;
     getRowId?: (row: any, index: number, parent?: any) => string;
     rowClassName?: (row: any, index: number) => string;
     onPageChange?: (pagination: PaginationState) => void;
+    onSortingChange?: (sorting: SortingState) => void;
     onRender?: (rows: unknown[], pagination: PaginationState, total: number) => void;
   };
 
@@ -145,6 +147,7 @@ const {
         pageIndex: Math.max(0, Number(config.initialPageIndex ?? this.pagination.pageIndex)),
         pageSize: Math.max(1, Number(config.initialPageSize ?? this.pagination.pageSize)),
       };
+      this.sorting = [...(config.initialSorting || [])];
       const pageSizeSelect = this.querySelector<HTMLSelectElement>("[data-page-size-select]");
       if (pageSizeSelect) pageSizeSelect.value = String(this.pagination.pageSize);
       this.rows = config.data || [];
@@ -163,6 +166,7 @@ const {
         onSortingChange: (updater) => {
           this.sorting = resolveUpdater(updater, this.sorting);
           this.pagination = { ...this.pagination, pageIndex: 0 };
+          this.config?.onSortingChange?.([...this.sorting]);
           this.config?.onPageChange?.({ ...this.pagination });
           if (this.config?.manualPagination) void this.refresh(false);
           else {
@@ -174,6 +178,7 @@ const {
         getPaginationRowModel: config.manualPagination ? undefined : getPaginationRowModel(),
         getSortedRowModel: getSortedRowModel(),
         manualPagination: Boolean(config.manualPagination),
+        manualSorting: Boolean(config.manualPagination),
         rowCount: this.total,
         getRowId: config.getRowId,
       });

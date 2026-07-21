@@ -48,12 +48,16 @@ from whatsapp_gateway.inbound.media_upload import upload_attachment_content
 from whatsapp_gateway.inbound.processing_api import (
     batch_approve_inbound_complaint_groups,
     create_inbound_processing_run,
-    list_inbound_processing_events,
-    list_inbound_processing_runs,
     preview_inbound_processing_item,
-    read_inbound_processing_run,
     review_inbound_complaint_group,
     review_inbound_processing_item,
+)
+from whatsapp_gateway.inbound.processing_query_api import (
+    list_inbound_complaint_groups,
+    list_inbound_processing_events,
+    list_inbound_processing_runs,
+    read_inbound_processing_item,
+    read_inbound_processing_run,
 )
 from whatsapp_gateway.inbound.schemas import (
     AttachmentEvent,
@@ -95,6 +99,7 @@ router.post("/processing-runs", status_code=status.HTTP_202_ACCEPTED)(create_inb
 router.get("/processing-runs")(list_inbound_processing_runs)
 router.get("/processing-runs/{run_id}")(read_inbound_processing_run)
 router.get("/processing-runs/{run_id}/events")(list_inbound_processing_events)
+router.get("/processing-runs/{run_id}/complaint-groups")(list_inbound_complaint_groups)
 router.post("/processing-runs/{run_id}/complaint-group-approvals")(
     batch_approve_inbound_complaint_groups
 )
@@ -102,19 +107,6 @@ router.post("/processing-runs/{run_id}/complaint-groups/{complaint_number}/revie
     review_inbound_complaint_group
 )
 router.post("/processing-items/{item_id}/review")(review_inbound_processing_item)
+router.get("/processing-items/{item_id}")(read_inbound_processing_item)
 router.get("/processing-items/{item_id}/content")(preview_inbound_processing_item)
 router.get("/status")(inbound_status)
-
-__all__ = [
-    "AttachmentEvent", "CreateInboundExportRequest", "HISTORY_ACTIVE_STATUSES",
-    "HISTORY_HARD_TIMEOUT_SECONDS", "HISTORY_NO_RESULT_SECONDS", "HISTORY_QUIET_SECONDS",
-    "InboundFileFilter", "InboundMessageEvent", "RequestInboundHistory",
-    "_history_contact_counts", "_insert_idempotently", "_reconcile_history_requests",
-    "_record_history_progress", "_resolve_account", "_resolve_contact_id",
-    "_serialize_history_request", "_upsert_inbound_attachment", "_upsert_inbound_message",
-    "_utc_naive", "_verify_worker_token", "create_inbound_export",
-    "get_inbound_history_request", "history_bridge_status", "inbound_status", "ingest_event",
-    "list_inbound_batches", "list_inbound_exports", "list_inbound_history_requests", "nats",
-    "preview_inbound_export", "read_inbound_export", "request_inbound_history",
-    "object_storage_status", "read_inbound_batch", "router", "upload_attachment_content",
-]

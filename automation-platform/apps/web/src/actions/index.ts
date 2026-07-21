@@ -195,9 +195,41 @@ export const server = {
       handler: () => api("/api/v1/crm/cases/statistics"),
     }),
     cases: defineAction({
-      input: z.object({ search: z.string().default(""), state: z.string().default(""), limit: z.number().int().min(1).max(200).default(100) }),
+      input: z.object({
+        search: z.string().default(""),
+        state: z.string().default(""),
+        publication: z.string().default(""),
+        paperless: z.string().default(""),
+        helpdeskStatus: z.string().default(""),
+        category: z.string().default(""),
+        district: z.string().default(""),
+        tehsil: z.string().default(""),
+        blocker: z.string().default(""),
+        updatedFrom: z.string().datetime().optional(),
+        updatedTo: z.string().datetime().optional(),
+        limit: z.number().int().min(1).max(200).default(50),
+        offset: z.number().int().min(0).default(0),
+        sort: z.string().default("updated_at"),
+        order: z.enum(["asc", "desc"]).default("desc"),
+      }),
       handler: (input) => {
-        const params = new URLSearchParams({ search: input.search, state: input.state, limit: String(input.limit) });
+        const params = new URLSearchParams({
+          search: input.search,
+          state: input.state,
+          publication: input.publication,
+          paperless: input.paperless,
+          helpdesk_status: input.helpdeskStatus,
+          category: input.category,
+          district: input.district,
+          tehsil: input.tehsil,
+          blocker: input.blocker,
+          limit: String(input.limit),
+          offset: String(input.offset),
+          sort: input.sort,
+          order: input.order,
+        });
+        if (input.updatedFrom) params.set("updated_from", input.updatedFrom);
+        if (input.updatedTo) params.set("updated_to", input.updatedTo);
         return api(`/api/v1/crm/cases?${params}`);
       },
     }),
@@ -606,6 +638,8 @@ export const server = {
         contact_id: z.string().uuid(),
         count: z.number().int().min(1).max(5000).default(50),
         all_history: z.boolean().default(false),
+        date_from: z.string().datetime({ offset: true }).nullable().optional(),
+        date_to: z.string().datetime({ offset: true }).nullable().optional(),
       }),
       handler: (input) => api("/api/v1/whatsapp/inbound/history/request", {
         method: "POST",
@@ -633,9 +667,12 @@ export const server = {
         status: z.string().optional(),
         search: z.string().optional(),
         limit: z.number().int().min(1).max(200).default(50),
+        offset: z.number().int().min(0).default(0),
+        sort: z.string().default("created_at"),
+        order: z.enum(["asc", "desc"]).default("desc"),
       }),
       handler: (input) => {
-        const params = new URLSearchParams({ limit: String(input.limit) });
+        const params = new URLSearchParams({ limit: String(input.limit), offset: String(input.offset), sort: input.sort, order: input.order });
         if (input.contactId) params.set("contact_id", input.contactId);
         if (input.status) params.set("status", input.status);
         if (input.search) params.set("search", input.search);
@@ -690,13 +727,44 @@ export const server = {
         category: z.string().optional(),
         search: z.string().optional(),
         limit: z.number().int().min(1).max(200).default(50),
+        offset: z.number().int().min(0).default(0),
+        sort: z.string().default("created_at"),
+        order: z.enum(["asc", "desc"]).default("desc"),
       }),
       handler: (input) => {
-        const params = new URLSearchParams({ limit: String(input.limit) });
+        const params = new URLSearchParams({
+          limit: String(input.limit),
+          offset: String(input.offset),
+          sort: input.sort,
+          order: input.order,
+        });
         if (input.status) params.set("status", input.status);
         if (input.category) params.set("category", input.category);
         if (input.search) params.set("search", input.search);
         return api(`/api/v1/whatsapp/inbound/processing-runs?${params}`);
+      },
+    }),
+    inboundComplaintGroups: defineAction({
+      input: z.object({
+        runId: z.string().uuid(),
+        bucket: z.string().optional(),
+        search: z.string().optional(),
+        paperlessCategory: z.string().optional(),
+        minimumConfidence: z.number().min(0).max(1).optional(),
+        maximumConfidence: z.number().min(0).max(1).optional(),
+        limit: z.number().int().min(1).max(200).default(50),
+        offset: z.number().int().min(0).default(0),
+        sort: z.string().default("complaint_number"),
+        order: z.enum(["asc", "desc"]).default("asc"),
+      }),
+      handler: ({ runId, bucket, search, paperlessCategory, minimumConfidence, maximumConfidence, limit, offset, sort, order }) => {
+        const params = new URLSearchParams({ limit: String(limit), offset: String(offset), sort, order });
+        if (bucket) params.set("bucket", bucket);
+        if (search) params.set("search", search);
+        if (paperlessCategory) params.set("paperless_category", paperlessCategory);
+        if (minimumConfidence !== undefined) params.set("minimum_confidence", String(minimumConfidence));
+        if (maximumConfidence !== undefined) params.set("maximum_confidence", String(maximumConfidence));
+        return api(`/api/v1/whatsapp/inbound/processing-runs/${runId}/complaint-groups?${params}`);
       },
     }),
     inboundProcessingRun: defineAction({
@@ -712,6 +780,10 @@ export const server = {
         const suffix = params.toString() ? `?${params}` : "";
         return api(`/api/v1/whatsapp/inbound/processing-runs/${id}${suffix}`);
       },
+    }),
+    inboundProcessingItem: defineAction({
+      input: z.object({ id: z.string().uuid() }),
+      handler: ({ id }) => api(`/api/v1/whatsapp/inbound/processing-items/${id}`),
     }),
     inboundProcessingEvents: defineAction({
       input: z.object({ id: z.string().uuid(), after: z.string().optional(), limit: z.number().int().min(1).max(2000).default(500) }),

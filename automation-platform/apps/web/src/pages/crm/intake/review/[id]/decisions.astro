@@ -1,0 +1,11 @@
+---
+import CrmIntakeNav from "../../../../../components/CrmIntakeNav.astro";
+import CrmReviewGroupTable from "../../../../../components/CrmReviewGroupTable.astro";
+import CrmReviewRunNav from "../../../../../components/CrmReviewRunNav.astro";
+import CrmLayout from "../../../../../layouts/CrmLayout.astro";
+const runId = Astro.params.id || "";
+---
+<CrmLayout title="Complaint Review Decisions" description="Inspect the approved and rejected decisions recorded for this processing run." page="intake">
+  <a class="btn btn-sm" href="/crm/intake/review" slot="actions">← All processing runs</a><CrmIntakeNav active="review" /><CrmReviewRunNav runId={runId} active="decisions" />
+  <CrmReviewGroupTable runId={runId} view="decided" title="Recorded decisions" description="Approved groups are represented once in the durable complaint registry, even when captured repeatedly." />
+</CrmLayout>

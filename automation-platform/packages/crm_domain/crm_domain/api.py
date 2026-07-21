@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import uuid
 import hashlib
+from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field as PydanticField
@@ -47,6 +49,17 @@ class BatchPublicationRequest(BaseModel):
     case_ids: list[uuid.UUID] = PydanticField(min_length=1, max_length=200)
 
 
+def _sort_value(value: object) -> tuple[int, object]:
+    """Keep nulls together while preserving numeric and chronological ordering."""
+    if value is None:
+        return (0, "")
+    if isinstance(value, datetime):
+        return (1, value.timestamp())
+    if isinstance(value, (int, float)):
+        return (1, value)
+    return (1, str(value).casefold())
+
+
 def _accepted_publication_documents(
     session: Session, case: ComplaintCase
 ) -> list[tuple[ComplaintDocument, ComplaintDocumentCaseLink]]:
@@ -55,8 +68,7 @@ def _accepted_publication_documents(
             select(ComplaintDocument, ComplaintDocumentCaseLink)
             .join(
                 ComplaintDocumentCaseLink,
-                ComplaintDocumentCaseLink.complaint_document_id
-                == ComplaintDocument.id,
+                ComplaintDocumentCaseLink.complaint_document_id == ComplaintDocument.id,
             )
             .where(
                 ComplaintDocumentCaseLink.complaint_case_id == case.id,
@@ -95,13 +107,9 @@ def _publication_blockers(session: Session, case: ComplaintCase) -> list[str]:
     if not str(case.remarks or "").strip():
         blockers.append("Confirm the complete complaint remarks")
     if case.canonical_paperless_document_id:
-        blockers.append(
-            f"Already linked to Paperless #{case.canonical_paperless_document_id}"
-        )
+        blockers.append(f"Already linked to Paperless #{case.canonical_paperless_document_id}")
     documents = _accepted_publication_documents(session, case)
-    main_documents = [
-        document for document, link in documents if link.role == "main_complaint"
-    ]
+    main_documents = [document for document, link in documents if link.role == "main_complaint"]
     if not main_documents:
         blockers.append("Accept one main complaint document")
     elif len(main_documents) > 1:
@@ -116,6 +124,7 @@ def _case_summary(
     document_count: int,
     publication_blockers: list[str] | None = None,
     publication_error: str | None = None,
+    paperless_result: dict[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = publication_blockers or []
     return {
@@ -137,6 +146,12 @@ def _case_summary(
         "classification_last_synced_at": case.classification_last_synced_at,
         "classification_last_error": case.classification_last_error,
         "paperless_document_id": case.canonical_paperless_document_id,
+        "paperless_result": paperless_result
+        or {
+            "category": "existing" if case.canonical_paperless_document_id else "not_checked",
+            "statuses": [],
+            "reason": "",
+        },
         "frappe_ticket_id": case.frappe_ticket_id,
         "frappe_ticket_url": case.frappe_ticket_url,
         "frappe_sync_status": case.frappe_sync_status,
@@ -146,7 +161,9 @@ def _case_summary(
         "frappe_workflow_status": case.frappe_workflow_status,
         "frappe_agent_group": case.frappe_agent_group,
         "frappe_assigned_users": case.frappe_assigned_users_json,
-        "frappe_assigned_officer_id": str(case.frappe_assigned_officer_id) if case.frappe_assigned_officer_id else None,
+        "frappe_assigned_officer_id": str(case.frappe_assigned_officer_id)
+        if case.frappe_assigned_officer_id
+        else None,
         "frappe_assigned_officer_name": case.frappe_assigned_officer_name,
         "frappe_assigned_officer_role": case.frappe_assigned_officer_role,
         "frappe_routing_status": case.frappe_routing_status,
@@ -180,17 +197,73 @@ def _latest_publication_error(session: Session, case_id: uuid.UUID) -> str | Non
     return publication.last_error if publication else None
 
 
+def _paperless_result(session: Session, case: ComplaintCase) -> dict[str, object]:
+    query = select(ComplaintMatch).where(ComplaintMatch.complaint_case_id == case.id)
+    match = None
+    if case.canonical_paperless_document_id:
+        match = session.exec(
+            query.where(
+                ComplaintMatch.paperless_document_id == case.canonical_paperless_document_id
+            ).order_by(ComplaintMatch.created_at.desc())
+        ).first()
+    if match is None:
+        match = session.exec(query.order_by(ComplaintMatch.created_at.desc())).first()
+    if match is None:
+        return {
+            "category": "existing" if case.canonical_paperless_document_id else "not_checked",
+            "statuses": [],
+            "reason": "",
+            "document_id": case.canonical_paperless_document_id,
+        }
+    signals = match.signals_json or {}
+    return {
+        "category": signals.get("paperless_category") or match.proposed_decision,
+        "statuses": list(signals.get("paperless_statuses") or []),
+        "reason": match.reason,
+        "document_id": match.paperless_document_id or case.canonical_paperless_document_id,
+    }
+
+
 @router.get("")
 def list_complaint_cases(
     search: str = Query(default="", max_length=120),
     state: str = Query(default="", max_length=40),
+    publication: str = Query(default="", max_length=20),
+    paperless: str = Query(default="", max_length=40),
+    helpdesk_status: str = Query(default="", max_length=40),
+    category: str = Query(default="", max_length=120),
+    district: str = Query(default="", max_length=120),
+    tehsil: str = Query(default="", max_length=120),
+    blocker: str = Query(default="", max_length=120),
+    updated_from: datetime | None = Query(default=None),
+    updated_to: datetime | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    sort: str = Query(default="updated_at", max_length=40),
+    order: Literal["asc", "desc"] = Query(default="desc"),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     filters = []
-    if state:
+    if state == "needs_review":
+        filters.append(ComplaintCase.state.in_(["candidate", "review_required"]))
+    elif state:
         filters.append(ComplaintCase.state == state)
+    if paperless == "existing":
+        filters.append(ComplaintCase.canonical_paperless_document_id.is_not(None))
+    elif paperless == "unmatched":
+        filters.append(ComplaintCase.canonical_paperless_document_id.is_(None))
+    if helpdesk_status:
+        filters.append(ComplaintCase.frappe_sync_status == helpdesk_status)
+    if category:
+        filters.append(ComplaintCase.category.ilike(f"%{category.strip()}%"))
+    if district:
+        filters.append(ComplaintCase.district.ilike(f"%{district.strip()}%"))
+    if tehsil:
+        filters.append(ComplaintCase.tehsil.ilike(f"%{tehsil.strip()}%"))
+    if updated_from:
+        filters.append(ComplaintCase.updated_at >= updated_from)
+    if updated_to:
+        filters.append(ComplaintCase.updated_at < updated_to)
     if search.strip():
         term = f"%{search.strip()}%"
         filters.append(
@@ -201,7 +274,6 @@ def list_complaint_cases(
                 ComplaintCase.complainant_cnic.ilike(term),
             )
         )
-    total = session.exec(select(func.count()).select_from(ComplaintCase).where(*filters)).one()
     rows = session.exec(
         select(
             ComplaintCase,
@@ -226,24 +298,66 @@ def list_complaint_cases(
         )
         .where(*filters)
         .group_by(ComplaintCase.id)
-        .order_by(ComplaintCase.updated_at.desc())
-        .offset(offset)
-        .limit(limit)
     ).all()
+    items = [
+        _case_summary(
+            case,
+            int(document_count),
+            _publication_blockers(session, case),
+            _latest_publication_error(session, case.id),
+            _paperless_result(session, case),
+        )
+        for case, document_count in rows
+    ]
+    if publication in {"ready", "blocked"}:
+        ready = publication == "ready"
+        items = [
+            item
+            for item in items
+            if bool(item["publication_ready"]) is ready and (ready or item["state"] == "fresh")
+        ]
+    if paperless and paperless not in {"existing", "unmatched"}:
+        paperless_term = paperless.casefold()
+        items = [
+            item
+            for item in items
+            if paperless_term
+            in {
+                str(item["paperless_result"].get("category") or "").casefold(),
+                *(
+                    str(value).casefold()
+                    for value in item["paperless_result"].get("statuses") or []
+                ),
+            }
+        ]
+    if blocker:
+        blocker_term = blocker.casefold()
+        items = [
+            item
+            for item in items
+            if any(blocker_term in str(value).casefold() for value in item["publication_blockers"])
+        ]
+    sort_keys = {
+        "complaint_number": "complaint_number",
+        "complainant_name": "complainant_name",
+        "district": "district",
+        "category": "category",
+        "state": "state",
+        "document_count": "document_count",
+        "updated_at": "updated_at",
+    }
+    sort_key = sort_keys.get(sort, "updated_at")
+    items.sort(
+        key=lambda item: _sort_value(item.get(sort_key)),
+        reverse=order == "desc",
+    )
+    total = len(items)
     return {
-        "items": [
-            _case_summary(
-                case,
-                int(document_count),
-                _publication_blockers(session, case),
-                _latest_publication_error(session, case.id),
-            )
-            for case, document_count in rows
-        ],
-        "total": int(total),
+        "items": items[offset : offset + limit],
+        "total": total,
         "limit": limit,
         "offset": offset,
-}
+    }
 
 
 @router.post("/publication-batches", status_code=202)
@@ -305,17 +419,14 @@ def complaint_case_statistics(
     state_counts: dict[str, int] = {}
     for case in cases:
         state_counts[case.state] = state_counts.get(case.state, 0) + 1
-    approved_cases = [
-        case for case in cases if case.state in {"fresh", "publishing", "published"}
-    ]
+    approved_cases = [case for case in cases if case.state in {"fresh", "publishing", "published"}]
     awaiting_publication = [case for case in cases if case.state == "fresh"]
     ready_to_publish = sum(
         not _publication_blockers(session, case) for case in awaiting_publication
     )
     return {
         "unique_cases": len(cases),
-        "needs_review": state_counts.get("candidate", 0)
-        + state_counts.get("review_required", 0),
+        "needs_review": state_counts.get("candidate", 0) + state_counts.get("review_required", 0),
         "approved_cases": len(approved_cases),
         "awaiting_publication": len(awaiting_publication),
         "ready_to_publish": ready_to_publish,
@@ -357,21 +468,29 @@ def read_complaint_case(
         if canonical_id != document.id:
             duplicate_of[document.id] = canonical_id
     document_ids = [document.id for document in documents]
-    extractions = list(
-        session.exec(
-            select(DocumentExtraction)
-            .where(DocumentExtraction.complaint_document_id.in_(document_ids))
-            .order_by(DocumentExtraction.created_at)
-        ).all()
-    ) if document_ids else []
+    extractions = (
+        list(
+            session.exec(
+                select(DocumentExtraction)
+                .where(DocumentExtraction.complaint_document_id.in_(document_ids))
+                .order_by(DocumentExtraction.created_at)
+            ).all()
+        )
+        if document_ids
+        else []
+    )
     extraction_ids = [extraction.id for extraction in extractions]
-    observations = list(
-        session.exec(
-            select(ComplaintFieldObservation)
-            .where(ComplaintFieldObservation.extraction_id.in_(extraction_ids))
-            .order_by(ComplaintFieldObservation.created_at)
-        ).all()
-    ) if extraction_ids else []
+    observations = (
+        list(
+            session.exec(
+                select(ComplaintFieldObservation)
+                .where(ComplaintFieldObservation.extraction_id.in_(extraction_ids))
+                .order_by(ComplaintFieldObservation.created_at)
+            ).all()
+        )
+        if extraction_ids
+        else []
+    )
     matches = list(
         session.exec(
             select(ComplaintMatch)
@@ -391,6 +510,7 @@ def read_complaint_case(
             case,
             len(canonical_by_binary),
             _publication_blockers(session, case),
+            paperless_result=_paperless_result(session, case),
         ),
         "capture_count": len(documents),
         "complainant_address": case.complainant_address,
@@ -404,9 +524,7 @@ def read_complaint_case(
                 "relationship_reason": link.reason,
                 "source_locator": link.source_locator,
                 "duplicate_of_document_id": (
-                    str(duplicate_of[document.id])
-                    if document.id in duplicate_of
-                    else None
+                    str(duplicate_of[document.id]) if document.id in duplicate_of else None
                 ),
                 "duplicate_capture_count": capture_counts.get(document.id, 0),
             }
@@ -436,34 +554,51 @@ def review_complaint_case(
     if case is None:
         raise HTTPException(status_code=404, detail="Complaint case not found")
     allowed = {
-        "complainant_name", "complainant_mobile", "complainant_cnic",
-        "complainant_address", "district", "tehsil", "department", "category",
-        "sub_category", "remarks",
+        "complainant_name",
+        "complainant_mobile",
+        "complainant_cnic",
+        "complainant_address",
+        "district",
+        "tehsil",
+        "department",
+        "category",
+        "sub_category",
+        "remarks",
     }
     unknown = set(payload.fields).difference(allowed)
     if unknown:
-        raise HTTPException(status_code=422, detail=f"Unsupported complaint fields: {sorted(unknown)}")
+        raise HTTPException(
+            status_code=422, detail=f"Unsupported complaint fields: {sorted(unknown)}"
+        )
     for name, value in payload.fields.items():
         setattr(case, name, value.strip() if isinstance(value, str) else value)
     if "category" in payload.fields:
         category_value = " ".join(str(case.category or "").split()).strip()
-        category = session.exec(
-            select(ComplaintCategory).where(
-                ComplaintCategory.normalized_name == category_value.casefold()
-            )
-        ).first() if category_value else None
+        category = (
+            session.exec(
+                select(ComplaintCategory).where(
+                    ComplaintCategory.normalized_name == category_value.casefold()
+                )
+            ).first()
+            if category_value
+            else None
+        )
         case.category_id = category.id if category else None
         case.sub_category_id = None
         case.classification_sync_status = "pending" if case.frappe_ticket_id else "not_synced"
         case.classification_last_error = None
     if "sub_category" in payload.fields and case.category_id:
         subcategory_value = " ".join(str(case.sub_category or "").split()).strip()
-        subcategory = session.exec(
-            select(ComplaintSubcategory).where(
-                ComplaintSubcategory.category_id == case.category_id,
-                ComplaintSubcategory.normalized_name == subcategory_value.casefold(),
-            )
-        ).first() if subcategory_value else None
+        subcategory = (
+            session.exec(
+                select(ComplaintSubcategory).where(
+                    ComplaintSubcategory.category_id == case.category_id,
+                    ComplaintSubcategory.normalized_name == subcategory_value.casefold(),
+                )
+            ).first()
+            if subcategory_value
+            else None
+        )
         case.sub_category_id = subcategory.id if subcategory else None
         case.classification_sync_status = "pending" if case.frappe_ticket_id else "not_synced"
         case.classification_last_error = None
@@ -559,7 +694,9 @@ def approve_fresh_complaint(
     if case is None:
         raise HTTPException(status_code=404, detail="Complaint case not found")
     if case.canonical_paperless_document_id:
-        raise HTTPException(status_code=409, detail="An existing Paperless complaint is already linked")
+        raise HTTPException(
+            status_code=409, detail="An existing Paperless complaint is already linked"
+        )
     normalized = normalize_complaint_number(case.complaint_number)
     if normalized is None or normalized != case.complaint_number:
         raise HTTPException(status_code=409, detail="Confirm one valid complaint number first")
@@ -567,7 +704,10 @@ def approve_fresh_complaint(
         raise HTTPException(status_code=409, detail="Confirm the complete complaint remarks first")
     main = session.exec(
         select(ComplaintDocument)
-        .join(ComplaintDocumentCaseLink, ComplaintDocumentCaseLink.complaint_document_id == ComplaintDocument.id)
+        .join(
+            ComplaintDocumentCaseLink,
+            ComplaintDocumentCaseLink.complaint_document_id == ComplaintDocument.id,
+        )
         .where(
             ComplaintDocumentCaseLink.complaint_case_id == case.id,
             ComplaintDocumentCaseLink.role == "main_complaint",
@@ -603,9 +743,7 @@ def _stage_case_publications(session: Session, case: ComplaintCase) -> None:
         key_source = f"{case.id}:{content_key}:v{case.version}"
         key = hashlib.sha256(key_source.encode()).hexdigest()
         existing = session.exec(
-            select(PaperlessPublication).where(
-                PaperlessPublication.idempotency_key == key
-            )
+            select(PaperlessPublication).where(PaperlessPublication.idempotency_key == key)
         ).first()
         if existing is None:
             session.add(
@@ -645,7 +783,9 @@ def queue_case_publication(
         )
     _stage_case_publications(session, case)
     session.commit()
-    task = celery_app.send_task("crm_domain.publish_complaint_case", args=[str(case.id)], queue="crm")
+    task = celery_app.send_task(
+        "crm_domain.publish_complaint_case", args=[str(case.id)], queue="crm"
+    )
     return {"case_id": str(case.id), "state": case.state, "task_id": task.id}
 
 

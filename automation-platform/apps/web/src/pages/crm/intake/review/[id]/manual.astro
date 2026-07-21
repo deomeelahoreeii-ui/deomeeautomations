@@ -1,0 +1,13 @@
+---
+import CrmIntakeNav from "../../../../../components/CrmIntakeNav.astro";
+import CrmManualItemsTable from "../../../../../components/CrmManualItemsTable.astro";
+import CrmReviewGroupTable from "../../../../../components/CrmReviewGroupTable.astro";
+import CrmReviewRunNav from "../../../../../components/CrmReviewRunNav.astro";
+import CrmLayout from "../../../../../layouts/CrmLayout.astro";
+const runId = Astro.params.id || "";
+---
+<CrmLayout title="Manual Complaint Review" description="Resolve uncertain complaint relationships one document at a time." page="intake">
+  <a class="btn btn-sm" href="/crm/intake/review" slot="actions">← All processing runs</a><CrmIntakeNav active="review" /><CrmReviewRunNav runId={runId} active="manual" />
+  <CrmReviewGroupTable runId={runId} view="manual_review" title="Complaint groups requiring verification" description="Open the evidence when the detected number, role or extraction confidence needs confirmation." />
+  <CrmManualItemsTable runId={runId} />
+</CrmLayout>

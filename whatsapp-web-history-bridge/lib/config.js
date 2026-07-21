@@ -75,7 +75,7 @@ const visibleProfileDirectory = String(
 ).trim();
 
 export const config = Object.freeze({
-  protocolVersion: 3,
+  protocolVersion: 4,
   workerId,
   natsUrl: process.env.NATS_URL || "nats://127.0.0.1:4222",
   historySubject: process.env.WWEBJS_HISTORY_SUBJECT || "whatsapp.web.inbound.history",

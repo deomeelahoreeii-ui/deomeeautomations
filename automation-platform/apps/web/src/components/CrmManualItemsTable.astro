@@ -1,0 +1,28 @@
+---
+import DataTable from "./DataTable.astro";
+
+interface Props { runId: string }
+const { runId } = Astro.props;
+---
+
+<section class="master-card crm-manual-items" data-manual-items data-run-id={runId}>
+  <div class="inbound-card-heading"><div><p class="eyebrow">Unassigned evidence</p><h2>Files without a safe complaint relationship</h2><p>Open one file at a time to confirm its document type and complaint number.</p></div><span class="badge" data-manual-count>Loading…</span></div>
+  <label class="crm-manual-search"><span class="sr-only">Search unassigned evidence</span><input class="input input-bordered input-sm" data-manual-search placeholder="Search filename, suggested number or type" /></label>
+  <DataTable id="manual-evidence-items" pageSize={10} pageSizeOptions={[10,25,50]} emptyText="No unassigned evidence remains in this run." ariaLabel="Unassigned evidence requiring manual review" />
+</section>
+
+<style>.crm-manual-items{margin-top:1rem;padding:1.05rem 1.15rem}.crm-manual-items h2{margin:.12rem 0}.crm-manual-items p{margin:.25rem 0 0;color:#66758a}.crm-manual-search{display:block;width:min(30rem,100%);margin:.85rem 0}.crm-manual-search input{width:100%}</style>
+
+<script>
+  import { actions } from "astro:actions";
+  await customElements.whenDefined("astro-data-table");
+  const root=document.querySelector<HTMLElement>("[data-manual-items]")!,runId=root.dataset.runId!,table=root.querySelector<any>("astro-data-table"),search=root.querySelector<HTMLInputElement>("[data-manual-search]")!,count=root.querySelector<HTMLElement>("[data-manual-count]")!;
+  let items:any[]=[];
+  const primary=(value:any,secondary="")=>{const wrap=document.createElement("div"),strong=document.createElement("strong");strong.textContent=String(value||"—");wrap.append(strong);if(secondary){const small=document.createElement("small");small.textContent=secondary;small.style.display="block";small.style.color="#758396";wrap.append(small)}return wrap};
+  const action=(item:any)=>{const link=document.createElement("a");link.className="btn btn-xs btn-primary";link.href=`/crm/intake/review/${runId}/items/${item.id}`;link.textContent="Review evidence →";return link};
+  function filtered(){const term=search.value.trim().toLowerCase();return items.filter(item=>!term||[item.filename,item.detected_complaint_number,item.primary_category,item.status].some(value=>String(value||"").toLowerCase().includes(term)))}
+  async function refresh(){const rows=filtered();count.textContent=String(rows.length);await table.setData(rows)}
+  await table.configure({data:items,getRowId:(row:any)=>row.id,columns:[{accessorKey:"filename",header:"File",cell:({row}:any)=>primary(row.original.filename,row.original.mime_type)},{accessorKey:"detected_complaint_number",header:"Suggested complaint",cell:({row}:any)=>row.original.detected_complaint_number||"Needs identification"},{accessorKey:"primary_category",header:"Detected type",cell:({row}:any)=>String(row.original.primary_category||"unknown").replaceAll("_"," ")},{accessorKey:"confidence",header:"Confidence",cell:({row}:any)=>`${Math.round(Number(row.original.confidence||0)*100)}%`},{accessorKey:"status",header:"Reason",cell:({row}:any)=>primary(String(row.original.status||"").replaceAll("_"," "),row.original.error||"")},{id:"action",header:"",cell:({row}:any)=>action(row.original),enableSorting:false,meta:{align:"right"}}]});
+  const result=await actions.whatsapp.inboundProcessingRun({id:runId});if(result.error){table.showError(result.error.message)}else{const data=result.data as any,grouped=new Set((data.complaint_groups||[]).filter((group:any)=>group.review_bucket==="manual_review").flatMap((group:any)=>group.files.map((file:any)=>file.id)));items=(data.items||[]).filter((item:any)=>["pending","deferred"].includes(item.review_status)).filter((item:any)=>!item.detected_complaint_number||item.status==="needs_review"||item.review_status==="deferred").filter((item:any)=>!grouped.has(item.id));await refresh()}
+  search.addEventListener("input",()=>void refresh());
+</script>

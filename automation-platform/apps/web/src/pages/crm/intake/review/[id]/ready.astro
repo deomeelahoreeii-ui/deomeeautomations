@@ -1,0 +1,11 @@
+---
+import CrmIntakeNav from "../../../../../components/CrmIntakeNav.astro";
+import CrmReviewGroupTable from "../../../../../components/CrmReviewGroupTable.astro";
+import CrmReviewRunNav from "../../../../../components/CrmReviewRunNav.astro";
+import CrmLayout from "../../../../../layouts/CrmLayout.astro";
+const runId = Astro.params.id || "";
+---
+<CrmLayout title="Ready Complaint Groups" description="Review confident complaint candidates and approve only the groups you have verified." page="intake">
+  <a class="btn btn-sm" href="/crm/intake/review" slot="actions">← All processing runs</a><CrmIntakeNav active="review" /><CrmReviewRunNav runId={runId} active="ready" />
+  <CrmReviewGroupTable runId={runId} view="ready" title="Ready for decision" description="No Paperless upload occurs here. Approval creates or updates the durable complaint case." />
+</CrmLayout>

@@ -1,0 +1,27 @@
+---
+interface Props {
+  caseId: string;
+  active: "overview" | "evidence" | "details" | "publication" | "helpdesk" | "audit";
+}
+
+const { caseId, active } = Astro.props;
+const base = `/crm/cases/${caseId}`;
+const links = [
+  ["overview", "Overview"],
+  ["evidence", "Evidence"],
+  ["details", "Details & classification"],
+  ["publication", "Paperless"],
+  ["helpdesk", "Helpdesk"],
+  ["audit", "Audit"],
+] as const;
+---
+
+<nav class="crm-case-nav" aria-label="Complaint case views">
+  {links.map(([id, label]) => (
+    <a href={`${base}/${id}`} class:list={{ active: active === id }} aria-current={active === id ? "page" : undefined}>{label}</a>
+  ))}
+</nav>
+
+<style>
+  .crm-case-nav{display:flex;gap:.25rem;margin:1rem 0;padding:.3rem;border:1px solid #d9e4eb;border-radius:.75rem;background:#edf3f6;overflow-x:auto}.crm-case-nav a{padding:.62rem .85rem;border-radius:.55rem;color:#58687b;font-size:.76rem;font-weight:750;white-space:nowrap;text-decoration:none}.crm-case-nav a:hover{background:#f8fbfc}.crm-case-nav a.active{background:#fff;color:#0d7788;box-shadow:0 1px 4px #0f172a18}
+</style>

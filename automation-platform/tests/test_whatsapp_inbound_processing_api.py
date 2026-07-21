@@ -163,21 +163,15 @@ def test_processing_run_creation_and_manual_review(tmp_path, monkeypatch) -> Non
             assert reopened.json()["task_id"] is None
             assert reopened.json()["reused"] is True
 
-            captured_runs = client.get(
-                "/api/v1/whatsapp/inbound/batches", params={"limit": 20}
-            )
+            captured_runs = client.get("/api/v1/whatsapp/inbound/batches", params={"limit": 20})
             assert captured_runs.status_code == 200, captured_runs.text
             captured = next(
-                item
-                for item in captured_runs.json()["items"]
-                if item["id"] == str(batch_id)
+                item for item in captured_runs.json()["items"] if item["id"] == str(batch_id)
             )
             assert captured["processing_run_id"] == run["id"]
             assert captured["processing_status"] == "queued"
 
-            detail = client.get(
-                f"/api/v1/whatsapp/inbound/processing-runs/{run['id']}"
-            )
+            detail = client.get(f"/api/v1/whatsapp/inbound/processing-runs/{run['id']}")
             assert detail.status_code == 200, detail.text
             item = detail.json()["items"][0]
             reviewed = client.post(
@@ -208,9 +202,9 @@ def test_processing_run_creation_and_manual_review(tmp_path, monkeypatch) -> Non
             assert group_review.json()["case_state"] == "fresh"
             assert group_review.json()["case_id"]
 
-            grouped = client.get(
-                f"/api/v1/whatsapp/inbound/processing-runs/{run['id']}"
-            ).json()["complaint_groups"]
+            grouped = client.get(f"/api/v1/whatsapp/inbound/processing-runs/{run['id']}").json()[
+                "complaint_groups"
+            ]
             assert len(grouped) == 1
             assert grouped[0]["complaint_number"] == "104-6609317"
             assert grouped[0]["item_count"] == 1
@@ -218,17 +212,35 @@ def test_processing_run_creation_and_manual_review(tmp_path, monkeypatch) -> Non
             assert grouped[0]["approved_items"] == 1
             assert grouped[0]["review_bucket"] == "approved"
 
-            events = client.get(
-                f"/api/v1/whatsapp/inbound/processing-runs/{run['id']}/events"
+            group_page = client.get(
+                f"/api/v1/whatsapp/inbound/processing-runs/{run['id']}/complaint-groups",
+                params={
+                    "bucket": "approved",
+                    "search": "6609317",
+                    "minimum_confidence": 0,
+                    "limit": 10,
+                    "offset": 0,
+                    "sort": "item_count",
+                    "order": "desc",
+                },
             )
+            assert group_page.status_code == 200, group_page.text
+            assert group_page.json()["total"] == 1
+            assert group_page.json()["items"][0]["paperless_category"] == "not_checked"
+            assert group_page.json()["items"][0]["paperless_document_ids"] == []
+            assert group_page.json()["bucket_counts"]["approved"] == 1
+
+            item_detail = client.get(f"/api/v1/whatsapp/inbound/processing-items/{item['id']}")
+            assert item_detail.status_code == 200, item_detail.text
+            assert item_detail.json()["filename"] == "104-6609317.pdf"
+
+            events = client.get(f"/api/v1/whatsapp/inbound/processing-runs/{run['id']}/events")
             assert events.status_code == 200
             event_types = {row["event_type"] for row in events.json()["items"]}
             assert {"processing_run_created", "review_decision_updated"}.issubset(event_types)
 
             with Session(engine) as session:
-                completed_run = session.get(
-                    WhatsAppInboundProcessingRun, uuid.UUID(run["id"])
-                )
+                completed_run = session.get(WhatsAppInboundProcessingRun, uuid.UUID(run["id"]))
                 assert completed_run is not None
                 completed_run.status = "completed"
                 session.add(completed_run)
@@ -262,11 +274,15 @@ def test_duplicate_only_group_approval_completes_review_without_regressing_case(
                 json={"batch_id": str(batch_id), "paperless_check": True},
             ).json()
             run_id = created["processing_run"]["id"]
-            item_id = created["processing_run"]["items"][0]["id"] if created["processing_run"].get("items") else None
+            item_id = (
+                created["processing_run"]["items"][0]["id"]
+                if created["processing_run"].get("items")
+                else None
+            )
             if item_id is None:
-                item_id = client.get(
-                    f"/api/v1/whatsapp/inbound/processing-runs/{run_id}"
-                ).json()["items"][0]["id"]
+                item_id = client.get(f"/api/v1/whatsapp/inbound/processing-runs/{run_id}").json()[
+                    "items"
+                ][0]["id"]
 
             with Session(engine) as session:
                 item = session.get(WhatsAppInboundProcessingItem, uuid.UUID(item_id))
@@ -279,9 +295,7 @@ def test_duplicate_only_group_approval_completes_review_without_regressing_case(
                 item.extraction_method = "pdftotext"
                 item.paperless_category = "fresh"
                 session.add(item)
-                case = ComplaintCase(
-                    complaint_number="104-6609317", state="review_required"
-                )
+                case = ComplaintCase(complaint_number="104-6609317", state="review_required")
                 session.add(case)
                 session.flush()
                 canonical = ComplaintDocument(
@@ -317,8 +331,7 @@ def test_duplicate_only_group_approval_completes_review_without_regressing_case(
                 case = session.get(ComplaintCase, case_id)
                 duplicate = session.exec(
                     select(ComplaintDocument).where(
-                        ComplaintDocument.source_processing_item_id
-                        == uuid.UUID(item_id)
+                        ComplaintDocument.source_processing_item_id == uuid.UUID(item_id)
                     )
                 ).one()
                 item = session.get(WhatsAppInboundProcessingItem, uuid.UUID(item_id))
@@ -339,9 +352,7 @@ def test_manual_attachment_links_existing_case_and_preserves_role_and_state(
                 "/api/v1/whatsapp/inbound/processing-runs",
                 json={"batch_id": str(batch_id), "paperless_check": True},
             ).json()["processing_run"]
-            detail = client.get(
-                f"/api/v1/whatsapp/inbound/processing-runs/{run['id']}"
-            ).json()
+            detail = client.get(f"/api/v1/whatsapp/inbound/processing-runs/{run['id']}").json()
             item_id = detail["items"][0]["id"]
 
             with Session(engine) as session:
@@ -447,7 +458,9 @@ Complaint Remarks: The complaint requires review.
         app.dependency_overrides.clear()
 
 
-def test_processing_worker_classifies_a_local_spreadsheet_without_paperless(tmp_path, monkeypatch) -> None:
+def test_processing_worker_classifies_a_local_spreadsheet_without_paperless(
+    tmp_path, monkeypatch
+) -> None:
     from openpyxl import Workbook
     from whatsapp_gateway.inbound.processing import create_processing_run
     from whatsapp_gateway.inbound.processing_tasks import process_inbound_batch
@@ -557,9 +570,7 @@ def test_processing_worker_classifies_a_local_spreadsheet_without_paperless(tmp_
         run_id = run.id
 
     monkeypatch.setattr("whatsapp_gateway.inbound.processing_tasks.engine", engine)
-    monkeypatch.setattr(
-        "whatsapp_gateway.inbound.processing_tasks.get_settings", lambda: settings
-    )
+    monkeypatch.setattr("whatsapp_gateway.inbound.processing_tasks.get_settings", lambda: settings)
     result = process_inbound_batch.run(str(run_id))
     assert result["status"] == "completed"
     with Session(engine) as session:
@@ -582,4 +593,6 @@ def test_processing_worker_classifies_a_local_spreadsheet_without_paperless(tmp_
                 )
             ).all()
         }
-        assert {"extraction_started", "item_classified", "processing_run_completed"}.issubset(event_types)
+        assert {"extraction_started", "item_classified", "processing_run_completed"}.issubset(
+            event_types
+        )

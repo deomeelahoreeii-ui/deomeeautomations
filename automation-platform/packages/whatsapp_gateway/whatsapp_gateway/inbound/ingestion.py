@@ -54,9 +54,7 @@ def message_values(
         ),
         "from_me": event.fromMe,
         "chat_scope": event.chatScope,
-        "message_timestamp": event.messageTimestamp.astimezone(timezone.utc).replace(
-            tzinfo=None
-        ),
+        "message_timestamp": event.messageTimestamp.astimezone(timezone.utc).replace(tzinfo=None),
         # Baileys can attach the connected account's own push name to outgoing
         # messages. It is not evidence about the remote contact.
         "push_name": None if event.fromMe else event.pushName,
@@ -112,12 +110,13 @@ def ingest_event(
             mapped=mapped_attachment,
             now=now,
         )
-        register_batch_item(
-            session,
-            batch_id=event.batchId,
-            attachment_id=attachment_id,
-            message_id=message_id,
-        )
+        if not event.fromMe:
+            register_batch_item(
+                session,
+                batch_id=event.batchId,
+                attachment_id=attachment_id,
+                message_id=message_id,
+            )
 
     record_history_progress(
         session,
@@ -126,6 +125,8 @@ def ingest_event(
         created_message=created,
         has_attachment=event.attachment is not None,
         ingestion_source=event.ingestionSource,
+        message_timestamp=event.messageTimestamp,
+        from_me=event.fromMe,
     )
     session.commit()
     return {

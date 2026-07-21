@@ -95,6 +95,9 @@ def serialize_history_request(
         "batch_id": str(item.batch_id) if item.batch_id else None,
         "requested_count": item.requested_count,
         "all_history": item.all_history,
+        "date_from": item.date_from,
+        "date_to": item.date_to,
+        "received_only": item.received_only,
         "remote_jid": item.remote_jid,
         "anchor_message_id": item.anchor_message_id,
         "anchor_timestamp": item.anchor_timestamp,
@@ -130,16 +133,16 @@ def reconcile_history_requests(
     for item in session.exec(query).all():
         requested_at = utc_naive(item.requested_at)
         age = (now - requested_at).total_seconds()
-        quiet_since = utc_naive(
-            item.last_activity_at or item.accepted_at or item.requested_at
-        )
+        quiet_since = utc_naive(item.last_activity_at or item.accepted_at or item.requested_at)
         quiet = (now - quiet_since).total_seconds()
         if item.provider == "wwebjs":
             if age < WEB_HISTORY_HARD_TIMEOUT_SECONDS:
                 continue
             item.status = "timed_out"
             item.finished_at = now
-            item.error = item.error or "WhatsApp Web bridge did not finish the history request in time"
+            item.error = (
+                item.error or "WhatsApp Web bridge did not finish the history request in time"
+            )
         elif item.messages_received > 0 and quiet >= HISTORY_QUIET_SECONDS:
             item.status = "succeeded"
             item.finished_at = now
@@ -149,9 +152,7 @@ def reconcile_history_requests(
         elif age >= HISTORY_HARD_TIMEOUT_SECONDS:
             item.status = "timed_out"
             item.finished_at = now
-            item.error = (
-                item.error or "WhatsApp did not finish the history request in time"
-            )
+            item.error = item.error or "WhatsApp did not finish the history request in time"
         else:
             continue
         item.updated_at = now

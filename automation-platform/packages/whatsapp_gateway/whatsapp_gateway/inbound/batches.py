@@ -90,6 +90,9 @@ def create_history_batch(
     provider: str,
     requested_count: int,
     all_history: bool = False,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    received_only: bool = True,
     remote_jid: str | None,
     anchor_message_id: str | None,
     anchor_timestamp: datetime | None,
@@ -104,13 +107,22 @@ def create_history_batch(
         provider=provider,
         requested_count=requested_count,
         all_history=all_history,
+        date_from=date_from,
+        date_to=date_to,
+        received_only=received_only,
         remote_jid=remote_jid,
         anchor_message_id=anchor_message_id,
         anchor_timestamp=anchor_timestamp,
         status="created",
-        storage_backend=(settings.object_storage_provider if settings.object_storage_enabled else "local"),
-        raw_bucket=(settings.object_storage_raw_bucket if settings.object_storage_enabled else None),
-        manifest_bucket=(settings.object_storage_manifest_bucket if settings.object_storage_enabled else None),
+        storage_backend=(
+            settings.object_storage_provider if settings.object_storage_enabled else "local"
+        ),
+        raw_bucket=(
+            settings.object_storage_raw_bucket if settings.object_storage_enabled else None
+        ),
+        manifest_bucket=(
+            settings.object_storage_manifest_bucket if settings.object_storage_enabled else None
+        ),
         created_at=now,
         updated_at=now,
     )
@@ -121,12 +133,25 @@ def create_history_batch(
         batch_id=batch.id,
         event_type="batch_created",
         message=(
-            f"Created inbound batch {batch.batch_code} for all available history "
-            f"(up to {requested_count} messages)."
-            if all_history
-            else f"Created inbound batch {batch.batch_code} for {requested_count} older messages."
+            f"Created inbound batch {batch.batch_code} for the selected date range "
+            f"(up to {requested_count} received messages)."
+            if date_from or date_to
+            else (
+                f"Created inbound batch {batch.batch_code} for available received history "
+                f"(up to {requested_count} messages)."
+                if all_history
+                else f"Created inbound batch {batch.batch_code} for {requested_count} older received messages."
+            )
         ),
-        details={"provider": provider, "remote_jid": remote_jid, "requested_count": requested_count, "all_history": all_history},
+        details={
+            "provider": provider,
+            "remote_jid": remote_jid,
+            "requested_count": requested_count,
+            "all_history": all_history,
+            "date_from": str(date_from) if date_from else None,
+            "date_to": str(date_to) if date_to else None,
+            "received_only": received_only,
+        },
     )
     return batch
 
@@ -141,6 +166,9 @@ def serialize_batch(batch: WhatsAppInboundBatch) -> dict[str, Any]:
         "provider": batch.provider,
         "requested_count": batch.requested_count,
         "all_history": batch.all_history,
+        "date_from": batch.date_from,
+        "date_to": batch.date_to,
+        "received_only": batch.received_only,
         "remote_jid": batch.remote_jid,
         "anchor_message_id": batch.anchor_message_id,
         "anchor_timestamp": batch.anchor_timestamp,
@@ -207,6 +235,12 @@ def register_batch_item(
     attachment = session.get(WhatsAppInboundAttachment, attachment_id)
     message = session.get(WhatsAppInboundMessage, message_id)
     if attachment is None or message is None:
+        return None
+    if batch.received_only and message.from_me:
+        return None
+    if batch.date_from and message.message_timestamp < batch.date_from:
+        return None
+    if batch.date_to and message.message_timestamp >= batch.date_to:
         return None
     now = utcnow()
     item = WhatsAppInboundBatchItem(
@@ -282,7 +316,9 @@ def reconcile_batch(
     batch.files_stored = sum(item.status == "stored" for item in items)
     batch.files_reused = sum(item.status == "already_stored" for item in items)
     batch.files_failed = sum(item.status in ITEM_FAILED_STATUSES for item in items)
-    batch.total_bytes = sum(int(item.size_bytes or 0) for item in items if item.status in ITEM_STORED_STATUSES)
+    batch.total_bytes = sum(
+        int(item.size_bytes or 0) for item in items if item.status in ITEM_STORED_STATUSES
+    )
     if request is not None:
         batch.messages_discovered = max(batch.messages_discovered, request.messages_received)
         if request.status in {"requested", "accepted", "syncing"}:
@@ -290,7 +326,10 @@ def reconcile_batch(
             if batch.started_at is None:
                 batch.started_at = request.accepted_at or request.requested_at
         elif request.status in {"succeeded", "no_results"}:
-            if any(item.status in {"discovered", "downloading", "hashing", "uploading"} for item in items):
+            if any(
+                item.status in {"discovered", "downloading", "hashing", "uploading"}
+                for item in items
+            ):
                 batch.status = "storing"
             elif batch.files_failed:
                 batch.status = "completed_with_errors"
@@ -299,14 +338,20 @@ def reconcile_batch(
                 batch.status = "completed"
                 batch.finished_at = batch.finished_at or now
         elif request.status in {"failed", "timed_out"}:
-            batch.status = "completed_with_errors" if (batch.files_stored or batch.files_reused) else "failed"
+            batch.status = (
+                "completed_with_errors" if (batch.files_stored or batch.files_reused) else "failed"
+            )
             batch.error = request.error
             batch.finished_at = batch.finished_at or now
     batch.updated_at = now
     session.add(batch)
     session.flush()
     if batch.status != previous_status:
-        level = "error" if batch.status == "failed" else ("warning" if batch.status == "completed_with_errors" else "info")
+        level = (
+            "error"
+            if batch.status == "failed"
+            else ("warning" if batch.status == "completed_with_errors" else "info")
+        )
         record_batch_event(
             session,
             batch_id=batch.id,
@@ -374,8 +419,8 @@ def write_batch_manifest(
 def batch_counts(session: Session) -> dict[str, int]:
     total = session.exec(select(func.count()).select_from(WhatsAppInboundBatch)).one()
     active = session.exec(
-        select(func.count()).select_from(WhatsAppInboundBatch).where(
-            WhatsAppInboundBatch.status.notin_(BATCH_TERMINAL_STATUSES)
-        )
+        select(func.count())
+        .select_from(WhatsAppInboundBatch)
+        .where(WhatsAppInboundBatch.status.notin_(BATCH_TERMINAL_STATUSES))
     ).one()
     return {"batches": int(total), "active_batches": int(active)}

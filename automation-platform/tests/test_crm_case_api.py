@@ -16,12 +16,102 @@ from crm_domain.models import (
     ComplaintCase,
     ComplaintDocument,
     ComplaintDocumentCaseLink,
+    ComplaintMatch,
     PaperlessPublication,
 )
 
 
 class _Task:
     id = "crm-publication-task"
+
+
+def test_case_registry_filters_exact_paperless_status_and_paginates() -> None:
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        existing = ComplaintCase(
+            complaint_number="104-6609317",
+            state="existing",
+            canonical_paperless_document_id=731,
+            complainant_name="Maryam Noor",
+            district="Lahore",
+        )
+        fresh = ComplaintCase(
+            complaint_number="104-6609318",
+            state="review_required",
+            complainant_name="Ali Ahmad",
+            district="Kasur",
+        )
+        session.add(existing)
+        session.add(fresh)
+        session.flush()
+        session.add(
+            ComplaintMatch(
+                complaint_case_id=existing.id,
+                paperless_document_id=731,
+                proposed_decision="existing",
+                final_decision="existing",
+                score=1.0,
+                reason="Exact complaint number matched one CRM main complaint.",
+                signals_json={
+                    "paperless_category": "submitted",
+                    "paperless_statuses": ["Submitted"],
+                },
+            )
+        )
+        session.add(
+            ComplaintMatch(
+                complaint_case_id=existing.id,
+                proposed_decision="fresh",
+                score=0.0,
+                reason="A later capture did not find another Paperless document.",
+                signals_json={
+                    "paperless_category": "fresh",
+                    "paperless_statuses": [],
+                },
+            )
+        )
+        session.commit()
+
+    def session_override():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = session_override
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/v1/crm/cases",
+                params={
+                    "paperless": "submitted",
+                    "district": "lah",
+                    "limit": 1,
+                    "offset": 0,
+                    "sort": "complaint_number",
+                    "order": "asc",
+                },
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["total"] == 1
+            item = response.json()["items"][0]
+            assert item["complaint_number"] == "104-6609317"
+            assert item["paperless_result"] == {
+                "category": "submitted",
+                "statuses": ["Submitted"],
+                "reason": "Exact complaint number matched one CRM main complaint.",
+                "document_id": 731,
+            }
+
+            needs_review = client.get(
+                "/api/v1/crm/cases", params={"state": "needs_review", "limit": 10}
+            )
+            assert needs_review.status_code == 200, needs_review.text
+            assert needs_review.json()["total"] == 1
+            assert needs_review.json()["items"][0]["complaint_number"] == "104-6609318"
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_publication_staging_collapses_identical_captures_with_main_role_winning() -> None:
@@ -137,10 +227,7 @@ def test_case_specific_document_review_is_required_before_publication(monkeypatc
             assert detail.json()["document_count"] == 1
             assert detail.json()["capture_count"] == 2
             assert detail.json()["documents"][0]["duplicate_capture_count"] == 2
-            assert (
-                detail.json()["documents"][1]["duplicate_of_document_id"]
-                == str(document_id)
-            )
+            assert detail.json()["documents"][1]["duplicate_of_document_id"] == str(document_id)
 
             blocked = client.post(f"/api/v1/crm/cases/{case_id}/approve-fresh")
             assert blocked.status_code == 409
@@ -210,9 +297,7 @@ def test_batch_publication_is_atomic_and_requires_verified_case_data(monkeypatch
             yield session
 
     app.dependency_overrides[get_session] = session_override
-    monkeypatch.setattr(
-        "crm_domain.api.celery_app.send_task", lambda *args, **kwargs: _Task()
-    )
+    monkeypatch.setattr("crm_domain.api.celery_app.send_task", lambda *args, **kwargs: _Task())
     try:
         with TestClient(app) as client:
             statistics = client.get("/api/v1/crm/cases/statistics")
@@ -239,8 +324,7 @@ def test_batch_publication_is_atomic_and_requires_verified_case_data(monkeypatch
             with Session(engine) as session:
                 assert session.exec(select(PaperlessPublication)).all() == []
                 assert all(
-                    session.get(ComplaintCase, case_id).state == "fresh"
-                    for case_id in case_ids
+                    session.get(ComplaintCase, case_id).state == "fresh" for case_id in case_ids
                 )
                 second = session.get(ComplaintCase, case_ids[1])
                 assert second is not None
@@ -264,8 +348,7 @@ def test_batch_publication_is_atomic_and_requires_verified_case_data(monkeypatch
         with Session(engine) as session:
             assert len(session.exec(select(PaperlessPublication)).all()) == 2
             assert all(
-                session.get(ComplaintCase, case_id).state == "publishing"
-                for case_id in case_ids
+                session.get(ComplaintCase, case_id).state == "publishing" for case_id in case_ids
             )
     finally:
         app.dependency_overrides.clear()

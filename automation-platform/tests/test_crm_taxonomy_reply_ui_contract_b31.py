@@ -9,6 +9,8 @@ TAXONOMY = ROOT / "apps/web/src/pages/crm/taxonomy/index.astro"
 REPLIES = ROOT / "apps/web/src/pages/crm/replies/index.astro"
 EDITOR = ROOT / "apps/web/src/pages/crm/replies/[id].astro"
 CASE = ROOT / "apps/web/src/pages/crm/cases/[id].astro"
+CASE_DETAILS = ROOT / "apps/web/src/pages/crm/cases/[id]/details.astro"
+CASE_HELPDESK = ROOT / "apps/web/src/pages/crm/cases/[id]/helpdesk.astro"
 HELPDESK = ROOT / "apps/web/src/pages/crm/helpdesk/index.astro"
 KNOWLEDGE = ROOT / "apps/web/src/pages/crm/knowledge/index.astro"
 MIGRATION = ROOT / "alembic/versions/e9b3c5d7f104_crm_taxonomy_and_reply_workspace.py"
@@ -83,16 +85,19 @@ def test_reply_editor_supports_every_status_and_verified_archive_rules() -> None
         "Helpdesk could not be read",
     ):
         assert token in source
-    assert 'ai.disabled=!approved' in source
-    assert 'if(!approved)ai.checked=false' in source
+    assert "ai.disabled=!approved" in source
+    assert "if(!approved)ai.checked=false" in source
 
 
 def test_case_page_has_controlled_classification_and_reply_entry_points() -> None:
-    source = CASE.read_text(encoding="utf-8")
+    redirect_source = CASE.read_text(encoding="utf-8")
+    source = CASE_DETAILS.read_text(encoding="utf-8")
+    helpdesk_source = CASE_HELPDESK.read_text(encoding="utf-8")
+    assert "/overview" in redirect_source
     assert "Authoritative classification" in source
-    assert "Save and sync" in source
+    assert "Save classification" in source
     assert "/crm/taxonomy/" in source
-    assert "/crm/replies/${caseId}/" in source
+    assert "/crm/replies/${caseId}/" in helpdesk_source
     assert "saveCaseClassification" in source
     assert ".catch(()=>({categories:[]}))" in source
 

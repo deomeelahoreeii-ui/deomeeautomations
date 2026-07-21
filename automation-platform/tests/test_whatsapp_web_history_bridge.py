@@ -34,12 +34,13 @@ class FakeBridge:
             return FakeMessage(
                 {
                     "provider": "wwebjs",
-                    "protocolVersion": 3,
+                    "protocolVersion": 4,
                     "workerId": "default",
                     "status": "ready",
                     "ready": True,
                     "mode": "visible_profile",
                     "historyReady": True,
+                    "capabilities": {"dateRange": True, "receivedOnly": True},
                     "visibleProfile": {"profileDirectory": "Profile 1"},
                 }
             )
@@ -177,9 +178,7 @@ def test_all_history_scope_is_audited_and_sent_with_safety_limit(tmp_path, monke
         assert response.status_code == 202, response.text
         assert response.json()["requested_count"] == 5000
         assert response.json()["all_history"] is True
-        _, payload = next(
-            item for item in fake.requests if item[1]["action"] == "request_history"
-        )
+        _, payload = next(item for item in fake.requests if item[1]["action"] == "request_history")
         assert payload["count"] == 5000
         assert payload["allHistory"] is True
     finally:
@@ -197,24 +196,67 @@ def test_custom_history_count_above_old_limit_is_preserved(tmp_path, monkeypatch
         assert response.status_code == 202, response.text
         assert response.json()["requested_count"] == 1234
         assert response.json()["all_history"] is False
-        _, payload = next(
-            item for item in fake.requests if item[1]["action"] == "request_history"
-        )
+        _, payload = next(item for item in fake.requests if item[1]["action"] == "request_history")
         assert payload["count"] == 1234
         assert payload["allHistory"] is False
     finally:
         app.dependency_overrides.clear()
 
 
+def test_date_range_scope_is_audited_and_sent_as_received_only(tmp_path, monkeypatch):
+    contact_id, fake = make_app(tmp_path, monkeypatch)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/whatsapp/inbound/history/request",
+                json={
+                    "contact_id": str(contact_id),
+                    "count": 50,
+                    "date_from": "2026-07-01T00:00:00+05:00",
+                    "date_to": "2026-07-11T00:00:00+05:00",
+                },
+            )
+        assert response.status_code == 202, response.text
+        body = response.json()
+        assert body["requested_count"] == 5000
+        assert body["received_only"] is True
+        assert body["date_from"] == "2026-06-30T19:00:00"
+        assert body["date_to"] == "2026-07-10T19:00:00"
+        requests = [item[1] for item in fake.requests]
+        assert requests[0]["action"] == "bridge_health"
+        payload = next(item for item in requests if item["action"] == "request_history")
+        assert payload["afterTimestamp"] == "2026-06-30T19:00:00Z"
+        assert payload["beforeTimestamp"] == "2026-07-10T19:00:00Z"
+        assert payload["receivedOnly"] is True
+        assert payload["anchorMessageId"] is None
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_invalid_date_range_is_rejected_before_a_run_is_created(tmp_path, monkeypatch):
+    contact_id, _fake = make_app(tmp_path, monkeypatch)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/whatsapp/inbound/history/request",
+                json={
+                    "contact_id": str(contact_id),
+                    "date_from": "2026-07-11T00:00:00Z",
+                    "date_to": "2026-07-01T00:00:00Z",
+                },
+            )
+        assert response.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_bridge_source_files_are_pinned_and_baileys_is_preserved() -> None:
     root = Path(__file__).resolve().parents[2]
-    package = json.loads(
-        (root / "whatsapp-web-history-bridge" / "package.json").read_text()
-    )
+    package = json.loads((root / "whatsapp-web-history-bridge" / "package.json").read_text())
     assert package["dependencies"]["whatsapp-web.js"] == "1.34.7"
-    assert package["version"] == "1.3.0"
+    assert package["version"] == "1.4.0"
     config_source = (root / "whatsapp-web-history-bridge" / "lib" / "config.js").read_text()
-    assert "protocolVersion: 3" in config_source
+    assert "protocolVersion: 4" in config_source
     assert 'process.env.WWEBJS_MODE || "visible_profile"' in config_source
     assert (root / "whatsapp-web-history-bridge" / "lib" / "page-session.js").is_file()
     assert (root / "whatsappbot" / "lib" / "inbound-history.js").is_file()

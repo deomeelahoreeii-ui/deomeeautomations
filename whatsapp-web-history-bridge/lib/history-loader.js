@@ -44,12 +44,13 @@ function dedupeMessages(messages) {
   return [...unique.values()];
 }
 
-function eligibleMessages(messages, { beforeSeconds, anchorMessageId, wanted }) {
+function eligibleMessages(messages, { afterSeconds, beforeSeconds, anchorMessageId, wanted }) {
   const eligible = dedupeMessages(messages)
     .filter((message) => !message.fromMe)
     .filter((message) => {
-      if (beforeSeconds == null) return true;
       const timestamp = messageTimestampSeconds(message);
+      if (afterSeconds != null && timestamp < afterSeconds) return false;
+      if (beforeSeconds == null) return true;
       if (timestamp < beforeSeconds) return true;
       return Boolean(anchorMessageId) && timestamp === beforeSeconds && messageKey(message) !== String(anchorMessageId);
     })
@@ -305,6 +306,7 @@ async function fetchHistoryPage(client, chat, limit, timeoutMs, pageRecoveryTime
 }
 
 export async function fetchOlderMessages(client, chat, {
+  afterTimestamp = null,
   beforeTimestamp = null,
   anchorMessageId = null,
   count = 50,
@@ -316,7 +318,9 @@ export async function fetchOlderMessages(client, chat, {
   pageRecoveryTimeoutMs = 30000,
 } = {}) {
   const wanted = Math.max(1, Number(count) || 50);
+  const afterMs = afterTimestamp ? Date.parse(afterTimestamp) : Number.NaN;
   const beforeMs = beforeTimestamp ? Date.parse(beforeTimestamp) : Number.NaN;
+  const afterSeconds = Number.isFinite(afterMs) ? Math.floor(afterMs / 1000) : null;
   const beforeSeconds = Number.isFinite(beforeMs) ? Math.floor(beforeMs / 1000) : null;
   const diagnostics = { sync: null, pages: [] };
 
@@ -351,7 +355,7 @@ export async function fetchOlderMessages(client, chat, {
     }
     diagnostics.pages.push(page.diagnostic);
     messages = dedupeMessages(page.messages);
-    const eligible = eligibleMessages(messages, { beforeSeconds, anchorMessageId, wanted });
+    const eligible = eligibleMessages(messages, { afterSeconds, beforeSeconds, anchorMessageId, wanted });
     if (eligible.length >= wanted) return { messages: eligible, diagnostics };
     if (messages.length < limit || messages.length === lastSize || limit >= maxScan) {
       return { messages: eligible, diagnostics };

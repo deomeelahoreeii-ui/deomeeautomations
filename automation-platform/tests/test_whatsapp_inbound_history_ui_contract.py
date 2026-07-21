@@ -24,7 +24,7 @@ def test_crm_intake_workspace_is_split_into_focused_subnavigation() -> None:
 
 def test_legacy_whatsapp_intake_url_redirects_to_crm() -> None:
     source = LEGACY_FETCH_PAGE.read_text(encoding="utf-8")
-    assert 'Astro.redirect(`/crm/intake/${Astro.url.search}`, 308)' in source
+    assert "Astro.redirect(`/crm/intake/${Astro.url.search}`, 308)" in source
 
 
 def test_crm_owns_complaint_intake_and_whatsapp_retains_capture_health() -> None:
@@ -39,19 +39,22 @@ def test_crm_owns_complaint_intake_and_whatsapp_retains_capture_health() -> None
 
 def test_history_fetch_console_polls_persisted_batch_activity() -> None:
     source = FETCH_PAGE.read_text(encoding="utf-8")
-    assert "Intake readiness" in source
+    assert "Contact history" in source
     assert "actions.whatsapp.inboundBatchEvents" in source
     assert "actions.whatsapp.inboundBatch" in source
-    assert "window.setInterval(()=>void loadBatch(),2000)" in source
+    assert "window.setInterval(() => void loadBatch(), 2000)" in source
     assert "Activity from the server will appear here" in source
-    assert "data.batch_id" not in source  # the response is assigned before use
-    assert "currentBatchId=d.batch_id" in source
+    assert "const data = result.data as any" in source
+    assert "currentBatchId = data.batch_id" in source
 
 
 def test_batch_management_pages_expose_files_activity_and_retry() -> None:
     listing = BATCH_PAGE.read_text(encoding="utf-8")
     detail = DETAIL_PAGE.read_text(encoding="utf-8")
-    assert "WhatsApp complaint intake history" in listing
+    assert "WhatsApp complaint captures" in listing
+    assert "DataTable" in listing
+    assert 'id="batch-search"' in listing
+    assert 'id="batch-status"' in listing
     assert "actions.whatsapp.inboundBatches" in listing
     assert "Live server log" in detail
     assert "actions.whatsapp.inboundBatchEvents" in detail
@@ -61,7 +64,19 @@ def test_batch_management_pages_expose_files_activity_and_retry() -> None:
 
 def test_fetch_page_requires_managed_visible_profile_bridge() -> None:
     source = FETCH_PAGE.read_text(encoding="utf-8")
-    assert 'state.textContent=bridgeReady?"Managed browser ready"' in source
-    assert "Managed Brave page ready" in source
-    assert "Turn a WhatsApp conversation into reviewable complaint evidence" in source
-    assert "CRM will preserve the source history" in source
+    assert 'state.textContent = bridgeReady ? "WhatsApp ready"' in source
+    assert "Only messages and supported files received" in source
+    assert "Sent-by-you messages will be excluded" in source
+
+
+def test_fetch_page_supports_received_only_date_range_intake() -> None:
+    source = FETCH_PAGE.read_text(encoding="utf-8")
+    assert 'value="range"' in source
+    assert 'id="inbound-date-from"' in source
+    assert 'id="inbound-date-to"' in source
+    assert "date_from: rangeFrom" in source
+    assert "date_to: rangeTo" in source
+    assert "bridgeSupportsDateRange" in source
+    assert "files_stored" in source
+    assert "files_failed" in source
+    assert "terminalStatuses.has(batch.status)" in source

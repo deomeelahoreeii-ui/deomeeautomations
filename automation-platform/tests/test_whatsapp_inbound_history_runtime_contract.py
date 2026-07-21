@@ -27,4 +27,12 @@ def test_dev_stack_starts_whatsapp_web_history_bridge() -> None:
     source = DEV_SCRIPT.read_text(encoding="utf-8")
     assert "whatsapp-web-history-bridge" in source
     assert "whatsapp_web_bridge_responder_ready" in source
-    assert "Starting whatsapp-web.js history bridge" in source
+    assert 'int(payload.get("protocolVersion") or 0) < 4' in source
+    assert "Starting whatsapp-web.js history bridge protocol v4" in source
+
+
+def test_dev_stack_fails_early_for_unwritable_frontend_caches() -> None:
+    source = DEV_SCRIPT.read_text(encoding="utf-8")
+    assert "assert_frontend_generated_paths_writable" in source
+    assert 'find "$path" ! -writable' in source
+    assert "sudo chown -R" in source

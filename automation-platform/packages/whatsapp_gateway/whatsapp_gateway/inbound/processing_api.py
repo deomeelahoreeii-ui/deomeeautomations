@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import tempfile
 import uuid
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -19,9 +18,7 @@ from crm_domain.identifiers import normalize_complaint_number
 from whatsapp_gateway.inbound.processing import (
     complaint_group_summary,
     create_processing_run,
-    processing_counts,
     recalculate_processing_run,
-    serialize_processing_event,
     serialize_processing_item,
     serialize_processing_run,
     update_review_decision,
@@ -35,7 +32,6 @@ from whatsapp_gateway.models import (
     WhatsAppInboundAttachment,
     WhatsAppInboundBatch,
     WhatsAppInboundBatchItem,
-    WhatsAppInboundProcessingEvent,
     WhatsAppInboundProcessingItem,
     WhatsAppInboundProcessingRun,
     WhatsAppInboundStoredObject,
@@ -110,110 +106,6 @@ def create_inbound_processing_run(
         }
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-def list_inbound_processing_runs(
-    status_filter: str | None = Query(default=None, alias="status"),
-    category: str | None = Query(default=None),
-    search: str | None = Query(default=None, max_length=120),
-    limit: int = Query(default=50, ge=1, le=200),
-    session: Session = Depends(get_session),
-) -> dict[str, Any]:
-    query = select(WhatsAppInboundProcessingRun)
-    if status_filter:
-        query = query.where(WhatsAppInboundProcessingRun.status == status_filter)
-    rows = list(
-        session.exec(
-            query.order_by(WhatsAppInboundProcessingRun.created_at.desc()).limit(limit)
-        ).all()
-    )
-    term = (search or "").strip().casefold()
-    items: list[dict[str, Any]] = []
-    for run in rows:
-        view = serialize_processing_run(session, run)
-        if category:
-            category_count = {
-                "crm_complaint": run.crm_complaints,
-                "possible_crm_complaint": run.possible_crm,
-                "crm_supporting_document": run.supporting_documents,
-                "crm_reply_or_report": run.reply_reports,
-                "duplicate_in_paperless": run.duplicate_items,
-                "eligible": run.eligible_items,
-                "needs_review": run.review_items,
-                "failed": run.failed_items,
-            }.get(category, 0)
-            if not category_count:
-                continue
-        if term and term not in " ".join(
-            str(view.get(key) or "").casefold()
-            for key in ("run_code", "batch_code", "contact_name", "contact_identity", "status")
-        ):
-            continue
-        items.append(view)
-    return {"items": items, "counts": processing_counts(session)}
-
-
-def read_inbound_processing_run(
-    run_id: uuid.UUID,
-    category: str | None = Query(default=None),
-    review_status: str | None = Query(default=None),
-    session: Session = Depends(get_session),
-) -> dict[str, Any]:
-    run = session.get(WhatsAppInboundProcessingRun, run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="Inbound processing run not found")
-    query = select(WhatsAppInboundProcessingItem).where(
-        WhatsAppInboundProcessingItem.run_id == run.id
-    )
-    if category:
-        if category == "crm":
-            query = query.where(
-                WhatsAppInboundProcessingItem.primary_category.in_(
-                    [
-                        "crm_complaint",
-                        "possible_crm_complaint",
-                        "crm_supporting_document",
-                        "crm_reply_or_report",
-                    ]
-                )
-            )
-        elif category == "duplicate_in_paperless":
-            query = query.where(WhatsAppInboundProcessingItem.status == category)
-        elif category == "needs_review":
-            query = query.where(WhatsAppInboundProcessingItem.status == category)
-        elif category == "eligible":
-            query = query.where(WhatsAppInboundProcessingItem.status.in_(["eligible", "approved"]))
-        else:
-            query = query.where(WhatsAppInboundProcessingItem.primary_category == category)
-    if review_status:
-        query = query.where(WhatsAppInboundProcessingItem.review_status == review_status)
-    items = list(
-        session.exec(query.order_by(WhatsAppInboundProcessingItem.created_at)).all()
-    )
-    return {
-        **serialize_processing_run(session, run),
-        "complaint_groups": complaint_group_summary(session, run.id),
-        "items": [serialize_processing_item(session, item) for item in items],
-    }
-
-
-def list_inbound_processing_events(
-    run_id: uuid.UUID,
-    after: datetime | None = Query(default=None),
-    limit: int = Query(default=500, ge=1, le=2000),
-    session: Session = Depends(get_session),
-) -> dict[str, Any]:
-    if session.get(WhatsAppInboundProcessingRun, run_id) is None:
-        raise HTTPException(status_code=404, detail="Inbound processing run not found")
-    query = select(WhatsAppInboundProcessingEvent).where(
-        WhatsAppInboundProcessingEvent.run_id == run_id
-    )
-    if after is not None:
-        query = query.where(WhatsAppInboundProcessingEvent.created_at > after)
-    events = session.exec(
-        query.order_by(WhatsAppInboundProcessingEvent.created_at.asc()).limit(limit)
-    ).all()
-    return {"items": [serialize_processing_event(event) for event in events]}
 
 
 def review_inbound_processing_item(
@@ -306,8 +198,7 @@ def batch_approve_inbound_complaint_groups(
         raise HTTPException(status_code=422, detail="Every selected complaint number must be valid")
     numbers = list(dict.fromkeys(value for value in normalized if value))
     groups = {
-        str(group["complaint_number"]): group
-        for group in complaint_group_summary(session, run.id)
+        str(group["complaint_number"]): group for group in complaint_group_summary(session, run.id)
     }
     missing = [number for number in numbers if number not in groups]
     stale = [
@@ -384,7 +275,9 @@ def preview_inbound_processing_item(
         stored = session.get(WhatsAppInboundStoredObject, item.stored_object_id)
         if stored is None:
             raise HTTPException(status_code=409, detail="RustFS object ledger record is missing")
-        handle = tempfile.NamedTemporaryFile(prefix="wa-preview-", suffix=Path(filename).suffix, delete=False)
+        handle = tempfile.NamedTemporaryFile(
+            prefix="wa-preview-", suffix=Path(filename).suffix, delete=False
+        )
         handle.close()
         try:
             S3ObjectStorage(settings).download_file(
@@ -394,7 +287,9 @@ def preview_inbound_processing_item(
             )
         except Exception as exc:
             _remove_file(handle.name)
-            raise HTTPException(status_code=502, detail=f"Could not read object storage: {exc}") from exc
+            raise HTTPException(
+                status_code=502, detail=f"Could not read object storage: {exc}"
+            ) from exc
         background_tasks.add_task(_remove_file, handle.name)
         return FileResponse(
             handle.name,

@@ -47,6 +47,9 @@ def complaint_group_summary(
                 "confidence_total": 0.0,
                 "minimum_confidence": 1.0,
                 "paperless_categories": {},
+                "paperless_document_ids": [],
+                "paperless_statuses": [],
+                "paperless_reasons": [],
                 "files": [],
                 "complainant_name": None,
                 "district": None,
@@ -68,6 +71,14 @@ def complaint_group_summary(
         group["paperless_categories"][paperless] = (
             group["paperless_categories"].get(paperless, 0) + 1
         )
+        for document_id in item.paperless_document_ids or []:
+            if document_id not in group["paperless_document_ids"]:
+                group["paperless_document_ids"].append(document_id)
+        for paperless_status in item.paperless_statuses or []:
+            if paperless_status not in group["paperless_statuses"]:
+                group["paperless_statuses"].append(paperless_status)
+        if item.paperless_reason and item.paperless_reason not in group["paperless_reasons"]:
+            group["paperless_reasons"].append(item.paperless_reason)
         batch_item = session.get(WhatsAppInboundBatchItem, item.batch_item_id)
         group["files"].append(
             {
@@ -83,14 +94,10 @@ def complaint_group_summary(
                 observation.field_name: observation.normalized_value
                 for observation in extract_field_observations(item.extracted_text or "")
             }
-            group["complainant_name"] = group["complainant_name"] or fields.get(
-                "complainant_name"
-            )
+            group["complainant_name"] = group["complainant_name"] or fields.get("complainant_name")
             group["district"] = group["district"] or fields.get("district")
 
-    approved_runs_by_number: dict[str, set[uuid.UUID]] = {
-        number: set() for number in groups
-    }
+    approved_runs_by_number: dict[str, set[uuid.UUID]] = {number: set() for number in groups}
     if groups:
         approved_rows = session.exec(
             select(
@@ -98,9 +105,7 @@ def complaint_group_summary(
                 WhatsAppInboundProcessingItem.detected_complaint_number,
             ).where(
                 WhatsAppInboundProcessingItem.review_status == "approved",
-                WhatsAppInboundProcessingItem.detected_complaint_number.in_(
-                    list(groups)
-                ),
+                WhatsAppInboundProcessingItem.detected_complaint_number.in_(list(groups)),
             )
         ).all()
         for approved_run_id, approved_number in approved_rows:
@@ -111,9 +116,26 @@ def complaint_group_summary(
     for number in sorted(groups):
         group = groups[number]
         count = int(group["item_count"])
-        group["average_confidence"] = (
-            float(group.pop("confidence_total")) / count if count else 0.0
+        group["average_confidence"] = float(group.pop("confidence_total")) / count if count else 0.0
+        paperless_priority = (
+            "manual_review",
+            "submitted",
+            "uploaded_not_relevant",
+            "uploaded_pending",
+            "fresh",
+            "unavailable",
+            "not_checked",
+            "not_applicable",
         )
+        group["paperless_category"] = next(
+            (
+                category
+                for category in paperless_priority
+                if category in group["paperless_categories"]
+            ),
+            "not_checked",
+        )
+        group["paperless_match_count"] = len(group["paperless_document_ids"])
         if group["approved_items"] == count:
             group["review_bucket"] = "approved"
         elif group["rejected_items"] == count:
@@ -133,8 +155,6 @@ def complaint_group_summary(
         group["case_id"] = str(complaint_case.id) if complaint_case else None
         group["case_state"] = complaint_case.state if complaint_case else None
         group["approved_run_count"] = len(approved_runs_by_number[number])
-        group["approved_in_other_runs"] = bool(
-            approved_runs_by_number[number].difference({run_id})
-        )
+        group["approved_in_other_runs"] = bool(approved_runs_by_number[number].difference({run_id}))
         result.append(group)
     return result

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -35,6 +35,17 @@ from whatsapp_gateway.models import (
     WhatsAppInboundMessage,
     WhatsAppInboundProcessingRun,
 )
+
+
+def _sort_value(value: object) -> tuple[int, object]:
+    """Keep nulls together while preserving numeric and chronological ordering."""
+    if value is None:
+        return (0, "")
+    if isinstance(value, datetime):
+        return (1, value.timestamp())
+    if isinstance(value, (int, float)):
+        return (1, value)
+    return (1, str(value).casefold())
 
 
 def object_storage_status(
@@ -75,7 +86,8 @@ def _batch_view(session: Session, batch: WhatsAppInboundBatch) -> dict[str, Any]
         ).first()
     return {
         **serialize_batch(batch),
-        "contact_name": (resolved_contact_name(session, contact) if contact else "") or str(push_name or "Unnamed contact"),
+        "contact_name": (resolved_contact_name(session, contact) if contact else "")
+        or str(push_name or "Unnamed contact"),
         "contact_identity": (
             (contact.phone_jid or contact.primary_lid_jid or contact.canonical_key)
             if contact
@@ -100,6 +112,9 @@ def list_inbound_batches(
     status: str | None = Query(default=None),
     search: str | None = Query(default=None, max_length=120),
     limit: int = Query(default=25, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    sort: str = Query(default="created_at", max_length=40),
+    order: Literal["asc", "desc"] = Query(default="desc"),
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
@@ -108,11 +123,7 @@ def list_inbound_batches(
         query = query.where(WhatsAppInboundBatch.contact_id == contact_id)
     if status:
         query = query.where(WhatsAppInboundBatch.status == status)
-    rows = list(
-        session.exec(
-            query.order_by(WhatsAppInboundBatch.created_at.desc()).limit(limit)
-        ).all()
-    )
+    rows = list(session.exec(query).all())
     items: list[dict[str, Any]] = []
     term = (search or "").strip().lower()
     for row in rows:
@@ -125,6 +136,20 @@ def list_inbound_batches(
         ):
             continue
         items.append(view)
+    sort_keys = {
+        "batch_code": "batch_code",
+        "contact_name": "contact_name",
+        "status": "status",
+        "messages_discovered": "messages_discovered",
+        "files_discovered": "files_discovered",
+        "created_at": "created_at",
+    }
+    sort_key = sort_keys.get(sort, "created_at")
+    items.sort(
+        key=lambda item: _sort_value(item.get(sort_key)),
+        reverse=order == "desc",
+    )
+    filtered_total = len(items)
     session.commit()
     counts = {
         "total": int(session.exec(select(func.count()).select_from(WhatsAppInboundBatch)).one()),
@@ -150,7 +175,13 @@ def list_inbound_batches(
             ).one()
         ),
     }
-    return {"items": items, "counts": counts}
+    return {
+        "items": items[offset : offset + limit],
+        "total": filtered_total,
+        "limit": limit,
+        "offset": offset,
+        "counts": counts,
+    }
 
 
 async def read_inbound_batch(
@@ -167,9 +198,7 @@ async def read_inbound_batch(
         )
     ).first()
     if request is not None:
-        await refresh_history_request_from_worker(
-            session, item=request, settings=settings
-        )
+        await refresh_history_request_from_worker(session, item=request, settings=settings)
     batch = reconcile_batch(session, batch_id=batch_id, settings=settings)
     assert batch is not None
     items = session.exec(
@@ -192,9 +221,7 @@ def list_inbound_batch_events(
 ) -> dict[str, Any]:
     if session.get(WhatsAppInboundBatch, batch_id) is None:
         raise HTTPException(status_code=404, detail="Inbound batch not found")
-    query = select(WhatsAppInboundBatchEvent).where(
-        WhatsAppInboundBatchEvent.batch_id == batch_id
-    )
+    query = select(WhatsAppInboundBatchEvent).where(WhatsAppInboundBatchEvent.batch_id == batch_id)
     if after is not None:
         query = query.where(WhatsAppInboundBatchEvent.created_at > after)
     rows = session.exec(
@@ -213,13 +240,17 @@ def download_inbound_batch_item(
         raise HTTPException(status_code=404, detail="Inbound batch item not found")
     attachment = session.get(WhatsAppInboundAttachment, item.attachment_id)
     if attachment is None or not attachment.stored_path:
-        raise HTTPException(status_code=409, detail="This file is not available in the local compatibility archive")
+        raise HTTPException(
+            status_code=409, detail="This file is not available in the local compatibility archive"
+        )
     source = Path(attachment.stored_path)
     if not source.is_file():
         raise HTTPException(status_code=410, detail="The local compatibility file is missing")
     return FileResponse(
         source,
-        media_type=attachment.detected_mime_type or attachment.mime_type or "application/octet-stream",
+        media_type=attachment.detected_mime_type
+        or attachment.mime_type
+        or "application/octet-stream",
         filename=attachment.original_filename or source.name,
     )
 

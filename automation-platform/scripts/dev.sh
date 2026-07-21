@@ -178,6 +178,23 @@ wait_for_http() {
   fail "$label did not become ready at $url within ${seconds}s."
 }
 
+assert_frontend_generated_paths_writable() {
+  local path=""
+  local blocked_path=""
+  local owner="$(id -u):$(id -g)"
+
+  for path in \
+    "$WEB_DIR/node_modules/.vite" \
+    "$WEB_DIR/.astro" \
+    "$WEB_DIR/dist"; do
+    [[ -e "$path" ]] || continue
+    blocked_path="$(find "$path" ! -writable -print -quit 2>/dev/null || true)"
+    if [[ -n "$blocked_path" ]]; then
+      fail "Frontend generated files are not writable: $blocked_path. This usually means a container wrote them as another user. Repair them with: sudo chown -R $owner '$WEB_DIR/node_modules/.vite' '$WEB_DIR/.astro' '$WEB_DIR/dist'"
+    fi
+  done
+}
+
 find_running_platform_worker_pids() {
   local process_dir=""
   local process_pid=""
@@ -525,7 +542,7 @@ import os
 payload = json.loads(os.environ["HEALTH_JSON"])
 if payload.get("provider") != "wwebjs":
     raise SystemExit(1)
-if int(payload.get("protocolVersion") or 0) < 3:
+if int(payload.get("protocolVersion") or 0) < 4:
     raise SystemExit(1)
 if str(payload.get("status") or "").lower() in {"failed", "disconnected", "auth_failure"}:
     raise SystemExit(1)
@@ -750,6 +767,7 @@ if [[ ! -x "$WEB_DIR/node_modules/.bin/astro" || -n "$current_hash" && "$current
 else
   echo "Frontend dependencies are already synchronized."
 fi
+assert_frontend_generated_paths_writable
 
 info "Synchronizing WhatsApp worker dependencies"
 if command -v pnpm >/dev/null 2>&1; then
@@ -890,7 +908,7 @@ else
 fi
 
 if whatsapp_web_bridge_responder_ready; then
-  echo "An existing whatsapp-web.js history bridge protocol v3 is running; it will be reused."
+  echo "An existing whatsapp-web.js history bridge protocol v4 is running; it will be reused."
 else
   mapfile -t existing_bridge_pids < <(find_running_whatsapp_web_bridge_pids)
   if whatsapp_web_bridge_any_responder || ((${#existing_bridge_pids[@]})); then
@@ -899,7 +917,7 @@ else
   fi
   info "Preparing the managed WhatsApp Web browser snapshot"
   prepare_whatsapp_web_snapshot_for_start
-  info "Starting whatsapp-web.js history bridge protocol v3"
+  info "Starting whatsapp-web.js history bridge protocol v4"
   (
     cd "$WWEBJS_DIR"
     exec node bridge.js

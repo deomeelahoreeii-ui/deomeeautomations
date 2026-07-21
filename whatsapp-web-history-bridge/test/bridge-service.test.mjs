@@ -39,7 +39,7 @@ function config(overrides = {}) {
     allowLocalAuthHistory: false,
     allowBrowserUrlHistory: false,
     pageRecoveryTimeoutMs: 1000,
-    protocolVersion: 3,
+    protocolVersion: 4,
     ...overrides,
   };
 }
@@ -98,16 +98,17 @@ test("local_auth is explicitly blocked because it is not the visible browser pro
   );
 });
 
-test("health exposes protocol 3 and the managed visible profile", () => {
+test("health exposes date-range received-only capabilities", () => {
   const instance = service();
   const health = instance.health();
-  assert.equal(health.protocolVersion, 3);
+  assert.equal(health.protocolVersion, 4);
   assert.equal(health.ready, true);
   assert.equal(health.historyReady, true);
   assert.equal(health.mode, "visible_profile");
   assert.equal(health.browserUrl, null);
   assert.equal(health.visibleProfile.profileDirectory, "Profile 1");
   assert.equal(health.chatResolver, "native_store_v1");
+  assert.deepEqual(health.capabilities, { dateRange: true, receivedOnly: true });
 });
 
 test("health keeps LocalAuth alive but marks it unusable for history", () => {

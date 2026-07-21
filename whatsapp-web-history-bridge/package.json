@@ -1,6 +1,6 @@
 {
   "name": "deomee-whatsapp-web-history-bridge",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "description": "Historical WhatsApp file bridge backed by the official WhatsApp Web client through whatsapp-web.js",
   "type": "module",

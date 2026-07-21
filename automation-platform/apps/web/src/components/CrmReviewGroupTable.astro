@@ -1,0 +1,100 @@
+---
+import DataTable from "./DataTable.astro";
+
+interface Props {
+  runId: string;
+  view: "ready" | "manual_review" | "existing" | "decided";
+  title: string;
+  description: string;
+}
+
+const { runId, view, title, description } = Astro.props;
+const tableId = `review-groups-${view}`;
+---
+
+<section class="master-card crm-table-workspace" data-review-group-table data-run-id={runId} data-view={view}>
+  <div class="inbound-card-heading">
+    <div><p class="eyebrow">Complaint groups</p><h2>{title}</h2><p>{description}</p></div>
+    {view === "ready" && <button class="btn btn-sm btn-primary" type="button" data-approve-selected disabled>Approve selected</button>}
+  </div>
+  <div class="toolbar crm-table-filters">
+    <input class="input input-bordered input-sm" data-group-search placeholder="Search complaint, complainant, district or file" aria-label="Search complaint groups" />
+    <select class="select select-bordered select-sm" data-paperless-filter aria-label="Filter by Paperless result">
+      <option value="">All Paperless results</option>
+      <option value="fresh">No Paperless match</option>
+      <option value="submitted">Existing · Submitted</option>
+      <option value="uploaded_pending">Existing · Pending</option>
+      <option value="uploaded_not_relevant">Existing · Not Relevant</option>
+      <option value="manual_review">Conflicting matches</option>
+      <option value="unavailable">Check unavailable</option>
+    </select>
+    <select class="select select-bordered select-sm" data-confidence-filter aria-label="Filter by confidence">
+      <option value="">Any confidence</option>
+      <option value="0.9">90% and above</option>
+      <option value="0.8">80% and above</option>
+      <option value="0.6">60% and above</option>
+    </select>
+    {view === "decided" && (
+      <select class="select select-bordered select-sm" data-decision-filter aria-label="Filter by decision">
+        <option value="">Approved and rejected</option>
+        <option value="approved">Approved</option>
+        <option value="rejected">Rejected</option>
+      </select>
+    )}
+    <button class="btn btn-sm" type="button" data-clear-filters>Clear filters</button>
+    <span class="toolbar-status" data-result-count>Loading…</span>
+  </div>
+  <div class="alert" data-table-message hidden></div>
+  <DataTable id={tableId} pageSize={25} pageSizeOptions={[10,25,50,100]} emptyText="No complaint groups match this view." ariaLabel={title} />
+</section>
+
+<style is:global>
+  .crm-table-workspace{padding:1.05rem 1.15rem}.crm-table-workspace h2{margin:.12rem 0}.crm-table-workspace .inbound-card-heading p:last-child{margin:.25rem 0 0;color:#66758a}.crm-table-filters{display:grid;grid-template-columns:minmax(15rem,1fr) 14rem 11rem auto auto;gap:.55rem;align-items:center;margin:.9rem 0}.crm-table-filters .toolbar-status{justify-self:end;color:#68778a;font-size:.72rem}.crm-table-primary{display:block;color:#243247;font-weight:800}.crm-table-secondary{display:block;margin-top:.16rem;color:#758396;font-size:.68rem}.crm-table-status{display:inline-flex;border-radius:999px;background:#edf3f6;padding:.25rem .5rem;color:#526476;font-size:.68rem;font-weight:800}.crm-table-status.ready,.crm-table-status.approved{background:#e7f8f1;color:#176b57}.crm-table-status.manual_review{background:#fff4dc;color:#8b5a0a}.crm-table-status.existing{background:#e9f5fb;color:#15677a}.crm-table-status.rejected{background:#fff0f1;color:#9e3038}.crm-table-actions{display:flex;gap:.35rem;justify-content:flex-end;white-space:nowrap}.crm-table-select{display:grid;place-items:center}.crm-table-select input{accent-color:#16879a}@media(max-width:1050px){.crm-table-filters{grid-template-columns:1fr 1fr}.crm-table-filters .toolbar-status{justify-self:start}}@media(max-width:650px){.crm-table-filters{grid-template-columns:1fr}}
+</style>
+
+<script>
+  import { actions } from "astro:actions";
+  import { paperlessLinkSummary, reviewBucketLabel } from "../lib/crm-status";
+
+  await customElements.whenDefined("astro-data-table");
+  const root=document.querySelector<HTMLElement>("[data-review-group-table]")!;
+  const runId=root.dataset.runId!,view=root.dataset.view!;
+  const table=root.querySelector<any>("astro-data-table");
+  const search=root.querySelector<HTMLInputElement>("[data-group-search]")!;
+  const paperless=root.querySelector<HTMLSelectElement>("[data-paperless-filter]")!;
+  const confidence=root.querySelector<HTMLSelectElement>("[data-confidence-filter]")!;
+  const decision=root.querySelector<HTMLSelectElement>("[data-decision-filter]");
+  const count=root.querySelector<HTMLElement>("[data-result-count]")!;
+  const message=root.querySelector<HTMLElement>("[data-table-message]")!;
+  const approveSelected=root.querySelector<HTMLButtonElement>("[data-approve-selected]");
+  const selected=new Set<string>();let visibleRows:any[]=[];let searchTimer:number|undefined;
+  const params=new URLSearchParams(location.search);
+  search.value=params.get("q")||"";paperless.value=params.get("paperless")||"";confidence.value=params.get("confidence")||"";if(decision)decision.value=params.get("decision")||"";
+  const initialPage=Math.max(0,Number(params.get("page")||1)-1),initialPageSize=Math.max(1,Number(params.get("page_size")||25)),initialSort=params.get("sort")||"complaint_number",initialOrder=params.get("order")==="desc"?"desc":"asc";
+  const node=(tag:string,className="",text="")=>{const value=document.createElement(tag);value.className=className;value.textContent=text;return value};
+  function showMessage(text:string,error=false){message.hidden=!text;message.className=`alert ${error?"alert-error":"alert-success"}`;message.textContent=text}
+  function syncUrl(pagination?:any,sorting?:any[]){const url=new URL(location.href);const values:any={q:search.value,paperless:paperless.value,confidence:confidence.value,decision:decision?.value||""};for(const [key,value] of Object.entries(values))value?url.searchParams.set(key,String(value)):url.searchParams.delete(key);if(pagination){url.searchParams.set("page",String(pagination.pageIndex+1));url.searchParams.set("page_size",String(pagination.pageSize))}if(sorting){const current=sorting[0];current?url.searchParams.set("sort",current.id):url.searchParams.delete("sort");current?url.searchParams.set("order",current.desc?"desc":"asc"):url.searchParams.delete("order")}history.replaceState({},"",url)}
+  function syncSelection(){if(!approveSelected)return;approveSelected.disabled=selected.size===0;approveSelected.textContent=selected.size?`Approve selected (${selected.size})`:"Approve selected"}
+  function selectionCell(group:any){const label=node("label","crm-table-select"),input=document.createElement("input");input.type="checkbox";input.checked=selected.has(group.complaint_number);input.setAttribute("aria-label",`Select complaint ${group.complaint_number}`);input.addEventListener("change",()=>{input.checked?selected.add(group.complaint_number):selected.delete(group.complaint_number);input.closest("tr")?.classList.toggle("selected",input.checked);syncSelection()});label.append(input);return label}
+  function selectionHeader(){const label=node("label","crm-table-select"),input=document.createElement("input");input.type="checkbox";const ids=visibleRows.map(row=>row.complaint_number);input.checked=ids.length>0&&ids.every(id=>selected.has(id));input.indeterminate=ids.some(id=>selected.has(id))&&!input.checked;input.setAttribute("aria-label","Select visible complaints");input.addEventListener("change",()=>{for(const id of ids)input.checked?selected.add(id):selected.delete(id);syncSelection();void table.refresh(false)});label.append(input);return label}
+  function primaryCell(primary:any,secondary:any=""){const wrap=node("div"),top=node("span","crm-table-primary",String(primary||"—"));wrap.append(top);if(secondary)wrap.append(node("small","crm-table-secondary",String(secondary)));return wrap}
+  function statusCell(value:any){return node("span",`crm-table-status ${String(value||"")}`,reviewBucketLabel(value))}
+  function paperlessCell(group:any){const documentId=(group.paperless_document_ids||[])[0],summary=paperlessLinkSummary(documentId,group.paperless_category,group.paperless_statuses||[]),reason=(group.paperless_reasons||[])[0]||"";return primaryCell(summary,reason)}
+  function evidenceCell(group:any){const filenames=group.files?.map((file:any)=>file.filename).slice(0,2).join(" · ")||"";const note=group.approved_in_other_runs?`Previously approved in ${group.approved_run_count} review run(s)`:filenames;return primaryCell(`${group.item_count} file${group.item_count===1?"":"s"}`,note)}
+  function actionCell(group:any){const wrap=node("div","crm-table-actions"),first=group.files?.[0];if(group.case_id){const link=node("a","btn btn-xs","Open case") as HTMLAnchorElement;link.href=`/crm/cases/${group.case_id}/overview`;wrap.append(link)}if(first){const review=node("a","btn btn-xs",view==="manual_review"?"Review evidence":"Open evidence") as HTMLAnchorElement;review.href=`/crm/intake/review/${runId}/items/${first.id}`;wrap.append(review)}if(["ready","manual_review"].includes(view)){for(const [value,label,className] of [["rejected","Reject","btn btn-xs"],["approved","Approve","btn btn-xs btn-primary"]]){const button=node("button",className,label) as HTMLButtonElement;button.type="button";button.addEventListener("click",()=>void decide(group,value));wrap.append(button)}}return wrap}
+  async function decide(group:any,decisionValue:string){if(!confirm(`${decisionValue==="approved"?"Approve":"Reject"} complaint ${group.complaint_number}?`))return;showMessage("");const result=await actions.whatsapp.reviewInboundComplaintGroup({runId,complaintNumber:group.complaint_number,decision:decisionValue as "approved"|"rejected",reviewed_by:"web-operator"});if(result.error){showMessage(result.error.message,true);return}selected.delete(group.complaint_number);showMessage(`Complaint ${group.complaint_number} ${decisionValue}.`);await table.refresh(false);syncSelection()}
+  const columns:any[]=[];
+  if(view==="ready")columns.push({id:"select",header:selectionHeader,cell:({row}:any)=>selectionCell(row.original),enableSorting:false,meta:{width:"2.8rem"}});
+  columns.push(
+    {accessorKey:"complaint_number",header:"Complaint",cell:({row}:any)=>primaryCell(row.original.complaint_number,row.original.complainant_name||"Complainant not extracted")},
+    {accessorKey:"district",header:"District",cell:({row}:any)=>row.original.district||"—"},
+    {accessorKey:"item_count",header:"Evidence",cell:({row}:any)=>evidenceCell(row.original)},
+    {accessorKey:"average_confidence",header:"Confidence",cell:({row}:any)=>`${Math.round(Number(row.original.average_confidence||0)*100)}%`},
+    {accessorKey:"paperless_category",header:"Paperless",cell:({row}:any)=>paperlessCell(row.original),meta:{minWidth:"16rem"}},
+    {accessorKey:"review_bucket",header:"Decision",cell:({row}:any)=>statusCell(row.original.review_bucket)},
+    {id:"actions",header:"",cell:({row}:any)=>actionCell(row.original),enableSorting:false,meta:{align:"right",minWidth:"12rem"}},
+  );
+  await table.configure({manualPagination:true,columns,initialPageIndex:initialPage,initialPageSize,initialSorting:[{id:initialSort,desc:initialOrder==="desc"}],onPageChange:(value:any)=>syncUrl(value),onSortingChange:(value:any[])=>syncUrl(undefined,value),getRowId:(row:any)=>row.complaint_number,rowClassName:(row:any)=>selected.has(row.complaint_number)?"selected":"",loadPage:async(pageIndex:number,pageSize:number,sorting:any[])=>{const currentSort=sorting[0],bucket=view==="decided"?(decision?.value||"decided"):view;const result=await actions.whatsapp.inboundComplaintGroups({runId,bucket,search:search.value.trim()||undefined,paperlessCategory:paperless.value||undefined,minimumConfidence:confidence.value?Number(confidence.value):undefined,limit:pageSize,offset:pageIndex*pageSize,sort:currentSort?.id||"complaint_number",order:currentSort?.desc?"desc":"asc"});if(result.error)throw new Error(result.error.message);const data=result.data as any;visibleRows=data.items||[];count.textContent=`${data.total} complaint group${data.total===1?"":"s"}`;return{rows:visibleRows,total:Number(data.total||0)}}});
+  async function refresh(){selected.clear();syncSelection();syncUrl({pageIndex:0,pageSize:table.getPagination().pageSize});await table.refresh(true)}
+  search.addEventListener("input",()=>{if(searchTimer)clearTimeout(searchTimer);searchTimer=window.setTimeout(()=>void refresh(),250)});for(const control of [paperless,confidence,decision])control?.addEventListener("change",()=>void refresh());root.querySelector("[data-clear-filters]")?.addEventListener("click",()=>{search.value="";paperless.value="";confidence.value="";if(decision)decision.value="";void refresh()});approveSelected?.addEventListener("click",async()=>{const complaintNumbers=[...selected];if(!complaintNumbers.length||!confirm(`Approve ${complaintNumbers.length} selected complaint group${complaintNumbers.length===1?"":"s"}?`))return;approveSelected.disabled=true;const result=await actions.whatsapp.batchApproveInboundComplaintGroups({runId,complaintNumbers,reviewed_by:"web-operator"});if(result.error){showMessage(result.error.message,true);syncSelection();return}selected.clear();showMessage(`${(result.data as any).approved_count} complaint group(s) approved.`);await table.refresh(false);syncSelection()});
+</script>

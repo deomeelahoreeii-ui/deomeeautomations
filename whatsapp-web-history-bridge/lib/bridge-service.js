@@ -79,6 +79,7 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
       const resolved = await resolveDirectChat(client, request.remoteJids || []);
       store.update(item.requestId, { diagnostics: { resolution: resolved.diagnostics } });
       const loaded = await fetchOlderMessages(client, resolved.chat, {
+        afterTimestamp: request.afterTimestamp || null,
         beforeTimestamp: request.beforeTimestamp || null,
         anchorMessageId: request.anchorMessageId || null,
         count: item.requestedCount,
@@ -178,6 +179,16 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
     if (requestedCount < 1 || requestedCount > config.maxHistoryCount) {
       throw new Error(`History count must be between 1 and ${config.maxHistoryCount}`);
     }
+    if (request.receivedOnly === false) {
+      throw new Error("Complaint intake only supports messages received from the selected contact");
+    }
+    const afterMs = request.afterTimestamp ? Date.parse(request.afterTimestamp) : Number.NaN;
+    const beforeMs = request.beforeTimestamp ? Date.parse(request.beforeTimestamp) : Number.NaN;
+    if (request.afterTimestamp && !Number.isFinite(afterMs)) throw new Error("afterTimestamp is invalid");
+    if (request.beforeTimestamp && !Number.isFinite(beforeMs)) throw new Error("beforeTimestamp is invalid");
+    if (Number.isFinite(afterMs) && Number.isFinite(beforeMs) && afterMs >= beforeMs) {
+      throw new Error("afterTimestamp must be earlier than beforeTimestamp");
+    }
     const count = request.allHistory ? config.maxHistoryCount : requestedCount;
     const requestId = String(request.requestId || "").trim();
     if (!requestId) throw new Error("requestId is required");
@@ -190,9 +201,19 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
       remoteJid: request.platformRemoteJid || remoteJids[0],
       anchorMessageId: request.anchorMessageId || null,
       anchorTimestamp: request.beforeTimestamp || null,
+      dateFrom: request.afterTimestamp || null,
+      dateTo: request.beforeTimestamp || null,
+      receivedOnly: true,
     });
     setImmediate(() => void processRequest({ ...request, remoteJids }, item));
-    return responseItem({ ...item, allHistory: Boolean(request.allHistory), operationId: `wwebjs:${requestId}` });
+    return responseItem({
+      ...item,
+      allHistory: Boolean(request.allHistory),
+      dateFrom: request.afterTimestamp || null,
+      dateTo: request.beforeTimestamp || null,
+      receivedOnly: true,
+      operationId: `wwebjs:${requestId}`,
+    });
   }
 
   async function downloadAttachment(request) {
@@ -254,6 +275,10 @@ export function createBridgeService({ config, client, store, platform, log, sc, 
       visibleProfile: runtime.visibleProfile || null,
       page: runtime.page || null,
       chatResolver: "native_store_v1",
+      capabilities: {
+        dateRange: true,
+        receivedOnly: true,
+      },
       activeRequest: store.active()?.requestId || null,
     };
   }

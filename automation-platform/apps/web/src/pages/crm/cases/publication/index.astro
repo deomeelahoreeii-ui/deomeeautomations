@@ -1,0 +1,15 @@
+---
+import CrmCaseTable from "../../../../components/CrmCaseTable.astro";
+import CrmLayout from "../../../../layouts/CrmLayout.astro";
+---
+<CrmLayout title="Paperless Publication" description="Verify approved complaint packages and publish only cases with complete metadata and evidence." page="cases">
+  <a class="btn btn-sm" href="/crm/cases/" slot="actions">← Complaint cases</a><button class="btn btn-sm" id="backfill-paperless" slot="actions">Import existing Paperless cases</button>
+  <section class="wa-health-banner"><span class="status-dot ready"></span><div><strong>Publication is explicit</strong><small>Review approval never uploads a document. Only the actions on this page can queue an approved package for Paperless.</small></div></section>
+  <section class="inbound-summary-grid crm-publication-metrics"><article class="master-card"><span>Approved cases</span><strong id="publication-approved">—</strong></article><article class="master-card"><span>Ready now</span><strong id="publication-ready">—</strong></article><article class="master-card"><span>Need verification</span><strong id="publication-blocked">—</strong></article><article class="master-card"><span>Publishing</span><strong id="publication-active">—</strong></article><article class="master-card"><span>Published</span><strong id="publication-complete">—</strong></article></section>
+  <div class="alert" id="backfill-message" hidden></div><CrmCaseTable view="publication" />
+  <style>.crm-publication-metrics{margin:1rem 0}</style>
+  <script>
+    import { actions } from "astro:actions";
+    const message=document.getElementById("backfill-message")!;async function stats(){const result=await actions.crm.caseStatistics({});if(!result.data)return;const data=result.data as any;document.getElementById("publication-approved")!.textContent=String(data.approved_cases||0);document.getElementById("publication-ready")!.textContent=String(data.ready_to_publish||0);document.getElementById("publication-blocked")!.textContent=String(data.blocked_from_publication||0);document.getElementById("publication-active")!.textContent=String(data.publishing||0);document.getElementById("publication-complete")!.textContent=String(data.published||0)}document.getElementById("backfill-paperless")!.addEventListener("click",async()=>{if(!confirm("Import the existing Paperless complaint index into the CRM registry? This is read-only and uploads nothing."))return;const result=await actions.crm.backfillPaperlessCases({});message.hidden=false;message.className=`alert ${result.error?"alert-error":"alert-success"}`;message.textContent=result.error?result.error.message:"Paperless import queued. Refresh shortly to see imported cases."});await stats();
+  </script>
+</CrmLayout>

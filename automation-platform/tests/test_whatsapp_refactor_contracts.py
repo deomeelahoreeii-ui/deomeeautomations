@@ -45,9 +45,6 @@ from whatsapp_gateway.persistence import (
 )
 
 
-
-
-
 def _resolve_openapi_schema_refs(
     value: object,
     schemas: dict[str, object],
@@ -78,10 +75,7 @@ def _resolve_openapi_schema_refs(
             for key, child in value.items()
         }
     if isinstance(value, list):
-        return [
-            _resolve_openapi_schema_refs(child, schemas, resolving)
-            for child in value
-        ]
+        return [_resolve_openapi_schema_refs(child, schemas, resolving) for child in value]
     return value
 
 
@@ -93,6 +87,63 @@ def _normalize_whatsapp_contract(contract: dict[str, object]) -> dict[str, objec
         normalized["openapi_paths"] = _resolve_openapi_schema_refs(paths, schemas)
     normalized.pop("openapi_schemas", None)
 
+    # These table controls and focused reads are deliberate additive CRM intake
+    # APIs, not regressions in the pre-refactor WhatsApp contract.
+    openapi_paths = normalized.get("openapi_paths")
+    if isinstance(openapi_paths, dict):
+        for additive_path in {
+            "/api/v1/whatsapp/inbound/processing-items/{item_id}",
+            "/api/v1/whatsapp/inbound/processing-runs/{run_id}/complaint-groups",
+        }:
+            openapi_paths.pop(additive_path, None)
+        for paginated_path in {
+            "/api/v1/whatsapp/inbound/batches",
+            "/api/v1/whatsapp/inbound/processing-runs",
+        }:
+            path = openapi_paths.get(paginated_path)
+            if not isinstance(path, dict):
+                continue
+            operation = path.get("get")
+            if not isinstance(operation, dict):
+                continue
+            parameters = operation.get("parameters")
+            if isinstance(parameters, list):
+                operation["parameters"] = [
+                    parameter
+                    for parameter in parameters
+                    if not (
+                        isinstance(parameter, dict)
+                        and parameter.get("name") in {"offset", "sort", "order"}
+                    )
+                ]
+
+    def without_intake_range_schema_fields(value: object) -> object:
+        if isinstance(value, dict):
+            projected = {
+                key: without_intake_range_schema_fields(child) for key, child in value.items()
+            }
+            if projected.get("title") == "RequestInboundHistory":
+                properties = projected.get("properties")
+                if isinstance(properties, dict):
+                    projected["properties"] = {
+                        key: child
+                        for key, child in properties.items()
+                        if key not in {"date_from", "date_to"}
+                    }
+                required = projected.get("required")
+                if isinstance(required, list):
+                    projected["required"] = [
+                        key for key in required if key not in {"date_from", "date_to"}
+                    ]
+            return projected
+        if isinstance(value, list):
+            return [without_intake_range_schema_fields(child) for child in value]
+        return value
+
+    normalized["openapi_paths"] = without_intake_range_schema_fields(
+        normalized.get("openapi_paths", {})
+    )
+
     # The snapshot protects the original AntiDengue/WhatsApp refactor contract.
     # B3.6 deliberately adds a polymorphic source identity to dispatch previews
     # for CRM while keeping every legacy field and API behavior intact. Compare
@@ -101,6 +152,34 @@ def _normalize_whatsapp_contract(contract: dict[str, object]) -> dict[str, objec
     # pre-refactor snapshot.
     tables = normalized.get("whatsapp_tables")
     if isinstance(tables, dict):
+        intake_range_columns = {"date_from", "date_to", "received_only"}
+        intake_range_indexes = {
+            "ix_whatsapp_inbound_batches_date_from",
+            "ix_whatsapp_inbound_batches_date_to",
+            "ix_whatsapp_inbound_history_requests_date_from",
+            "ix_whatsapp_inbound_history_requests_date_to",
+        }
+        for table_name in {
+            "whatsapp_inbound_batches",
+            "whatsapp_inbound_history_requests",
+        }:
+            intake_table = tables.get(table_name)
+            if not isinstance(intake_table, dict):
+                continue
+            columns = intake_table.get("columns")
+            if isinstance(columns, list):
+                intake_table["columns"] = [
+                    column
+                    for column in columns
+                    if not (isinstance(column, dict) and column.get("name") in intake_range_columns)
+                ]
+            indexes = intake_table.get("indexes")
+            if isinstance(indexes, list):
+                intake_table["indexes"] = [
+                    index
+                    for index in indexes
+                    if not (isinstance(index, dict) and index.get("name") in intake_range_indexes)
+                ]
         preview = tables.get("whatsapp_dispatch_previews")
         if isinstance(preview, dict):
             additive_columns = {"source_kind", "source_reference_id", "source_revision"}
@@ -130,6 +209,7 @@ def _normalize_whatsapp_contract(contract: dict[str, object]) -> dict[str, objec
                     )
                 ]
     return normalized
+
 
 EXPECTED_MODELS = {
     "WhatsAppAccount": WhatsAppAccount,
@@ -204,14 +284,10 @@ def test_model_inventory_and_movement_map_are_complete() -> None:
     moved = json.loads((package_root / "MOVED_SYMBOLS.json").read_text())
 
     original_classes = {
-        item["name"]
-        for item in inventory["models.py"]["symbols"]
-        if item["kind"] == "class"
+        item["name"] for item in inventory["models.py"]["symbols"] if item["kind"] == "class"
     }
     moved_classes = {
-        key.rsplit(".", 1)[-1]
-        for key in moved
-        if key.startswith("whatsapp_gateway.models.")
+        key.rsplit(".", 1)[-1] for key in moved if key.startswith("whatsapp_gateway.models.")
     }
 
     # The inventory is the immutable pre-refactor set. New persistence models may

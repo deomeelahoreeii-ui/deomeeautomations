@@ -76,6 +76,27 @@ test("loader keeps same-second peers while excluding the anchor", async () => {
   assert.deepEqual(loaded.messages.map((item) => item.id._serialized), ["older", "same-second-peer"]);
 });
 
+test("loader applies an inclusive lower and exclusive upper date range and excludes sent messages", async () => {
+  const messages = [
+    message("too-old", 1000),
+    message("range-start", 1100),
+    message("received", 1150),
+    message("sent-by-me", 1160, { fromMe: true }),
+    message("range-end", 1200),
+  ];
+  const chat = { fetchMessages: async () => messages };
+  const loaded = await fetchOlderMessages(noBrowserClient, chat, {
+    afterTimestamp: new Date(1100 * 1000).toISOString(),
+    beforeTimestamp: new Date(1200 * 1000).toISOString(),
+    count: 20,
+    syncHistory: false,
+  });
+  assert.deepEqual(
+    loaded.messages.map((item) => item.id._serialized),
+    ["range-start", "received"],
+  );
+});
+
 test("opaque official fetch failure falls back to the attached-page compatibility loader", async () => {
   const messages = new Map([
     ["older-1", message("older-1", 1000)],
@@ -168,4 +189,3 @@ test("native Store chats never fall back into the broken WWebJS serializer", asy
   assert.equal(loaded.diagnostics.pages[0].strategy, "native_store");
   assert.equal(browserEvaluations, 0);
 });
-

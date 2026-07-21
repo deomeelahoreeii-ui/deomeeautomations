@@ -12,15 +12,31 @@ from sqlmodel import Session, select
 from automation_core.config import Settings, get_settings
 from automation_core.database import get_session
 from automation_core.time import utcnow
-from whatsapp_gateway.inbound.batches import create_history_batch, reconcile_batch, record_batch_event
-from whatsapp_gateway.inbound.history_tracking import (
-    HISTORY_ACTIVE_STATUSES, history_contact_anchor, history_contact_counts,
-    reconcile_history_requests, serialize_history_request,
+from whatsapp_gateway.inbound.batches import (
+    create_history_batch,
+    reconcile_batch,
+    record_batch_event,
 )
-from whatsapp_gateway.inbound.history_transport import history_subject, iso_utc, provider, request_nats
+from whatsapp_gateway.inbound.history_tracking import (
+    HISTORY_ACTIVE_STATUSES,
+    history_contact_anchor,
+    history_contact_counts,
+    reconcile_history_requests,
+    serialize_history_request,
+    utc_naive,
+)
+from whatsapp_gateway.inbound.history_transport import (
+    bridge_operator_message,
+    history_subject,
+    iso_utc,
+    provider,
+    request_nats,
+)
 from whatsapp_gateway.inbound.schemas import MAX_INBOUND_HISTORY_MESSAGES, RequestInboundHistory
 from whatsapp_gateway.models import (
-    WhatsAppAccount, WhatsAppDirectoryContact, WhatsAppIdentityAlias,
+    WhatsAppAccount,
+    WhatsAppDirectoryContact,
+    WhatsAppIdentityAlias,
     WhatsAppInboundHistoryRequest,
 )
 
@@ -28,7 +44,9 @@ router = APIRouter()
 
 
 def _fail_request(
-    session: Session, audit: WhatsAppInboundHistoryRequest, batch,
+    session: Session,
+    audit: WhatsAppInboundHistoryRequest,
+    batch,
     detail: str,
 ) -> None:
     now = utcnow()
@@ -43,8 +61,11 @@ def _fail_request(
     session.add(batch)
     session.add(audit)
     record_batch_event(
-        session, batch_id=batch.id, level="error",
-        event_type="history_request_failed", message=detail,
+        session,
+        batch_id=batch.id,
+        level="error",
+        event_type="history_request_failed",
+        message=detail,
     )
     session.commit()
 
@@ -63,6 +84,14 @@ async def request_inbound_history(
     if account is None or not account.enabled:
         raise HTTPException(status_code=409, detail="WhatsApp account is unavailable")
     provider_name = provider(settings)
+    has_date_range = data.date_from is not None or data.date_to is not None
+    if has_date_range and provider_name != "wwebjs":
+        raise HTTPException(
+            status_code=409,
+            detail="Date-range intake requires the managed WhatsApp Web history provider",
+        )
+    date_from = utc_naive(data.date_from) if data.date_from else None
+    date_to = utc_naive(data.date_to) if data.date_to else None
 
     active_query = select(WhatsAppInboundHistoryRequest).where(
         WhatsAppInboundHistoryRequest.status.in_(HISTORY_ACTIVE_STATUSES)
@@ -86,42 +115,90 @@ async def request_inbound_history(
             detail=f"A history request is already active ({active.request_id})",
         )
 
+    if has_date_range:
+        try:
+            bridge = await request_nats(
+                settings=settings,
+                subject=history_subject(settings, account.worker_key, provider_name),
+                payload={"action": "bridge_health", "workerId": account.worker_key},
+                timeout=min(float(settings.whatsapp_inbound_history_timeout_seconds), 3.0),
+            )
+        except (
+            NoRespondersError,
+            NatsTimeoutError,
+            OSError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Managed WhatsApp Web is unavailable for date-range intake",
+            ) from exc
+        if not (bridge.get("historyReady") or bridge.get("ready")):
+            raise HTTPException(status_code=409, detail=bridge_operator_message(bridge))
+        capabilities = bridge.get("capabilities") or {}
+        if int(bridge.get("protocolVersion") or 0) < 4 or not capabilities.get("dateRange"):
+            raise HTTPException(
+                status_code=409,
+                detail="Restart the managed WhatsApp Web bridge to enable date-range intake",
+            )
+
     aliases = session.exec(
         select(WhatsAppIdentityAlias.lid_jid).where(
             WhatsAppIdentityAlias.account_id == account.id,
             WhatsAppIdentityAlias.contact_id == contact.id,
         )
     ).all()
-    remote_jids = list(dict.fromkeys(
-        value for value in [contact.phone_jid, contact.primary_lid_jid, *aliases] if value
-    ))
+    remote_jids = list(
+        dict.fromkeys(
+            value for value in [contact.phone_jid, contact.primary_lid_jid, *aliases] if value
+        )
+    )
     if not remote_jids:
         raise HTTPException(
             status_code=409,
             detail="This contact has no WhatsApp JID available for history lookup",
         )
 
-    anchor = history_contact_anchor(session, contact_id=contact.id)
+    anchor = None if has_date_range else history_contact_anchor(session, contact_id=contact.id)
     request_id = str(uuid.uuid4())
     baseline_messages, baseline_attachments = history_contact_counts(
         session, account.id, contact.id
     )
-    requested_count = MAX_INBOUND_HISTORY_MESSAGES if data.all_history else data.count
+    requested_count = (
+        MAX_INBOUND_HISTORY_MESSAGES if data.all_history or has_date_range else data.count
+    )
     platform_remote_jid = contact.phone_jid or contact.primary_lid_jid or remote_jids[0]
     batch = create_history_batch(
-        session, account_id=account.id, contact_id=contact.id,
-        worker_key=account.worker_key, provider=provider_name,
-        requested_count=requested_count, all_history=data.all_history,
+        session,
+        account_id=account.id,
+        contact_id=contact.id,
+        worker_key=account.worker_key,
+        provider=provider_name,
+        requested_count=requested_count,
+        all_history=data.all_history,
+        date_from=date_from,
+        date_to=date_to,
+        received_only=True,
         remote_jid=platform_remote_jid,
         anchor_message_id=anchor.message_id if anchor else None,
         anchor_timestamp=anchor.message_timestamp if anchor else None,
         settings=settings,
     )
     audit = WhatsAppInboundHistoryRequest(
-        request_id=request_id, account_id=account.id, contact_id=contact.id,
-        worker_key=account.worker_key, provider=provider_name, batch_id=batch.id,
-        requested_count=requested_count, all_history=data.all_history,
-        baseline_messages=baseline_messages, baseline_attachments=baseline_attachments,
+        request_id=request_id,
+        account_id=account.id,
+        contact_id=contact.id,
+        worker_key=account.worker_key,
+        provider=provider_name,
+        batch_id=batch.id,
+        requested_count=requested_count,
+        all_history=data.all_history,
+        date_from=date_from,
+        date_to=date_to,
+        received_only=True,
+        baseline_messages=baseline_messages,
+        baseline_attachments=baseline_attachments,
         remote_jid=platform_remote_jid,
         anchor_message_id=anchor.message_id if anchor else None,
         anchor_timestamp=anchor.message_timestamp if anchor else None,
@@ -131,13 +208,20 @@ async def request_inbound_history(
     session.refresh(audit)
 
     payload = {
-        "action": "request_history", "requestId": request_id,
-        "batchId": str(batch.id), "batchCode": batch.batch_code,
-        "workerId": account.worker_key, "provider": provider_name,
-        "remoteJids": remote_jids, "platformRemoteJid": platform_remote_jid,
-        "count": requested_count, "allHistory": data.all_history,
+        "action": "request_history",
+        "requestId": request_id,
+        "batchId": str(batch.id),
+        "batchCode": batch.batch_code,
+        "workerId": account.worker_key,
+        "provider": provider_name,
+        "remoteJids": remote_jids,
+        "platformRemoteJid": platform_remote_jid,
+        "count": requested_count,
+        "allHistory": data.all_history,
+        "afterTimestamp": iso_utc(date_from),
+        "receivedOnly": True,
         "anchorMessageId": anchor.message_id if anchor else None,
-        "beforeTimestamp": iso_utc(anchor.message_timestamp) if anchor else None,
+        "beforeTimestamp": iso_utc(date_to or (anchor.message_timestamp if anchor else None)),
     }
     try:
         result = await request_nats(
@@ -168,15 +252,25 @@ async def request_inbound_history(
         session.add(batch)
         session.add(audit)
         record_batch_event(
-            session, batch_id=batch.id, event_type="history_request_accepted",
+            session,
+            batch_id=batch.id,
+            event_type="history_request_accepted",
             message=(
-                f"WhatsApp Web accepted the request for all available history (up to {requested_count} messages)."
-                if data.all_history
-                else f"WhatsApp Web accepted the request for up to {requested_count} older messages."
+                f"WhatsApp Web accepted the selected date range (up to {requested_count} received messages)."
+                if has_date_range
+                else (
+                    f"WhatsApp Web accepted the request for available received history (up to {requested_count} messages)."
+                    if data.all_history
+                    else f"WhatsApp Web accepted the request for up to {requested_count} older received messages."
+                )
             ),
             details={
-                "request_id": request_id, "operation_id": audit.operation_id,
+                "request_id": request_id,
+                "operation_id": audit.operation_id,
                 "all_history": data.all_history,
+                "date_from": iso_utc(date_from),
+                "date_to": iso_utc(date_to),
+                "received_only": True,
             },
         )
         session.commit()

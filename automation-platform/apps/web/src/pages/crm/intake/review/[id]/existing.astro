@@ -1,0 +1,12 @@
+---
+import CrmIntakeNav from "../../../../../components/CrmIntakeNav.astro";
+import CrmReviewGroupTable from "../../../../../components/CrmReviewGroupTable.astro";
+import CrmReviewRunNav from "../../../../../components/CrmReviewRunNav.astro";
+import CrmLayout from "../../../../../layouts/CrmLayout.astro";
+const runId = Astro.params.id || "";
+---
+<CrmLayout title="Existing Paperless Complaints" description="Inspect complaint numbers already matched and linked to Paperless records." page="intake">
+  <a class="btn btn-sm" href="/crm/intake/review" slot="actions">← All processing runs</a><CrmIntakeNav active="review" /><CrmReviewRunNav runId={runId} active="existing" />
+  <section class="wa-health-banner"><span class="status-dot ready"></span><div><strong>No new upload is required</strong><small>These complaint numbers already match a CRM main complaint in Paperless. “Submitted” is the status of that existing Paperless record—not an action performed by this intake.</small></div></section>
+  <CrmReviewGroupTable runId={runId} view="existing" title="Already archived in Paperless" description="Review the exact document number, Paperless status and matching reason." />
+</CrmLayout>

@@ -16,10 +16,16 @@ from sqlmodel import Field, SQLModel
 
 from automation_core.time import utcnow
 
+
 class WhatsAppInboundMessage(SQLModel, table=True):
     """Normalized inbound message metadata mirrored from the WhatsApp worker."""
+
     __tablename__ = "whatsapp_inbound_messages"
-    __table_args__ = (UniqueConstraint("account_id", "remote_jid", "message_id", name="uq_whatsapp_inbound_message_identity"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "account_id", "remote_jid", "message_id", name="uq_whatsapp_inbound_message_identity"
+        ),
+    )
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     account_id: uuid.UUID = Field(foreign_key="whatsapp_accounts.id", index=True)
     worker_key: str = Field(index=True)
@@ -27,7 +33,9 @@ class WhatsAppInboundMessage(SQLModel, table=True):
     remote_jid: str = Field(index=True)
     participant_jid: str | None = Field(default=None, index=True)
     sender_jid: str = Field(index=True)
-    directory_contact_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_directory_contacts.id", index=True)
+    directory_contact_id: uuid.UUID | None = Field(
+        default=None, foreign_key="whatsapp_directory_contacts.id", index=True
+    )
     from_me: bool = Field(default=False, index=True)
     chat_scope: str = Field(index=True)
     message_timestamp: datetime = Field(index=True)
@@ -43,7 +51,9 @@ class WhatsAppInboundMessage(SQLModel, table=True):
 
 class WhatsAppInboundAttachment(SQLModel, table=True):
     __tablename__ = "whatsapp_inbound_attachments"
-    __table_args__ = (UniqueConstraint("message_id", name="uq_whatsapp_inbound_attachment_message"),)
+    __table_args__ = (
+        UniqueConstraint("message_id", name="uq_whatsapp_inbound_attachment_message"),
+    )
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     message_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_messages.id", index=True)
     media_kind: str = Field(index=True)
@@ -58,7 +68,9 @@ class WhatsAppInboundAttachment(SQLModel, table=True):
     media_sha256: str | None = Field(default=None, index=True)
     actual_sha256: str | None = Field(default=None, index=True)
     stored_path: str | None = Field(default=None, sa_column=Column(Text))
-    stored_object_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_inbound_stored_objects.id", index=True)
+    stored_object_id: uuid.UUID | None = Field(
+        default=None, foreign_key="whatsapp_inbound_stored_objects.id", index=True
+    )
     storage_status: str = Field(default="local_only", index=True)
     storage_error: str | None = Field(default=None, sa_column=Column(Text))
     storage_uploaded_at: datetime | None = Field(default=None, index=True)
@@ -85,14 +97,17 @@ class WhatsAppInboundHistoryRequest(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     request_id: str = Field(unique=True, index=True)
     account_id: uuid.UUID = Field(foreign_key="whatsapp_accounts.id", index=True)
-    contact_id: uuid.UUID = Field(
-        foreign_key="whatsapp_directory_contacts.id", index=True
-    )
+    contact_id: uuid.UUID = Field(foreign_key="whatsapp_directory_contacts.id", index=True)
     worker_key: str = Field(index=True)
     provider: str = Field(default="baileys", index=True)
-    batch_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_inbound_batches.id", unique=True, index=True)
+    batch_id: uuid.UUID | None = Field(
+        default=None, foreign_key="whatsapp_inbound_batches.id", unique=True, index=True
+    )
     requested_count: int = 50
     all_history: bool = False
+    date_from: datetime | None = Field(default=None, index=True)
+    date_to: datetime | None = Field(default=None, index=True)
+    received_only: bool = True
     remote_jid: str | None = Field(default=None, index=True)
     anchor_message_id: str | None = Field(default=None, index=True)
     anchor_timestamp: datetime | None = Field(default=None, index=True)
@@ -114,7 +129,9 @@ class WhatsAppInboundStoredObject(SQLModel, table=True):
     __tablename__ = "whatsapp_inbound_stored_objects"
     __table_args__ = (
         UniqueConstraint(
-            "backend", "bucket", "object_key",
+            "backend",
+            "bucket",
+            "object_key",
             name="uq_whatsapp_inbound_stored_object_location",
         ),
     )
@@ -151,6 +168,9 @@ class WhatsAppInboundBatch(SQLModel, table=True):
     provider: str = Field(default="wwebjs", index=True)
     requested_count: int = 50
     all_history: bool = False
+    date_from: datetime | None = Field(default=None, index=True)
+    date_to: datetime | None = Field(default=None, index=True)
+    received_only: bool = True
     remote_jid: str | None = Field(default=None, index=True)
     anchor_message_id: str | None = Field(default=None, index=True)
     anchor_timestamp: datetime | None = Field(default=None, index=True)
@@ -176,7 +196,8 @@ class WhatsAppInboundBatchItem(SQLModel, table=True):
     __tablename__ = "whatsapp_inbound_batch_items"
     __table_args__ = (
         UniqueConstraint(
-            "batch_id", "attachment_id",
+            "batch_id",
+            "attachment_id",
             name="uq_whatsapp_inbound_batch_item_attachment",
         ),
         CheckConstraint(
@@ -189,7 +210,9 @@ class WhatsAppInboundBatchItem(SQLModel, table=True):
     batch_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_batches.id", index=True)
     attachment_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_attachments.id", index=True)
     message_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_messages.id", index=True)
-    stored_object_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_inbound_stored_objects.id", index=True)
+    stored_object_id: uuid.UUID | None = Field(
+        default=None, foreign_key="whatsapp_inbound_stored_objects.id", index=True
+    )
     status: str = Field(default="discovered", index=True)
     original_filename: str | None = Field(default=None, index=True)
     message_timestamp: datetime | None = Field(default=None, index=True)
@@ -260,7 +283,8 @@ class WhatsAppInboundProcessingItem(SQLModel, table=True):
     __tablename__ = "whatsapp_inbound_processing_items"
     __table_args__ = (
         UniqueConstraint(
-            "run_id", "batch_item_id",
+            "run_id",
+            "batch_item_id",
             name="uq_whatsapp_inbound_processing_item_batch_item",
         ),
         CheckConstraint(
@@ -277,7 +301,9 @@ class WhatsAppInboundProcessingItem(SQLModel, table=True):
     run_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_processing_runs.id", index=True)
     batch_item_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_batch_items.id", index=True)
     attachment_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_attachments.id", index=True)
-    stored_object_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_inbound_stored_objects.id", index=True)
+    stored_object_id: uuid.UUID | None = Field(
+        default=None, foreign_key="whatsapp_inbound_stored_objects.id", index=True
+    )
     status: str = Field(default="queued", index=True)
     primary_category: str = Field(default="unknown", index=True)
     detected_complaint_number: str | None = Field(default=None, index=True)
@@ -329,9 +355,7 @@ class WhatsAppInboundExportRun(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     job_id: uuid.UUID = Field(foreign_key="jobs.id", unique=True, index=True)
     account_id: uuid.UUID = Field(foreign_key="whatsapp_accounts.id", index=True)
-    contact_id: uuid.UUID = Field(
-        foreign_key="whatsapp_directory_contacts.id", index=True
-    )
+    contact_id: uuid.UUID = Field(foreign_key="whatsapp_directory_contacts.id", index=True)
     contact_name: str = Field(default="", index=True)
     date_from: datetime | None = Field(default=None, index=True)
     date_to: datetime | None = Field(default=None, index=True)
@@ -363,12 +387,8 @@ class WhatsAppInboundExportItem(SQLModel, table=True):
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    export_run_id: uuid.UUID = Field(
-        foreign_key="whatsapp_inbound_export_runs.id", index=True
-    )
-    attachment_id: uuid.UUID = Field(
-        foreign_key="whatsapp_inbound_attachments.id", index=True
-    )
+    export_run_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_export_runs.id", index=True)
+    attachment_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_attachments.id", index=True)
     media_category: str = Field(index=True)
     status: str = Field(default="pending", index=True)
     output_path: str | None = Field(default=None, sa_column=Column(Text))
@@ -382,16 +402,16 @@ class WhatsAppInboundExportItem(SQLModel, table=True):
 
 
 __all__ = [
-    'WhatsAppInboundMessage',
-    'WhatsAppInboundAttachment',
-    'WhatsAppInboundHistoryRequest',
-    'WhatsAppInboundStoredObject',
-    'WhatsAppInboundBatch',
-    'WhatsAppInboundBatchItem',
-    'WhatsAppInboundBatchEvent',
-    'WhatsAppInboundProcessingRun',
-    'WhatsAppInboundProcessingItem',
-    'WhatsAppInboundProcessingEvent',
-    'WhatsAppInboundExportRun',
-    'WhatsAppInboundExportItem',
+    "WhatsAppInboundMessage",
+    "WhatsAppInboundAttachment",
+    "WhatsAppInboundHistoryRequest",
+    "WhatsAppInboundStoredObject",
+    "WhatsAppInboundBatch",
+    "WhatsAppInboundBatchItem",
+    "WhatsAppInboundBatchEvent",
+    "WhatsAppInboundProcessingRun",
+    "WhatsAppInboundProcessingItem",
+    "WhatsAppInboundProcessingEvent",
+    "WhatsAppInboundExportRun",
+    "WhatsAppInboundExportItem",
 ]

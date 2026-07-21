@@ -17,10 +17,17 @@ def _utc_naive(value):
 
 
 def record_history_progress(
-    session: Session, *, account_id: uuid.UUID, contact_id: uuid.UUID | None,
-    created_message: bool, has_attachment: bool, ingestion_source: str,
+    session: Session,
+    *,
+    account_id: uuid.UUID,
+    contact_id: uuid.UUID | None,
+    created_message: bool,
+    has_attachment: bool,
+    ingestion_source: str,
+    message_timestamp,
+    from_me: bool,
 ) -> None:
-    if not created_message or contact_id is None:
+    if not created_message or contact_id is None or from_me:
         return
     if ingestion_source not in {"history_sync", "offline_sync", "web_history"}:
         return
@@ -32,13 +39,26 @@ def record_history_progress(
             WhatsAppInboundHistoryRequest.account_id == account_id,
             WhatsAppInboundHistoryRequest.contact_id == contact_id,
             WhatsAppInboundHistoryRequest.requested_at >= cutoff,
-            WhatsAppInboundHistoryRequest.status.in_([
-                "requested", "accepted", "syncing", "succeeded", "no_results", "timed_out",
-            ]),
+            WhatsAppInboundHistoryRequest.status.in_(
+                [
+                    "requested",
+                    "accepted",
+                    "syncing",
+                    "succeeded",
+                    "no_results",
+                    "timed_out",
+                ]
+            ),
         )
         .order_by(WhatsAppInboundHistoryRequest.requested_at.desc())
     ).first()
     if request is None:
+        return
+
+    timestamp = _utc_naive(message_timestamp)
+    if request.date_from and timestamp < _utc_naive(request.date_from):
+        return
+    if request.date_to and timestamp >= _utc_naive(request.date_to):
         return
 
     now = _utc_naive(utcnow())
@@ -52,11 +72,13 @@ def record_history_progress(
     request.updated_at = now
     session.add(request)
     record_batch_event(
-        session, batch_id=request.batch_id,
+        session,
+        batch_id=request.batch_id,
         event_type="history_file_received" if has_attachment else "history_message_received",
         message=(
             f"Received historical file metadata ({request.attachments_discovered} file(s), {request.messages_received} message(s))."
-            if has_attachment else f"Received historical message {request.messages_received}."
+            if has_attachment
+            else f"Received historical message {request.messages_received}."
         ),
         details={
             "messages_received": request.messages_received,
