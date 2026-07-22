@@ -21,6 +21,8 @@ from whatsapp_gateway.models import (
     WhatsAppInboundMessage,
 )
 from whatsapp_gateway.inbound.batch_storage import store_attachment_object
+from whatsapp_gateway.inbound.batch_serialization import serialize_batch_item
+from whatsapp_gateway.inbound.media_types import classify_attachment_metadata
 
 BATCH_TERMINAL_STATUSES = {"completed", "completed_with_errors", "failed", "cancelled"}
 ITEM_STORED_STATUSES = {"stored", "already_stored"}
@@ -97,6 +99,7 @@ def create_history_batch(
     anchor_message_id: str | None,
     anchor_timestamp: datetime | None,
     settings: Settings,
+    media_types: list[str] | None = None,
 ) -> WhatsAppInboundBatch:
     now = utcnow()
     batch = WhatsAppInboundBatch(
@@ -110,6 +113,9 @@ def create_history_batch(
         date_from=date_from,
         date_to=date_to,
         received_only=received_only,
+        media_types_json=list(
+            dict.fromkeys(media_types or ["image", "pdf", "spreadsheet"])
+        ),
         remote_jid=remote_jid,
         anchor_message_id=anchor_message_id,
         anchor_timestamp=anchor_timestamp,
@@ -151,6 +157,9 @@ def create_history_batch(
             "date_from": str(date_from) if date_from else None,
             "date_to": str(date_to) if date_to else None,
             "received_only": received_only,
+            "media_types": list(
+                dict.fromkeys(media_types or ["image", "pdf", "spreadsheet"])
+            ),
         },
     )
     return batch
@@ -169,6 +178,7 @@ def serialize_batch(batch: WhatsAppInboundBatch) -> dict[str, Any]:
         "date_from": batch.date_from,
         "date_to": batch.date_to,
         "received_only": batch.received_only,
+        "media_types": batch.media_types_json or [],
         "remote_jid": batch.remote_jid,
         "anchor_message_id": batch.anchor_message_id,
         "anchor_timestamp": batch.anchor_timestamp,
@@ -178,6 +188,7 @@ def serialize_batch(batch: WhatsAppInboundBatch) -> dict[str, Any]:
         "files_stored": batch.files_stored,
         "files_reused": batch.files_reused,
         "files_failed": batch.files_failed,
+        "files_excluded": batch.files_excluded,
         "total_bytes": batch.total_bytes,
         "storage_backend": batch.storage_backend,
         "raw_bucket": batch.raw_bucket,
@@ -188,27 +199,6 @@ def serialize_batch(batch: WhatsAppInboundBatch) -> dict[str, Any]:
         "started_at": batch.started_at,
         "finished_at": batch.finished_at,
         "updated_at": batch.updated_at,
-    }
-
-
-def serialize_batch_item(item: WhatsAppInboundBatchItem) -> dict[str, Any]:
-    return {
-        "id": str(item.id),
-        "batch_id": str(item.batch_id),
-        "attachment_id": str(item.attachment_id),
-        "message_id": str(item.message_id),
-        "stored_object_id": str(item.stored_object_id) if item.stored_object_id else None,
-        "status": item.status,
-        "original_filename": item.original_filename,
-        "message_timestamp": item.message_timestamp,
-        "mime_type": item.mime_type,
-        "sha256": item.sha256,
-        "size_bytes": item.size_bytes,
-        "object_key": item.object_key,
-        "error": item.error,
-        "created_at": item.created_at,
-        "stored_at": item.stored_at,
-        "updated_at": item.updated_at,
     }
 
 
@@ -241,6 +231,34 @@ def register_batch_item(
     if batch.date_from and message.message_timestamp < batch.date_from:
         return None
     if batch.date_to and message.message_timestamp >= batch.date_to:
+        return None
+    category = attachment.media_category or classify_attachment_metadata(
+        media_kind=attachment.media_kind,
+        mime_type=attachment.mime_type,
+        original_filename=attachment.original_filename,
+    )
+    selected_media = set(
+        batch.media_types_json or ["image", "pdf", "spreadsheet"]
+    )
+    if category is not None and category not in selected_media:
+        batch.files_excluded += 1
+        batch.updated_at = utcnow()
+        session.add(batch)
+        record_batch_event(
+            session,
+            batch_id=batch_id,
+            event_type="file_excluded_by_scope",
+            message=(
+                f"Skipped {attachment.original_filename or attachment.message_key}: "
+                f"{category} was not selected for this intake."
+            ),
+            details={
+                "attachment_id": str(attachment.id),
+                "message_id": str(message.id),
+                "media_category": category,
+                "selected_media_types": sorted(selected_media),
+            },
+        )
         return None
     now = utcnow()
     item = WhatsAppInboundBatchItem(

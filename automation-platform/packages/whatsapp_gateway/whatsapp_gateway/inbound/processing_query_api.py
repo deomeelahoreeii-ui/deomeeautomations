@@ -58,6 +58,8 @@ def list_inbound_processing_runs(
                 "crm_supporting_document": run.supporting_documents,
                 "crm_reply_or_report": run.reply_reports,
                 "duplicate_in_paperless": run.duplicate_items,
+                "content_duplicate": run.content_duplicate_items,
+                "spreadsheet": view["spreadsheet_batches"],
                 "eligible": run.eligible_items,
                 "needs_review": run.review_items,
                 "failed": run.failed_items,
@@ -197,6 +199,10 @@ def read_inbound_processing_run(
             )
         elif category in {"duplicate_in_paperless", "needs_review"}:
             query = query.where(WhatsAppInboundProcessingItem.status == category)
+        elif category == "content_duplicate":
+            query = query.where(
+                WhatsAppInboundProcessingItem.content_match_kind.is_not(None)
+            )
         elif category == "eligible":
             query = query.where(WhatsAppInboundProcessingItem.status.in_(["eligible", "approved"]))
         else:

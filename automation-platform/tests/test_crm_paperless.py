@@ -146,6 +146,70 @@ def test_publication_applies_the_legacy_crm_correspondent() -> None:
     assert payload["custom_fields"] == [{"field": 14, "value": "102"}]
 
 
+def test_status_transition_preserves_all_custom_fields_and_verifies_result() -> None:
+    from unittest.mock import MagicMock
+
+    from crm_filters.paperless import PaperlessClient
+
+    client = PaperlessClient(base_url="https://paperless.lab.internal", token="token")
+    client.metadata = metadata()
+    before = document(756, "104-6032890", 102)
+    before["custom_fields"].append({"field": 99, "value": "preserve-me"})
+    after = document(756, "104-6032890", 100)
+    after["custom_fields"].append({"field": 99, "value": "preserve-me"})
+    client._get_document = MagicMock(side_effect=[before, after])
+    response = MagicMock(ok=True)
+    client._request = MagicMock(return_value=response)
+
+    result = client.set_document_status(756, "Submitted")
+
+    assert result.status_before == "Pending"
+    assert result.status_after == "Submitted"
+    assert result.changed is True
+    payload = client._request.call_args.kwargs["json"]
+    assert {"field": 99, "value": "preserve-me"} in payload["custom_fields"]
+    assert {"field": 14, "value": 100} in payload["custom_fields"]
+
+
+def test_status_transition_is_idempotent_when_paperless_is_already_submitted() -> None:
+    from unittest.mock import MagicMock
+
+    from crm_filters.paperless import PaperlessClient
+
+    client = PaperlessClient(base_url="https://paperless.lab.internal", token="token")
+    client.metadata = metadata()
+    client._get_document = MagicMock(return_value=document(756, "104-6032890", 100))
+    client._request = MagicMock()
+
+    result = client.set_document_status(756, "Submitted")
+
+    assert result.changed is False
+    assert result.status_after == "Submitted"
+    client._request.assert_not_called()
+
+
+def test_status_transition_refuses_to_overwrite_an_unexpected_terminal_status() -> None:
+    from unittest.mock import MagicMock
+
+    import pytest
+
+    from crm_filters.paperless import PaperlessClient
+
+    client = PaperlessClient(base_url="https://paperless.lab.internal", token="token")
+    client.metadata = metadata()
+    client._get_document = MagicMock(return_value=document(756, "104-6032890", 101))
+    client._request = MagicMock()
+
+    with pytest.raises(RuntimeError, match="cannot transition"):
+        client.set_document_status(
+            756,
+            "Submitted",
+            allowed_from_statuses={"Pending"},
+        )
+
+    client._request.assert_not_called()
+
+
 def test_internal_paperless_tls_failure_uses_configured_fallback() -> None:
     import requests
     from unittest.mock import MagicMock

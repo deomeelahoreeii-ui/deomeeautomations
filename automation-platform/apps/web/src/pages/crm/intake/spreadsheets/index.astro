@@ -1,0 +1,27 @@
+---
+import CrmIntakeNav from "../../../../components/CrmIntakeNav.astro";
+import DataTable from "../../../../components/DataTable.astro";
+import CrmLayout from "../../../../layouts/CrmLayout.astro";
+
+const runId = Astro.url.searchParams.get("run_id") || undefined;
+---
+<CrmLayout title="Spreadsheet Intake" description="Review spreadsheet rows separately before any row can become a complaint case." page="intake">
+  <button class="btn btn-sm" id="refresh-sheets" slot="actions">↻ Refresh</button>
+  <CrmIntakeNav active="spreadsheets" />
+  <section class="wa-health-banner"><span class="status-dot ready"></span><div><strong>Rows are candidates, not cases</strong><small>Paperless matching is read-only. A durable complaint case is created only when you explicitly approve a row.</small></div></section>
+  <section class="master-card crm-table-page">
+    <div class="inbound-card-heading"><div><p class="eyebrow">Workbook batches</p><h2>Received spreadsheets</h2><p>Each workbook keeps its own row decisions, Paperless observations and source lineage.</p></div><span class="badge" id="sheet-count">Loading…</span></div>
+    <div class="toolbar sheet-filters"><input class="input input-bordered input-sm" id="sheet-search" placeholder="Search filename or run"/><select class="select select-bordered select-sm" id="sheet-status"><option value="">All statuses</option><option value="awaiting_review">Awaiting review</option><option value="completed">Completed</option><option value="rejected">Rejected</option><option value="failed">Failed</option></select><button class="btn btn-sm" id="clear-sheet-filters">Clear filters</button></div>
+    <DataTable id="spreadsheet-batches-table" pageSize={25} pageSizeOptions={[10,25,50,100]} emptyText="No spreadsheet intake batches match these filters." ariaLabel="Spreadsheet intake batches" />
+  </section>
+  <style is:global>.crm-table-page{padding:1.1rem;margin-top:1rem}.sheet-filters{display:grid;grid-template-columns:minmax(16rem,1fr) 13rem auto;gap:.55rem;margin:.9rem 0}.sheet-primary{display:block;font-weight:800;color:#28374b}.sheet-secondary{display:block;margin-top:.14rem;color:#758396;font-size:.7rem}.sheet-actions{display:flex;justify-content:flex-end}@media(max-width:700px){.sheet-filters{grid-template-columns:1fr}}</style>
+  <script define:vars={{ runId }}>
+    import { actions } from "astro:actions";
+    await customElements.whenDefined("astro-data-table");
+    const el=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T,table=el<any>("spreadsheet-batches-table"),search=el<HTMLInputElement>("sheet-search"),status=el<HTMLSelectElement>("sheet-status");let searchTimer:number|undefined;
+    const stack=(top:any,bottom="")=>{const d=document.createElement("div"),a=document.createElement("strong");a.className="sheet-primary";a.textContent=String(top||"—");d.append(a);if(bottom){const b=document.createElement("small");b.className="sheet-secondary";b.textContent=bottom;d.append(b)}return d};
+    const action=(row:any)=>{const d=document.createElement("div"),a=document.createElement("a");d.className="sheet-actions";a.className="btn btn-xs btn-primary";a.href=row.review_url;a.textContent="Review rows →";d.append(a);return d};
+    await table.configure({manualPagination:true,getRowId:(r:any)=>r.id,columns:[{accessorKey:"source_filename",header:"Workbook",cell:({row}:any)=>stack(row.original.source_filename,row.original.run_code||"WhatsApp intake")},{accessorKey:"status",header:"Status",cell:({row}:any)=>stack(String(row.original.status).replaceAll("_"," "),`${row.original.candidate_rows} awaiting decision`)},{accessorKey:"total_rows",header:"Rows",cell:({row}:any)=>stack(row.original.total_rows,`${row.original.invalid_rows} invalid`)},{accessorKey:"existing_rows",header:"Paperless",cell:({row}:any)=>stack(`${row.original.existing_rows} existing`,`${row.original.fresh_rows} fresh · ${row.original.manual_review_rows} manual`)},{accessorKey:"approved_rows",header:"Decisions",cell:({row}:any)=>stack(`${row.original.approved_rows} approved`,`${row.original.rejected_rows} rejected`)},{accessorKey:"created_at",header:"Received",cell:({getValue}:any)=>new Date(getValue()).toLocaleString()},{id:"actions",header:"",cell:({row}:any)=>action(row.original),enableSorting:false,meta:{align:"right"}}],loadPage:async(pageIndex:number,pageSize:number)=>{const result=await actions.whatsapp.spreadsheetIntakeBatches({runId,search:search.value.trim()||undefined,status:status.value||undefined,limit:pageSize,offset:pageIndex*pageSize});if(result.error)throw result.error;const data=result.data as any;el("sheet-count").textContent=`${data.total} workbook${data.total===1?"":"s"}`;return{rows:data.items||[],total:Number(data.total||0)}}});
+    async function refresh(){await table.refresh(true)}search.addEventListener("input",()=>{if(searchTimer)clearTimeout(searchTimer);searchTimer=window.setTimeout(()=>void refresh(),250)});status.addEventListener("change",()=>void refresh());el("clear-sheet-filters").addEventListener("click",()=>{search.value="";status.value="";void refresh()});el("refresh-sheets").addEventListener("click",()=>void table.refresh(false));
+  </script>
+</CrmLayout>

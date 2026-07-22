@@ -94,6 +94,9 @@ def _normalize_whatsapp_contract(contract: dict[str, object]) -> dict[str, objec
         for additive_path in {
             "/api/v1/whatsapp/inbound/processing-items/{item_id}",
             "/api/v1/whatsapp/inbound/processing-runs/{run_id}/complaint-groups",
+            "/api/v1/whatsapp/inbound/spreadsheet-batches",
+            "/api/v1/whatsapp/inbound/spreadsheet-batches/{batch_id}",
+            "/api/v1/whatsapp/inbound/spreadsheet-rows/{row_id}/review",
         }:
             openapi_paths.pop(additive_path, None)
         for paginated_path in {
@@ -128,12 +131,14 @@ def _normalize_whatsapp_contract(contract: dict[str, object]) -> dict[str, objec
                     projected["properties"] = {
                         key: child
                         for key, child in properties.items()
-                        if key not in {"date_from", "date_to"}
+                        if key not in {"date_from", "date_to", "media_types"}
                     }
                 required = projected.get("required")
                 if isinstance(required, list):
                     projected["required"] = [
-                        key for key in required if key not in {"date_from", "date_to"}
+                        key
+                        for key in required
+                        if key not in {"date_from", "date_to", "media_types"}
                     ]
             return projected
         if isinstance(value, list):
@@ -152,7 +157,13 @@ def _normalize_whatsapp_contract(contract: dict[str, object]) -> dict[str, objec
     # pre-refactor snapshot.
     tables = normalized.get("whatsapp_tables")
     if isinstance(tables, dict):
-        intake_range_columns = {"date_from", "date_to", "received_only"}
+        intake_range_columns = {
+            "date_from",
+            "date_to",
+            "received_only",
+            "media_types_json",
+            "files_excluded",
+        }
         intake_range_indexes = {
             "ix_whatsapp_inbound_batches_date_from",
             "ix_whatsapp_inbound_batches_date_to",
@@ -206,6 +217,63 @@ def _normalize_whatsapp_contract(contract: dict[str, object]) -> dict[str, objec
                             "ix_whatsapp_dispatch_previews_source_kind",
                             "ix_whatsapp_dispatch_previews_source_reference_id",
                         }
+                    )
+                ]
+        processing_items = tables.get("whatsapp_inbound_processing_items")
+        if isinstance(processing_items, dict):
+            additive_columns = {
+                "normalized_content_sha256",
+                "content_match_kind",
+                "canonical_processing_item_id",
+                "content_match_details_json",
+            }
+            columns = processing_items.get("columns")
+            if isinstance(columns, list):
+                processing_items["columns"] = [
+                    column
+                    for column in columns
+                    if not (
+                        isinstance(column, dict)
+                        and column.get("name") in additive_columns
+                    )
+                ]
+            indexes = processing_items.get("indexes")
+            if isinstance(indexes, list):
+                processing_items["indexes"] = [
+                    index
+                    for index in indexes
+                    if not (
+                        isinstance(index, dict)
+                        and set(index.get("columns") or []).intersection(
+                            additive_columns
+                        )
+                    )
+                ]
+            constraints = processing_items.get("constraints")
+            if isinstance(constraints, list):
+                processing_items["constraints"] = [
+                    constraint
+                    for constraint in constraints
+                    if not (
+                        isinstance(constraint, dict)
+                        and (
+                            constraint.get("name")
+                            == "ck_whatsapp_inbound_processing_items_content_match_kind"
+                            or "canonical_processing_item_id"
+                            in (constraint.get("columns") or [])
+                        )
+                    )
+                ]
+        processing_runs = tables.get("whatsapp_inbound_processing_runs")
+        if isinstance(processing_runs, dict):
+            columns = processing_runs.get("columns")
+            if isinstance(columns, list):
+                processing_runs["columns"] = [
+                    column
+                    for column in columns
+                    if not (
+                        isinstance(column, dict)
+                        and column.get("name") == "content_duplicate_items"
                     )
                 ]
     return normalized

@@ -20,9 +20,9 @@ from whatsapp_gateway.inbound.batches import (
     record_batch_event,
     serialize_batch,
     serialize_batch_event,
-    serialize_batch_item,
     store_attachment_object,
 )
+from whatsapp_gateway.inbound.batch_serialization import serialize_batch_item
 from whatsapp_gateway.inbound.history_worker_status import refresh_history_request_from_worker
 from whatsapp_gateway.models import (
     WhatsAppAccount,

@@ -3,10 +3,11 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from sqlalchemy import or_
 from sqlmodel import Session, select
 
 from crm_domain.fields import extract_field_observations
-from crm_domain.models import ComplaintCase
+from crm_domain.models import ComplaintCase, ComplaintMatch
 from whatsapp_gateway.models import (
     WhatsAppInboundBatchItem,
     WhatsAppInboundProcessingItem,
@@ -22,6 +23,13 @@ def complaint_group_summary(
             select(WhatsAppInboundProcessingItem)
             .where(WhatsAppInboundProcessingItem.run_id == run_id)
             .where(WhatsAppInboundProcessingItem.detected_complaint_number.is_not(None))
+            .where(
+                or_(
+                    WhatsAppInboundProcessingItem.content_match_kind.is_(None),
+                    WhatsAppInboundProcessingItem.content_match_kind
+                    == "normalized_candidate",
+                )
+            )
             .order_by(
                 WhatsAppInboundProcessingItem.detected_complaint_number,
                 WhatsAppInboundProcessingItem.created_at,
@@ -135,6 +143,11 @@ def complaint_group_summary(
             ),
             "not_checked",
         )
+        group["paperless_at_intake"] = {
+            "category": group["paperless_category"],
+            "statuses": list(group["paperless_statuses"]),
+            "reasons": list(group["paperless_reasons"]),
+        }
         group["paperless_match_count"] = len(group["paperless_document_ids"])
         if group["approved_items"] == count:
             group["review_bucket"] = "approved"
@@ -154,6 +167,40 @@ def complaint_group_summary(
         ).first()
         group["case_id"] = str(complaint_case.id) if complaint_case else None
         group["case_state"] = complaint_case.state if complaint_case else None
+        if complaint_case is not None:
+            current_match_query = select(ComplaintMatch).where(
+                ComplaintMatch.complaint_case_id == complaint_case.id
+            )
+            if complaint_case.canonical_paperless_document_id:
+                current_match_query = current_match_query.where(
+                    ComplaintMatch.paperless_document_id
+                    == complaint_case.canonical_paperless_document_id
+                )
+            current_match = session.exec(
+                current_match_query.order_by(ComplaintMatch.created_at.desc())
+            ).first()
+            if current_match is not None:
+                signals = dict(current_match.signals_json or {})
+                current_category = signals.get("paperless_category")
+                current_statuses = list(signals.get("paperless_statuses") or [])
+                if current_category:
+                    current_document_id = (
+                        current_match.paperless_document_id
+                        or complaint_case.canonical_paperless_document_id
+                    )
+                    group["paperless_category"] = current_category
+                    group["paperless_statuses"] = current_statuses
+                    group["paperless_document_ids"] = (
+                        [current_document_id] if current_document_id else []
+                    )
+                    group["paperless_match_count"] = len(
+                        group["paperless_document_ids"]
+                    )
+                    group["paperless_reasons"] = [current_match.reason]
+                    group["paperless_status_source"] = (
+                        signals.get("paperless_observation_source") or "latest_check"
+                    )
+                    group["paperless_checked_at"] = current_match.created_at
         group["approved_run_count"] = len(approved_runs_by_number[number])
         group["approved_in_other_runs"] = bool(approved_runs_by_number[number].difference({run_id}))
         result.append(group)

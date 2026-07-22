@@ -8,7 +8,9 @@ REVIEW_READY_PAGE = ROOT / "apps/web/src/pages/crm/intake/review/[id]/ready.astr
 REVIEW_MANUAL_PAGE = ROOT / "apps/web/src/pages/crm/intake/review/[id]/manual.astro"
 REVIEW_EXISTING_PAGE = ROOT / "apps/web/src/pages/crm/intake/review/[id]/existing.astro"
 REVIEW_ITEM_PAGE = ROOT / "apps/web/src/pages/crm/intake/review/[id]/items/[item].astro"
+REVIEW_DUPLICATES_PAGE = ROOT / "apps/web/src/pages/crm/intake/review/[id]/duplicates.astro"
 REVIEW_GROUP_TABLE = ROOT / "apps/web/src/components/CrmReviewGroupTable.astro"
+DUPLICATE_TABLE = ROOT / "apps/web/src/components/CrmDuplicateItemsTable.astro"
 BATCH_LIST_PAGE = ROOT / "apps/web/src/pages/crm/intake/batches/index.astro"
 BATCH_PAGE = ROOT / "apps/web/src/pages/crm/intake/batches/[id].astro"
 NAV = ROOT / "apps/web/src/components/CrmIntakeNav.astro"
@@ -87,6 +89,19 @@ def test_manual_review_links_documents_to_resolved_complaint_cases() -> None:
     assert "Existing CRM case" in source
     assert "Save and link evidence" in source
     assert "Approve and create case" not in source
+
+
+def test_repeated_evidence_has_a_dedicated_auditable_workspace() -> None:
+    navigation = (ROOT / "apps/web/src/components/CrmReviewRunNav.astro").read_text()
+    page = REVIEW_DUPLICATES_PAGE.read_text()
+    table = DUPLICATE_TABLE.read_text()
+    item = REVIEW_ITEM_PAGE.read_text()
+    assert '"duplicates", "Repeated evidence"' in navigation
+    assert "Repeated content is processed once" in page
+    assert "content_match_kind" in table
+    assert "Canonical review" in table
+    assert "content-match-panel" in item
+    assert "exact_conflict" in item
 
 
 def test_crm_case_page_collapses_identical_captures_into_one_evidence_card() -> None:

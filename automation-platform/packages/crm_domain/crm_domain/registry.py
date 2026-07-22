@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from automation_core.time import utcnow
-from crm_domain.fields import extract_field_observations, extract_mapping_observations
+from crm_domain.fields import extract_field_observations
 from crm_domain.identifiers import normalize_complaint_number
 from crm_domain.models import (
     ComplaintCase,
@@ -260,8 +260,15 @@ def _record_binary_duplicate_signal(
 def record_captured_document(
     session: Session,
     captured: CapturedComplaintDocument,
+    *,
+    materialize_case: bool = True,
 ) -> tuple[ComplaintDocument, ComplaintCase | None, DocumentExtraction]:
-    """Persist one provider-neutral CRM evidence record idempotently."""
+    """Persist immutable evidence, materializing a case only after approval.
+
+    Classification is allowed to preserve the source document and extraction,
+    but it must not populate the durable complaint registry.  Review workflows
+    opt into ``materialize_case`` after an explicit operator decision.
+    """
 
     existing_document = session.exec(
         select(ComplaintDocument).where(
@@ -269,7 +276,7 @@ def record_captured_document(
         )
     ).first()
     complaint_number = normalize_complaint_number(captured.complaint_number)
-    case = _get_or_create_case(session, complaint_number)
+    case = _get_or_create_case(session, complaint_number) if materialize_case else None
 
     role = _document_role(captured.category)
     relationship_reason = "; ".join(captured.classification_evidence[:8]) or None
@@ -315,6 +322,9 @@ def record_captured_document(
     duplicate_of = _record_binary_duplicate_signal(session, document=document, case=case)
     if duplicate_of is not None:
         reason = f"Exact binary duplicate of complaint document {duplicate_of.id}."
+        document.duplicate_of_document_id = (
+            duplicate_of.duplicate_of_document_id or duplicate_of.id
+        )
         document.review_state = "duplicate"
         document.relationship_reason = reason
         document.updated_at = utcnow()
@@ -387,44 +397,23 @@ def record_captured_document(
             _promote_safe_fields(case, _canonical_field_values(observations))
             session.add(case)
 
-        complaint_rows = captured.extraction_metadata.get("complaint_rows", [])
-        if isinstance(complaint_rows, list):
-            for row in complaint_rows:
-                if not isinstance(row, dict):
-                    continue
-                row_number = int(row.get("row_number") or 0)
-                sheet = str(row.get("sheet") or "Sheet")
-                locator = f"sheet:{sheet}:row:{row_number}"
-                row_number_value = normalize_complaint_number(row.get("complaint_number"))
-                row_case = _get_or_create_case(session, row_number_value)
-                if row_case is None:
-                    continue
-                _link_case(
-                    session,
-                    document=document,
-                    case=row_case,
-                    role="source_row",
-                    confidence=1.0,
-                    reason="Structured spreadsheet row with one canonical CRM complaint number.",
-                    source_locator=locator,
+    elif case is not None:
+        # The extraction was recorded while this source was only a candidate.
+        # Attach its immutable observations to the newly approved case now.
+        observations = list(
+            session.exec(
+                select(ComplaintFieldObservation).where(
+                    ComplaintFieldObservation.extraction_id == extraction.id,
+                    ComplaintFieldObservation.complaint_case_id.is_(None),
                 )
-                values = row.get("values")
-                if isinstance(values, dict):
-                    row_observations: list[ComplaintFieldObservation] = []
-                    for field in extract_mapping_observations(values, source_locator=locator):
-                        observation = ComplaintFieldObservation(
-                            complaint_case_id=row_case.id,
-                            extraction_id=extraction.id,
-                            field_name=field.field_name,
-                            raw_value=field.raw_value,
-                            normalized_value=field.normalized_value,
-                            confidence=field.confidence,
-                            source_locator=field.source_locator,
-                        )
-                        row_observations.append(observation)
-                        session.add(observation)
-                    _promote_safe_fields(row_case, _canonical_field_values(row_observations))
-                    session.add(row_case)
+            ).all()
+        )
+        for observation in observations:
+            observation.complaint_case_id = case.id
+            session.add(observation)
+        if observations:
+            _promote_safe_fields(case, _canonical_field_values(observations))
+            session.add(case)
 
     return document, case, extraction
 

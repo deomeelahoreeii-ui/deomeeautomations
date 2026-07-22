@@ -6,17 +6,20 @@ import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from sqlalchemy import func, or_, select
 from sqlmodel import Session
 
 from automation_core.config import Settings
 from automation_core.time import utcnow
+from crm_filters.paperless import PaperlessClient
 from crm_domain.models import (
+    ComplaintAuditEvent,
     ComplaintCase,
     ComplaintDocument,
     ComplaintDocumentCaseLink,
+    ComplaintMatch,
     CrmComplaintTag,
     CrmComplaintTagLink,
     ComplaintReplyRevision,
@@ -27,6 +30,7 @@ from crm_domain.models import (
     CrmDispatchTarget,
     CrmOfficialLetter,
     CrmOfficialLetterArtifact,
+    CrmPaperlessStatusSync,
 )
 from crm_domain.official_letters import OfficialLetterService
 from whatsapp_gateway.configuration.defaults import ensure_defaults
@@ -133,11 +137,38 @@ def _target_identity(
 
 
 class CrmDispatchService:
-    def __init__(self, session: Session, settings: Settings | None = None):
+    def __init__(
+        self,
+        session: Session,
+        settings: Settings | None = None,
+        *,
+        paperless_client_factory: Callable[[Settings], PaperlessClient] | None = None,
+    ):
         self.session = session
         self.settings = settings or Settings()
+        self.paperless_client_factory = (
+            paperless_client_factory or self._default_paperless_client
+        )
         self.packet_root = self.settings.artifact_root.expanduser().resolve() / "crm-dispatch-packets"
         self.packet_root.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _default_paperless_client(settings: Settings) -> PaperlessClient:
+        return PaperlessClient(
+            base_url=settings.paperless_url,
+            username=settings.paperless_username,
+            password=settings.paperless_password,
+            token=settings.paperless_token,
+            verify_ssl=settings.paperless_verify_ssl,
+            ca_bundle=settings.paperless_ca_bundle,
+            allow_insecure_fallback=settings.paperless_allow_insecure_fallback,
+            timeout_seconds=settings.paperless_timeout_seconds,
+            document_type_name=settings.paperless_document_type_complaint,
+            attachment_type_name=settings.paperless_document_type_attachment,
+            correspondent_name=settings.paperless_correspondent_name,
+            max_pages=settings.paperless_max_pages,
+            task_timeout_seconds=settings.paperless_task_timeout_seconds,
+        )
 
     def ensure_defaults(self) -> dict[str, Any]:
         account, _settings = ensure_defaults(self.session)
@@ -1288,7 +1319,290 @@ class CrmDispatchService:
         batch.successful_items = sum(item.business_status == "delivered" for item in targets)
         batch.failed_items = sum(item.business_status in {"failed", "timed_out"} for item in targets)
 
-    def refresh(self, batch_id: uuid.UUID) -> dict[str, Any]:
+    @staticmethod
+    def _paperless_sync_required(batch: CrmDispatchBatch) -> bool:
+        return batch.direction == "upward" and batch.purpose in {
+            "compliance_submission",
+            "reply_submission",
+            "follow_up_submission",
+        }
+
+    @staticmethod
+    def _paperless_sync_dict(
+        sync: CrmPaperlessStatusSync | None,
+        *,
+        document_id: int | None = None,
+    ) -> dict[str, Any]:
+        if sync is None:
+            return {
+                "state": "not_required",
+                "document_id": document_id,
+                "intended_status": None,
+                "status_before": None,
+                "status_after": None,
+                "attempts": 0,
+                "error": None,
+                "completed_at": None,
+            }
+        return {
+            "state": sync.state,
+            "document_id": sync.paperless_document_id,
+            "intended_status": sync.intended_status,
+            "status_before": sync.observed_status_before,
+            "status_after": sync.observed_status_after,
+            "attempts": sync.attempts,
+            "error": sync.last_error,
+            "last_attempted_at": sync.last_attempted_at,
+            "completed_at": sync.completed_at,
+        }
+
+    def _record_paperless_sync_match(
+        self,
+        *,
+        item: CrmDispatchItem,
+        document_id: int,
+        status: str,
+        changed: bool,
+    ) -> None:
+        latest = self.session.scalar(
+            select(ComplaintMatch)
+            .where(
+                ComplaintMatch.complaint_case_id == item.complaint_case_id,
+                ComplaintMatch.paperless_document_id == document_id,
+            )
+            .order_by(ComplaintMatch.created_at.desc())
+        )
+        latest_signals = dict(latest.signals_json or {}) if latest else {}
+        already_projected = (
+            latest_signals.get("paperless_observation_source") == "dispatch_sync"
+            and latest_signals.get("dispatch_item_id") == str(item.id)
+            and latest_signals.get("paperless_statuses") == [status]
+        )
+        if not already_projected:
+            self.session.add(
+                ComplaintMatch(
+                    complaint_case_id=item.complaint_case_id,
+                    processing_item_id=None,
+                    paperless_document_id=document_id,
+                    proposed_decision="existing",
+                    final_decision="existing",
+                    score=1.0,
+                    reason=(
+                        f"Paperless status synchronized to {status} after confirmed "
+                        "upward WhatsApp delivery."
+                    ),
+                    signals_json={
+                        "exact_complaint_number": True,
+                        "paperless_category": "submitted",
+                        "paperless_statuses": [status],
+                        "paperless_observation_source": "dispatch_sync",
+                        "dispatch_item_id": str(item.id),
+                        "paperless_changed": changed,
+                    },
+                )
+            )
+
+    def _paperless_sync_audit(
+        self,
+        *,
+        item: CrmDispatchItem,
+        sync: CrmPaperlessStatusSync,
+        state: str,
+        before: str | None = None,
+        after: str | None = None,
+        error: str | None = None,
+        changed: bool | None = None,
+    ) -> None:
+        self.session.add(
+            ComplaintAuditEvent(
+                complaint_case_id=item.complaint_case_id,
+                entity_type="crm_dispatch_item",
+                entity_id=str(item.id),
+                event_type="paperless_status_synchronization",
+                state=state,
+                actor="dispatch-reconciler",
+                before_json={"status": before} if before else {},
+                after_json={"status": after} if after else {},
+                details_json={
+                    "sync_id": str(sync.id),
+                    "dispatch_batch_id": str(item.batch_id),
+                    "paperless_document_id": sync.paperless_document_id,
+                    "intended_status": sync.intended_status,
+                    "attempt": sync.attempts,
+                    **({"changed": changed} if changed is not None else {}),
+                },
+                error=error,
+            )
+        )
+
+    def _eligible_paperless_syncs(
+        self,
+        batch: CrmDispatchBatch,
+        items: list[CrmDispatchItem],
+    ) -> list[tuple[CrmDispatchItem, CrmPaperlessStatusSync]]:
+        if not self._paperless_sync_required(batch):
+            return []
+        pending: list[tuple[CrmDispatchItem, CrmPaperlessStatusSync]] = []
+        for item in items:
+            if item.excluded or item.compliance_status != "submitted":
+                continue
+            case = self.session.get(ComplaintCase, item.complaint_case_id)
+            document_id = case.canonical_paperless_document_id if case else None
+            sync = self.session.scalar(
+                select(CrmPaperlessStatusSync).where(
+                    CrmPaperlessStatusSync.dispatch_item_id == item.id
+                )
+            )
+            if sync is None:
+                sync = CrmPaperlessStatusSync(
+                    dispatch_item_id=item.id,
+                    complaint_case_id=item.complaint_case_id,
+                    paperless_document_id=document_id,
+                    intended_status="Submitted",
+                )
+                self.session.add(sync)
+                self.session.flush()
+            elif sync.state == "succeeded" and sync.paperless_document_id == document_id:
+                continue
+            else:
+                sync.paperless_document_id = document_id
+                sync.state = "pending"
+                sync.last_error = None
+                sync.updated_at = utcnow()
+                self.session.add(sync)
+            if document_id is None:
+                sync.state = "blocked"
+                sync.last_error = "The CRM case has no canonical Paperless document link."
+                sync.updated_at = utcnow()
+                self._paperless_sync_audit(
+                    item=item,
+                    sync=sync,
+                    state="failed",
+                    error=sync.last_error,
+                )
+                continue
+            pending.append((item, sync))
+        self.session.commit()
+        return pending
+
+    def _mark_paperless_syncs_unavailable(
+        self,
+        pending: list[tuple[CrmDispatchItem, CrmPaperlessStatusSync]],
+        error: str,
+    ) -> None:
+        for item, sync in pending:
+            sync.state = "failed"
+            sync.attempts += 1
+            sync.last_attempted_at = utcnow()
+            sync.last_error = error
+            sync.updated_at = utcnow()
+            self.session.add(sync)
+            self._paperless_sync_audit(
+                item=item,
+                sync=sync,
+                state="failed",
+                error=error,
+            )
+        self.session.commit()
+
+    def _sync_submitted_items_to_paperless(
+        self,
+        batch: CrmDispatchBatch,
+        items: list[CrmDispatchItem],
+    ) -> dict[str, int]:
+        pending = self._eligible_paperless_syncs(batch, items)
+        summary = {
+            "eligible": len(pending),
+            "synchronized": 0,
+            "already_synchronized": 0,
+            "failed": 0,
+        }
+        if not pending:
+            return summary
+        configured = bool(
+            self.settings.paperless_url
+            and (
+                self.settings.paperless_token
+                or (
+                    self.settings.paperless_username
+                    and self.settings.paperless_password
+                )
+            )
+        )
+        if not configured:
+            error = "Paperless credentials are not configured."
+            self._mark_paperless_syncs_unavailable(pending, error)
+            summary["failed"] = len(pending)
+            return summary
+        try:
+            client = self.paperless_client_factory(self.settings)
+            client.connect()
+        except Exception as exc:
+            error = f"Paperless connection failed: {exc}"
+            self._mark_paperless_syncs_unavailable(pending, error)
+            summary["failed"] = len(pending)
+            return summary
+
+        for item, sync in pending:
+            sync.state = "syncing"
+            sync.attempts += 1
+            sync.last_attempted_at = utcnow()
+            sync.last_error = None
+            sync.updated_at = utcnow()
+            self.session.add(sync)
+            self.session.commit()
+            try:
+                assert sync.paperless_document_id is not None
+                result = client.set_document_status(
+                    sync.paperless_document_id,
+                    sync.intended_status,
+                    allowed_from_statuses={"Pending"},
+                )
+                sync.observed_status_before = result.status_before
+                sync.observed_status_after = result.status_after
+                sync.state = "succeeded"
+                sync.last_error = None
+                sync.completed_at = utcnow()
+                sync.updated_at = sync.completed_at
+                self.session.add(sync)
+                self._record_paperless_sync_match(
+                    item=item,
+                    document_id=sync.paperless_document_id,
+                    status=result.status_after,
+                    changed=result.changed,
+                )
+                self._paperless_sync_audit(
+                    item=item,
+                    sync=sync,
+                    state="succeeded",
+                    before=result.status_before,
+                    after=result.status_after,
+                    changed=result.changed,
+                )
+                self.session.commit()
+                key = "synchronized" if result.changed else "already_synchronized"
+                summary[key] += 1
+            except Exception as exc:
+                sync.state = "failed"
+                sync.last_error = str(exc)
+                sync.updated_at = utcnow()
+                self.session.add(sync)
+                self._paperless_sync_audit(
+                    item=item,
+                    sync=sync,
+                    state="failed",
+                    error=sync.last_error,
+                )
+                self.session.commit()
+                summary["failed"] += 1
+        return summary
+
+    def refresh(
+        self,
+        batch_id: uuid.UUID,
+        *,
+        sync_paperless: bool = True,
+    ) -> dict[str, Any]:
         batch = self.session.get(CrmDispatchBatch, batch_id)
         if batch is None:
             raise CrmDispatchNotFound("Dispatch batch not found")
@@ -1300,23 +1614,44 @@ class CrmDispatchService:
         for target in targets:
             if not target.preview_id:
                 continue
-            approval = self.session.scalar(select(WhatsAppDispatchApproval).where(WhatsAppDispatchApproval.preview_id == target.preview_id))
+            approval = self.session.scalar(
+                select(WhatsAppDispatchApproval).where(
+                    WhatsAppDispatchApproval.preview_id == target.preview_id
+                )
+            )
             if approval is None:
                 continue
-            deliveries = list(self.session.scalars(select(WhatsAppDelivery).where(WhatsAppDelivery.approval_id == approval.id)).all())
+            deliveries = list(self.session.scalars(
+                select(WhatsAppDelivery).where(
+                    WhatsAppDelivery.approval_id == approval.id
+                )
+            ).all())
             target.whatsapp_delivery_ids_json = [str(item.id) for item in deliveries]
             statuses = {item.status for item in deliveries}
+            if deliveries:
+                target.sent_at = min(item.queued_at for item in deliveries)
             if not deliveries and approval.delivery_count == 0:
                 target.business_status = "blocked"
-                target.error = approval.error or "No new WhatsApp delivery was queued; the frozen recipient was blocked, excluded, or already sent."
+                target.error = approval.error or (
+                    "No new WhatsApp delivery was queued; the frozen recipient was "
+                    "blocked, excluded, or already sent."
+                )
             elif "failed" in statuses:
                 target.business_status = "failed"
-                target.error = next((item.error for item in deliveries if item.error), None)
+                target.error = next(
+                    (item.error for item in deliveries if item.error), None
+                )
             elif "timed_out" in statuses:
                 target.business_status = "timed_out"
+                target.error = next(
+                    (item.error for item in deliveries if item.error), None
+                )
             elif statuses and statuses <= {"delivered"}:
                 target.business_status = "delivered"
-                target.completed_at = max((item.completed_at for item in deliveries if item.completed_at), default=utcnow())
+                target.completed_at = max(
+                    (item.completed_at for item in deliveries if item.completed_at),
+                    default=utcnow(),
+                )
                 target.error = None
             elif "sent_pending_confirmation" in statuses:
                 target.business_status = "sent_pending_confirmation"
@@ -1327,12 +1662,19 @@ class CrmDispatchService:
             elif deliveries:
                 target.business_status = "approved"
                 target.error = None
+            target.updated_at = utcnow()
             self.session.add(target)
+
         items = list(self.session.scalars(
             select(CrmDispatchItem).where(CrmDispatchItem.batch_id == batch.id)
         ).all())
         for item in items:
-            item_targets = [target for target in targets if target.dispatch_item_id == item.id]
+            item_targets = [
+                target
+                for target in targets
+                if target.dispatch_item_id == item.id
+                and target.business_status != "excluded"
+            ]
             if batch.direction == "downward":
                 received_document = self.session.scalar(
                     select(ComplaintDocument.id).where(
@@ -1343,27 +1685,61 @@ class CrmDispatchService:
                 )
                 if received_document:
                     item.compliance_status = "received"
-                elif any(target.business_status in {"approved", "queued", "sent_pending_confirmation", "delivered"} for target in item_targets):
+                elif any(
+                    target.business_status
+                    in {"approved", "queued", "sent_pending_confirmation", "delivered"}
+                    for target in item_targets
+                ):
                     item.compliance_status = "requested"
-            elif any(target.business_status == "delivered" for target in item_targets):
+            elif item_targets and all(
+                target.business_status == "delivered" for target in item_targets
+            ):
                 item.compliance_status = "submitted"
             item.updated_at = utcnow()
             self.session.add(item)
+
         self._update_batch_counts(batch)
         target_statuses = {item.business_status for item in targets}
+        terminal_failures = target_statuses.intersection({"failed", "timed_out"})
+        active = target_statuses.intersection(
+            {"approved", "queued", "sent_pending_confirmation"}
+        )
         if target_statuses and target_statuses <= {"delivered", "excluded"}:
             batch.status = "completed"
             batch.completed_at = utcnow()
-        elif target_statuses.intersection({"failed", "timed_out"}) and target_statuses.intersection({"delivered"}):
+            batch.error_summary = None
+        elif terminal_failures and target_statuses.intersection({"delivered"}):
             batch.status = "completed_with_errors"
-        elif target_statuses.intersection({"queued", "sent_pending_confirmation", "approved"}):
+            batch.completed_at = utcnow()
+            batch.error_summary = "Some WhatsApp deliveries failed or timed out."
+        elif terminal_failures and not active:
+            batch.status = "failed"
+            batch.completed_at = utcnow()
+            batch.error_summary = "WhatsApp deliveries failed or timed out."
+        elif active:
             batch.status = "sending"
-        elif target_statuses.intersection({"blocked"}) and not target_statuses.intersection({"queued", "sent_pending_confirmation", "delivered"}):
+            batch.completed_at = None
+        elif target_statuses.intersection({"blocked"}) and not target_statuses.intersection(
+            {"queued", "sent_pending_confirmation", "delivered"}
+        ):
             batch.status = "review_required"
         batch.updated_at = utcnow()
         self.session.add(batch)
         self.session.commit()
-        return self.detail(batch.id)
+
+        reconciliation = (
+            self._sync_submitted_items_to_paperless(batch, items)
+            if sync_paperless
+            else {
+                "eligible": 0,
+                "synchronized": 0,
+                "already_synchronized": 0,
+                "failed": 0,
+            }
+        )
+        result = self.detail(batch.id)
+        result["reconciliation"] = reconciliation
+        return result
 
     def statistics(self) -> dict[str, int]:
         count = lambda *filters: int(self.session.scalar(select(func.count()).select_from(CrmDispatchBatch).where(*filters)) or 0)
@@ -1441,6 +1817,12 @@ class CrmDispatchService:
         for target in targets:
             item = self.session.get(CrmDispatchItem, target.dispatch_item_id)
             batch = self.session.get(CrmDispatchBatch, item.batch_id) if item else None
+            case = self.session.get(ComplaintCase, item.complaint_case_id) if item else None
+            paperless_sync = self.session.scalar(
+                select(CrmPaperlessStatusSync).where(
+                    CrmPaperlessStatusSync.dispatch_item_id == item.id
+                )
+            ) if item else None
             profile = self.session.get(WhatsAppDispatchProfile, target.dispatch_profile_id)
             approval = self.session.scalar(
                 select(WhatsAppDispatchApproval).where(WhatsAppDispatchApproval.preview_id == target.preview_id)
@@ -1461,6 +1843,14 @@ class CrmDispatchService:
                 "recipient_name": latest.recipient_name if latest else (target.recipient_snapshot_json[0].get("name") if target.recipient_snapshot_json else "—"),
                 "target": latest.target if latest else (target.recipient_snapshot_json[0].get("jid") if target.recipient_snapshot_json else "—"),
                 "status": latest.status if latest else target.business_status,
+                "crm_status": target.business_status,
+                "compliance_status": item.compliance_status if item else None,
+                "paperless_sync": self._paperless_sync_dict(
+                    paperless_sync,
+                    document_id=(
+                        case.canonical_paperless_document_id if case else None
+                    ),
+                ),
                 "error": latest.error if latest else target.error,
                 "queued_at": latest.queued_at if latest else None,
                 "completed_at": latest.completed_at if latest else target.completed_at,
@@ -1504,6 +1894,12 @@ class CrmDispatchService:
         preview_ids: set[uuid.UUID] = set()
         for item in items:
             targets = list(self.session.scalars(select(CrmDispatchTarget).where(CrmDispatchTarget.dispatch_item_id == item.id)).all())
+            case = self.session.get(ComplaintCase, item.complaint_case_id)
+            paperless_sync = self.session.scalar(
+                select(CrmPaperlessStatusSync).where(
+                    CrmPaperlessStatusSync.dispatch_item_id == item.id
+                )
+            )
             for target in targets:
                 if target.preview_id:
                     preview_ids.add(target.preview_id)
@@ -1517,6 +1913,12 @@ class CrmDispatchService:
                 "letter_number": item.letter_number_snapshot,
                 "letter_date": item.letter_date_snapshot,
                 "compliance_status": item.compliance_status,
+                "paperless_sync": self._paperless_sync_dict(
+                    paperless_sync,
+                    document_id=(
+                        case.canonical_paperless_document_id if case else None
+                    ),
+                ),
                 "packet_sha256": item.packet_sha256,
                 "packet_size_bytes": item.packet_size_bytes,
                 "packet_page_count": item.packet_page_count,

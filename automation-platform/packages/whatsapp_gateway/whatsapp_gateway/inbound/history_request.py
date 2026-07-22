@@ -180,6 +180,7 @@ async def request_inbound_history(
         date_from=date_from,
         date_to=date_to,
         received_only=True,
+        media_types=data.media_types,
         remote_jid=platform_remote_jid,
         anchor_message_id=anchor.message_id if anchor else None,
         anchor_timestamp=anchor.message_timestamp if anchor else None,
@@ -197,6 +198,7 @@ async def request_inbound_history(
         date_from=date_from,
         date_to=date_to,
         received_only=True,
+        media_types_json=data.media_types,
         baseline_messages=baseline_messages,
         baseline_attachments=baseline_attachments,
         remote_jid=platform_remote_jid,
@@ -220,6 +222,7 @@ async def request_inbound_history(
         "allHistory": data.all_history,
         "afterTimestamp": iso_utc(date_from),
         "receivedOnly": True,
+        "mediaTypes": data.media_types,
         "anchorMessageId": anchor.message_id if anchor else None,
         "beforeTimestamp": iso_utc(date_to or (anchor.message_timestamp if anchor else None)),
     }

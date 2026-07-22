@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy import or_
 from sqlmodel import Session, select
 
 from crm_domain.models import ComplaintCase, ComplaintDocument
@@ -25,8 +26,9 @@ def persist_crm_capture(
     batch_item: WhatsAppInboundBatchItem | None,
     attachment: WhatsAppInboundAttachment | None,
     filename: str,
+    materialize_case: bool = False,
 ) -> None:
-    """Translate WhatsApp capture records into the provider-neutral CRM ledger."""
+    """Preserve evidence without creating a durable case before approval."""
 
     record_captured_document(
         session,
@@ -50,6 +52,7 @@ def persist_crm_capture(
             extraction_metadata=dict(item.extracted_metadata_json or {}),
             extraction_error=item.error,
         ),
+        materialize_case=materialize_case,
     )
 
 
@@ -105,25 +108,26 @@ def persist_paperless_reconciliation(
 
 def complaint_numbers_for_run(session: Session, run_id: object) -> list[str]:
     values = session.exec(
-        select(ComplaintCase.complaint_number)
-        .join(
-            ComplaintDocumentCaseLink,
-            ComplaintDocumentCaseLink.complaint_case_id == ComplaintCase.id,
-        )
-        .join(
-            ComplaintDocument,
-            ComplaintDocument.id == ComplaintDocumentCaseLink.complaint_document_id,
-        )
-        .join(
-            WhatsAppInboundProcessingItem,
-            WhatsAppInboundProcessingItem.id == ComplaintDocument.source_processing_item_id,
-        )
-        .where(
+        select(WhatsAppInboundProcessingItem.detected_complaint_number).where(
             WhatsAppInboundProcessingItem.run_id == run_id,
-            ComplaintCase.complaint_number.is_not(None),
+            WhatsAppInboundProcessingItem.detected_complaint_number.is_not(None),
+            or_(
+                WhatsAppInboundProcessingItem.content_match_kind.is_(None),
+                WhatsAppInboundProcessingItem.content_match_kind
+                == "normalized_candidate",
+            ),
         )
     ).all()
-    return sorted({value for value in values if value})
+    # Import locally to keep the provider-neutral registry free of an inbound
+    # service dependency at module import time.
+    from whatsapp_gateway.inbound.spreadsheet_intake import (
+        spreadsheet_numbers_for_run,
+    )
+
+    return sorted(
+        {value for value in values if value}
+        | spreadsheet_numbers_for_run(session, run_id)
+    )
 
 
 def associate_run_attachments(session: Session, run_id: object) -> int:
@@ -137,6 +141,13 @@ def associate_run_attachments(session: Session, run_id: object) -> int:
                 WhatsAppInboundProcessingItem.id == ComplaintDocument.source_processing_item_id,
             )
             .where(WhatsAppInboundProcessingItem.run_id == run_id)
+            .where(
+                or_(
+                    WhatsAppInboundProcessingItem.content_match_kind.is_(None),
+                    WhatsAppInboundProcessingItem.content_match_kind
+                    == "normalized_candidate",
+                )
+            )
             .order_by(ComplaintDocument.created_at)
         ).all()
     )

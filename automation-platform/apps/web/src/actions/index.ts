@@ -640,6 +640,7 @@ export const server = {
         all_history: z.boolean().default(false),
         date_from: z.string().datetime({ offset: true }).nullable().optional(),
         date_to: z.string().datetime({ offset: true }).nullable().optional(),
+        media_types: z.array(z.enum(["image", "pdf", "spreadsheet"])).min(1).default(["image", "pdf", "spreadsheet"]),
       }),
       handler: (input) => api("/api/v1/whatsapp/inbound/history/request", {
         method: "POST",
@@ -719,6 +720,51 @@ export const server = {
       handler: (input) => api("/api/v1/whatsapp/inbound/processing-runs", {
         method: "POST",
         body: JSON.stringify(input),
+      }),
+    }),
+    spreadsheetIntakeBatches: defineAction({
+      input: z.object({
+        runId: z.string().uuid().optional(),
+        status: z.string().optional(),
+        search: z.string().optional(),
+        limit: z.number().int().min(1).max(200).default(50),
+        offset: z.number().int().min(0).default(0),
+      }),
+      handler: ({ runId, status, search, limit, offset }) => {
+        const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+        if (runId) params.set("run_id", runId);
+        if (status) params.set("status", status);
+        if (search) params.set("search", search);
+        return api(`/api/v1/whatsapp/inbound/spreadsheet-batches?${params}`);
+      },
+    }),
+    spreadsheetIntakeBatch: defineAction({
+      input: z.object({
+        id: z.string().uuid(),
+        status: z.string().optional(),
+        paperlessCategory: z.string().optional(),
+        search: z.string().optional(),
+        limit: z.number().int().min(1).max(200).default(50),
+        offset: z.number().int().min(0).default(0),
+      }),
+      handler: ({ id, status, paperlessCategory, search, limit, offset }) => {
+        const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+        if (status) params.set("status", status);
+        if (paperlessCategory) params.set("paperless_category", paperlessCategory);
+        if (search) params.set("search", search);
+        return api(`/api/v1/whatsapp/inbound/spreadsheet-batches/${id}?${params}`);
+      },
+    }),
+    reviewSpreadsheetIntakeRow: defineAction({
+      input: z.object({
+        id: z.string().uuid(),
+        decision: z.enum(["approved", "rejected"]),
+        reviewedBy: z.string().min(1).max(120).default("web-operator"),
+        note: z.string().max(4000).optional(),
+      }),
+      handler: ({ id, decision, reviewedBy, note }) => api(`/api/v1/whatsapp/inbound/spreadsheet-rows/${id}/review`, {
+        method: "POST",
+        body: JSON.stringify({ decision, reviewed_by: reviewedBy, note }),
       }),
     }),
     inboundProcessingRuns: defineAction({

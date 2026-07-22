@@ -320,6 +320,84 @@ def test_batch_membership_enforces_date_range_and_received_only(tmp_path, monkey
         app.dependency_overrides.clear()
 
 
+def test_batch_membership_enforces_selected_file_types(tmp_path, monkeypatch) -> None:
+    engine, contact_id, _settings, fake_nats = setup_app(tmp_path, monkeypatch)
+    try:
+        with TestClient(app) as client:
+            created = client.post(
+                "/api/v1/whatsapp/inbound/history/request",
+                json={
+                    "contact_id": str(contact_id),
+                    "count": 50,
+                    "media_types": ["pdf"],
+                },
+            )
+            assert created.status_code == 202, created.text
+            batch_id = created.json()["batch_id"]
+            history_payload = next(
+                item for item in fake_nats.requests if item["action"] == "request_history"
+            )
+            assert history_payload["mediaTypes"] == ["pdf"]
+
+            def event(message_id: str, filename: str, mime_type: str) -> dict:
+                return {
+                    "workerId": "default",
+                    "batchId": batch_id,
+                    "messageId": message_id,
+                    "remoteJid": "923360249999@s.whatsapp.net",
+                    "participantJid": None,
+                    "senderJid": "923360249999@s.whatsapp.net",
+                    "fromMe": False,
+                    "chatScope": "direct",
+                    "messageTimestamp": "2026-07-12T12:00:00Z",
+                    "pushName": "Faheem",
+                    "text": "CRM evidence",
+                    "messageType": "document",
+                    "ingestionSource": "web_history",
+                    "payloadSha256": message_id[0] * 64,
+                    "rawPayload": {},
+                    "attachment": {
+                        "mediaKind": "document",
+                        "messageKey": "document",
+                        "originalFilename": filename,
+                        "mimeType": mime_type,
+                        "declaredSize": 12,
+                    },
+                }
+
+            for payload in (
+                event("selected-pdf", "complaint.pdf", "application/pdf"),
+                event(
+                    "excluded-sheet",
+                    "register.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            ):
+                response = client.post(
+                    "/api/v1/whatsapp/inbound/events",
+                    json=payload,
+                    headers={"x-whatsapp-worker-token": "test-secret"},
+                )
+                assert response.status_code == 200, response.text
+
+        with Session(engine) as session:
+            batch = session.get(WhatsAppInboundBatch, uuid.UUID(batch_id))
+            assert batch is not None
+            assert batch.media_types_json == ["pdf"]
+            assert batch.files_discovered == 1
+            assert batch.files_excluded == 1
+            items = list(session.exec(select(WhatsAppInboundBatchItem)).all())
+            assert [item.original_filename for item in items] == ["complaint.pdf"]
+            excluded = session.exec(
+                select(WhatsAppInboundBatchEvent).where(
+                    WhatsAppInboundBatchEvent.event_type == "file_excluded_by_scope"
+                )
+            ).one()
+            assert excluded.details_json["media_category"] == "spreadsheet"
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_content_addressed_s3_storage_is_verified_and_reused(tmp_path, monkeypatch) -> None:
     engine, contact_id, settings, _fake_nats = setup_app(tmp_path, monkeypatch)
     fake_s3 = FakeS3Session()

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import asyncio
+import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -71,3 +73,41 @@ def test_preview_artifact_download_validates_the_actual_source_domain() -> None:
     assert "CrmDispatchArtifact.batch_id == preview.source_reference_id" in source
     assert "Artifact is not registered to the frozen preview source" in source
     assert "Artifact is not registered to the source dry run" not in source
+
+
+def test_terminal_whatsapp_delivery_reconciles_the_immutable_source_workflow() -> None:
+    approved = read("packages/whatsapp_gateway/whatsapp_gateway/dispatch/approved_delivery.py")
+    retry = read("packages/whatsapp_gateway/whatsapp_gateway/dispatch/retry_delivery.py")
+    router = read(
+        "packages/whatsapp_gateway/whatsapp_gateway/dispatch/source_reconciliation.py"
+    )
+    dispatch = read("packages/crm_domain/crm_domain/dispatch.py")
+
+    assert "reconcile_source_after_terminal_delivery(" in approved
+    assert "reconcile_source_after_terminal_delivery(" in retry
+    assert 'preview.source_kind != "crm_dispatch_batch"' in router
+    assert "CrmDispatchService(session, Settings()).refresh" in router
+    assert "def _sync_submitted_items_to_paperless(" in dispatch
+    assert "client.set_document_status(" in dispatch
+
+
+def test_terminal_delivery_wrapper_preserves_result_and_invokes_source(monkeypatch) -> None:
+    from whatsapp_gateway.dispatch import source_reconciliation
+
+    approval_id = uuid.uuid4()
+    observed: list[uuid.UUID] = []
+
+    async def publisher(value: uuid.UUID, _job_id: str) -> dict[str, int]:
+        return {"delivered": 1, "failed": 0}
+
+    monkeypatch.setattr(
+        source_reconciliation,
+        "reconcile_approval_source",
+        observed.append,
+    )
+    wrapped = source_reconciliation.reconcile_source_after_terminal_delivery(publisher)
+
+    result = asyncio.run(wrapped(approval_id, "job-1"))
+
+    assert result == {"delivered": 1, "failed": 0}
+    assert observed == [approval_id]

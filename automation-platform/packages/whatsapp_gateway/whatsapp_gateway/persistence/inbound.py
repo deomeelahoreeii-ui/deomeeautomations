@@ -108,6 +108,10 @@ class WhatsAppInboundHistoryRequest(SQLModel, table=True):
     date_from: datetime | None = Field(default=None, index=True)
     date_to: datetime | None = Field(default=None, index=True)
     received_only: bool = True
+    media_types_json: list[str] = Field(
+        default_factory=lambda: ["image", "pdf", "spreadsheet"],
+        sa_column=Column(JSON, nullable=False),
+    )
     remote_jid: str | None = Field(default=None, index=True)
     anchor_message_id: str | None = Field(default=None, index=True)
     anchor_timestamp: datetime | None = Field(default=None, index=True)
@@ -171,6 +175,10 @@ class WhatsAppInboundBatch(SQLModel, table=True):
     date_from: datetime | None = Field(default=None, index=True)
     date_to: datetime | None = Field(default=None, index=True)
     received_only: bool = True
+    media_types_json: list[str] = Field(
+        default_factory=lambda: ["image", "pdf", "spreadsheet"],
+        sa_column=Column(JSON, nullable=False),
+    )
     remote_jid: str | None = Field(default=None, index=True)
     anchor_message_id: str | None = Field(default=None, index=True)
     anchor_timestamp: datetime | None = Field(default=None, index=True)
@@ -180,6 +188,7 @@ class WhatsAppInboundBatch(SQLModel, table=True):
     files_stored: int = 0
     files_reused: int = 0
     files_failed: int = 0
+    files_excluded: int = 0
     total_bytes: int = 0
     storage_backend: str = Field(default="local", index=True)
     raw_bucket: str | None = Field(default=None, index=True)
@@ -268,6 +277,7 @@ class WhatsAppInboundProcessingRun(SQLModel, table=True):
     non_crm: int = 0
     unknown_items: int = 0
     duplicate_items: int = 0
+    content_duplicate_items: int = 0
     eligible_items: int = 0
     review_items: int = 0
     failed_items: int = 0
@@ -295,6 +305,10 @@ class WhatsAppInboundProcessingItem(SQLModel, table=True):
             "review_status IN ('pending', 'approved', 'rejected', 'deferred')",
             name="ck_whatsapp_inbound_processing_items_review_status",
         ),
+        CheckConstraint(
+            "content_match_kind IS NULL OR content_match_kind IN ('exact_reused', 'exact_pending', 'exact_conflict', 'normalized_reused', 'normalized_candidate')",
+            name="ck_whatsapp_inbound_processing_items_content_match_kind",
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -312,6 +326,17 @@ class WhatsAppInboundProcessingItem(SQLModel, table=True):
     extracted_text: str | None = Field(default=None, sa_column=Column(Text))
     extraction_method: str | None = Field(default=None, index=True)
     extracted_metadata_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    normalized_content_sha256: str | None = Field(default=None, index=True, max_length=64)
+    content_match_kind: str | None = Field(default=None, index=True, max_length=32)
+    canonical_processing_item_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="whatsapp_inbound_processing_items.id",
+        index=True,
+    )
+    content_match_details_json: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False),
+    )
     paperless_category: str = Field(default="not_checked", index=True)
     paperless_reason: str | None = Field(default=None, sa_column=Column(Text))
     paperless_document_ids: list[int | str] = Field(default_factory=list, sa_column=Column(JSON))

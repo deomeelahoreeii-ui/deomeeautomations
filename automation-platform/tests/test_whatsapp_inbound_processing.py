@@ -65,6 +65,21 @@ def test_multiple_complaint_numbers_require_review() -> None:
     assert result.all_complaint_numbers == ["104-6609317", "104-6609318"]
 
 
+def test_specific_filename_preserves_routing_identity_when_body_mentions_other_cases() -> None:
+    result = classify_extracted_document(
+        filename="Attach LAHORE_2026-07-08--104-6795237.pdf",
+        mime_type="application/pdf",
+        extracted_text=(
+            "Attachment for complaint 104-6795237 with a reference to 104-6609318"
+        ),
+        extraction_method="pdftotext+selective-tesseract",
+    )
+    assert result.category == "possible_crm_complaint"
+    assert result.complaint_number == "104-6795237"
+    assert result.needs_review is True
+    assert "complaint_number_disambiguated_by_filename" in result.evidence
+
+
 def test_spreadsheet_text_is_inspected_for_crm_numbers(tmp_path) -> None:
     path = tmp_path / "complaints.xlsx"
     workbook = Workbook()
@@ -81,9 +96,12 @@ def test_spreadsheet_text_is_inspected_for_crm_numbers(tmp_path) -> None:
         extraction_method=extraction.method,
     )
     assert extraction.method == "spreadsheet:xlsx"
-    assert classification.complaint_number == "104-6609317"
-    assert classification.category == "crm_supporting_document"
+    assert classification.complaint_number is None
+    assert classification.category == "spreadsheet"
+    assert classification.needs_review is False
+    assert "routed_to_spreadsheet_intake" in classification.evidence
     assert extraction.metadata["complaint_rows"][0]["complaint_number"] == "104-6609317"
+    assert extraction.metadata["spreadsheet_rows"][0]["row_number"] == 2
 
 
 def test_spreadsheet_keeps_each_complaint_row_as_a_candidate(tmp_path) -> None:
@@ -99,6 +117,23 @@ def test_spreadsheet_keeps_each_complaint_row_as_a_candidate(tmp_path) -> None:
         "104-6609317",
         "104-6609318",
     ]
+
+
+def test_spreadsheet_text_limit_never_truncates_the_row_candidate_ledger(tmp_path) -> None:
+    path = tmp_path / "large-register.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Complaint No", "Long Remarks"])
+    sheet.append(["104-6609317", "A" * 100])
+    sheet.append(["104-6609318", "B" * 100])
+    workbook.save(path)
+
+    extraction = extract_document(path, text_limit=20)
+
+    assert len(extraction.text) <= 20
+    assert [
+        row["complaint_number"] for row in extraction.metadata["spreadsheet_rows"]
+    ] == ["104-6609317", "104-6609318"]
 
 
 def test_ods_text_is_inspected_for_crm_numbers(tmp_path) -> None:
@@ -123,5 +158,5 @@ def test_ods_text_is_inspected_for_crm_numbers(tmp_path) -> None:
         extraction_method=extraction.method,
     )
     assert extraction.method == "spreadsheet:ods"
-    assert classification.complaint_number == "104-6609317"
-    assert classification.category == "crm_supporting_document"
+    assert classification.complaint_number is None
+    assert classification.category == "spreadsheet"

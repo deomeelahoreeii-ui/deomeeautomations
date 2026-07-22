@@ -74,6 +74,14 @@ class PaperlessComplaintCandidate:
     fields: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class PaperlessStatusUpdateResult:
+    document_id: int
+    status_before: str
+    status_after: str
+    changed: bool
+
+
 @dataclass
 class PaperlessMetadata:
     complaint_type_id: int | str | None = None
@@ -637,6 +645,90 @@ class PaperlessClient:
                 f"Paperless metadata update failed ({patch.status_code}): {patch.text}",
                 response=patch,
             )
+
+    def set_document_status(
+        self,
+        document_id: int,
+        status: str,
+        *,
+        allowed_from_statuses: set[str] | None = None,
+    ) -> PaperlessStatusUpdateResult:
+        """Idempotently update only the Status field and verify the live result.
+
+        Paperless accepts the custom-fields collection as one value. Preserve every
+        existing field while replacing Status so a dispatch transition cannot erase
+        complaint metadata written by another workflow.
+        """
+
+        if self.metadata is None:
+            raise RuntimeError("PaperlessClient.connect() must be called before updating status.")
+        field_id = self.metadata.status_field_id
+        if field_id is None:
+            raise PaperlessConfigurationError(
+                f"Paperless custom field '{STATUS_FIELD_NAME}' was not found."
+            )
+        option_id = self.metadata.status_option_ids_by_label.get(status.casefold())
+        if option_id is None:
+            raise PaperlessConfigurationError(
+                f"Paperless status option '{status}' was not found."
+            )
+
+        document = self._get_document(document_id)
+        current_value = custom_field_value(document, field_id)
+        status_before = status_label(current_value, self.metadata) or "Unspecified"
+        if status_matches(current_value, status, self.metadata):
+            return PaperlessStatusUpdateResult(
+                document_id=document_id,
+                status_before=status_before,
+                status_after=status_before,
+                changed=False,
+            )
+        allowed = {value.casefold() for value in (allowed_from_statuses or set())}
+        if allowed and status_before.casefold() not in allowed:
+            raise RuntimeError(
+                f"Paperless document #{document_id} cannot transition from "
+                f"{status_before!r} to {status!r}."
+            )
+
+        custom_fields: list[dict[str, object]] = []
+        replaced = False
+        for item in document.get("custom_fields", []) or []:
+            existing_field_id = item.get("field")
+            if existing_field_id is None:
+                continue
+            value = item.get("value")
+            if str(existing_field_id) == str(field_id):
+                value = option_id
+                replaced = True
+            custom_fields.append({"field": existing_field_id, "value": value})
+        if not replaced:
+            custom_fields.append({"field": field_id, "value": option_id})
+
+        patch = self._request(
+            "PATCH",
+            f"{self.base_url}/api/documents/{document_id}/",
+            json={"custom_fields": custom_fields},
+        )
+        if not patch.ok:
+            raise requests.HTTPError(
+                f"Paperless status update failed ({patch.status_code}): {patch.text}",
+                response=patch,
+            )
+
+        verified = self._get_document(document_id)
+        verified_value = custom_field_value(verified, field_id)
+        status_after = status_label(verified_value, self.metadata) or "Unspecified"
+        if not status_matches(verified_value, status, self.metadata):
+            raise RuntimeError(
+                f"Paperless document #{document_id} status verification failed: "
+                f"expected {status!r}, found {status_after!r}."
+            )
+        return PaperlessStatusUpdateResult(
+            document_id=document_id,
+            status_before=status_before,
+            status_after=status_after,
+            changed=True,
+        )
 
     def wait_for_document_id(self, task_id: str) -> int:
         deadline = time.monotonic() + self.task_timeout_seconds

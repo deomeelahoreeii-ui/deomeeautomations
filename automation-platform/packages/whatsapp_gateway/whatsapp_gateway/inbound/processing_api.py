@@ -28,6 +28,10 @@ from whatsapp_gateway.inbound.crm_review import (
     approve_manual_item,
     decide_complaint_group,
 )
+from whatsapp_gateway.inbound.content_duplicates import (
+    propagate_exact_duplicate_decision,
+)
+from whatsapp_gateway.inbound.spreadsheet_intake import reject_spreadsheet_item
 from whatsapp_gateway.models import (
     WhatsAppInboundAttachment,
     WhatsAppInboundBatch,
@@ -119,6 +123,10 @@ def review_inbound_processing_item(
     try:
         approval = None
         if data.decision == "approved":
+            if item.primary_category == "spreadsheet":
+                raise ValueError(
+                    "Review spreadsheet rows in Spreadsheet Intake; a workbook cannot be approved as one complaint."
+                )
             approval = approve_manual_item(
                 session,
                 item=item,
@@ -137,6 +145,15 @@ def review_inbound_processing_item(
                 category=data.category,
                 complaint_number=data.complaint_number,
             )
+            if data.decision == "rejected":
+                if item.primary_category == "spreadsheet":
+                    reject_spreadsheet_item(
+                        session,
+                        item=item,
+                        reviewed_by=data.reviewed_by,
+                        note=data.note,
+                    )
+                propagate_exact_duplicate_decision(session, source_item=item)
         session.commit()
         session.refresh(item)
         response = serialize_processing_item(session, item)

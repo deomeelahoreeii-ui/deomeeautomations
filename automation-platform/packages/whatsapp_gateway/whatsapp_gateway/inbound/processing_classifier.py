@@ -156,19 +156,28 @@ def classify_extracted_document(
     is_sheet = suffix in SUPPORTED_SHEET_EXTENSIONS or "spreadsheet" in (mime_type or "").lower()
 
     complaint_number = all_numbers[0] if len(all_numbers) == 1 else None
+    if is_sheet:
+        # A workbook is a row container, never a complaint document.  Its rows
+        # are routed to the dedicated spreadsheet intake ledger where each
+        # candidate can be reviewed independently.
+        return ClassificationResult(
+            category="spreadsheet",
+            complaint_number=None,
+            confidence=0.95,
+            evidence=["spreadsheet_file", "routed_to_spreadsheet_intake"],
+            all_complaint_numbers=all_numbers,
+            needs_review=False,
+        )
+    if complaint_number is None and len(name_numbers) == 1:
+        # A specifically named source file is a useful routing anchor even when
+        # an attachment or combined PDF mentions other complaint numbers. Keep
+        # the item in review, but do not throw away the filename identity.
+        complaint_number = name_numbers[0]
+        evidence.append("complaint_number_disambiguated_by_filename")
     needs_review = len(all_numbers) != 1 and bool(all_numbers)
     if len(all_numbers) > 1:
         evidence.append("multiple_complaint_numbers_detected")
 
-    if complaint_number and is_sheet:
-        return ClassificationResult(
-            category="crm_supporting_document",
-            complaint_number=complaint_number,
-            confidence=max(score, 0.65),
-            evidence=list(dict.fromkeys([*evidence, "spreadsheet_contains_crm_number"])),
-            all_complaint_numbers=all_numbers,
-            needs_review=True,
-        )
     if complaint_number and reply_terms:
         evidence.extend(f"reply_indicator:{term}" for term in reply_terms[:3])
         return ClassificationResult(
@@ -201,14 +210,12 @@ def classify_extracted_document(
     if all_numbers:
         return ClassificationResult(
             category="possible_crm_complaint",
-            complaint_number=None,
+            complaint_number=complaint_number,
             confidence=max(score, 0.45),
             evidence=list(dict.fromkeys(evidence)),
             all_complaint_numbers=all_numbers,
             needs_review=True,
         )
-    if is_sheet:
-        return ClassificationResult("spreadsheet", None, 0.95, ["spreadsheet_file"], [], False)
     if is_image:
         return ClassificationResult("image", None, 0.85, ["image_file"], [], False)
     if is_pdf and official_terms:
@@ -245,12 +252,14 @@ def _spreadsheet_text(path: Path, *, limit: int) -> tuple[str, dict[str, object]
     suffix = path.suffix.lower()
     rendered_rows: list[str] = []
     complaint_rows: list[dict[str, object]] = []
+    spreadsheet_rows: list[dict[str, object]] = []
     rows = 0
     sheets = 0
     headers: list[str] = []
+    rendered_characters = 0
 
     def capture_row(values: list[object], *, sheet: str, row_number: int) -> None:
-        nonlocal headers
+        nonlocal headers, rendered_characters
         cleaned = [_compact(str(value)) if value not in (None, "") else "" for value in values]
         if not headers:
             headers = [value or f"Column {index + 1}" for index, value in enumerate(cleaned)]
@@ -262,25 +271,30 @@ def _spreadsheet_text(path: Path, *, limit: int) -> tuple[str, dict[str, object]
         }
         if not mapping:
             return
-        rendered_rows.append(" | ".join(f"{key}: {value}" for key, value in mapping.items()))
+        rendered = " | ".join(f"{key}: {value}" for key, value in mapping.items())
+        # The classifier text is bounded, but the row ledger must never silently
+        # omit later candidates merely because the preview text reached its cap.
+        if rendered_characters < limit:
+            remaining = limit - rendered_characters
+            rendered_rows.append(rendered[:remaining])
+            rendered_characters += min(len(rendered), remaining)
         numbers = normalize_complaint_numbers("\n".join(mapping.values()))
+        structured = {
+            "sheet": sheet,
+            "row_number": row_number,
+            "complaint_number": numbers[0] if len(numbers) == 1 else None,
+            "complaint_numbers": numbers,
+            "values": mapping,
+        }
+        spreadsheet_rows.append(structured)
         if len(numbers) == 1:
-            complaint_rows.append(
-                {
-                    "sheet": sheet,
-                    "row_number": row_number,
-                    "complaint_number": numbers[0],
-                    "values": mapping,
-                }
-            )
+            complaint_rows.append(structured)
 
     if suffix == ".csv":
         with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
             for row_number, row in enumerate(csv.reader(handle), start=1):
                 rows += 1
                 capture_row(list(row), sheet="CSV", row_number=row_number)
-                if sum(len(value) for value in rendered_rows) >= limit:
-                    break
         sheets = 1
     elif suffix == ".xlsx":
         workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
@@ -291,10 +305,6 @@ def _spreadsheet_text(path: Path, *, limit: int) -> tuple[str, dict[str, object]
                 for row_number, row in enumerate(sheet.iter_rows(values_only=True), start=1):
                     rows += 1
                     capture_row(list(row), sheet=sheet.title, row_number=row_number)
-                    if sum(len(value) for value in rendered_rows) >= limit:
-                        break
-                if sum(len(value) for value in rendered_rows) >= limit:
-                    break
         finally:
             workbook.close()
     elif suffix == ".xls":
@@ -312,10 +322,6 @@ def _spreadsheet_text(path: Path, *, limit: int) -> tuple[str, dict[str, object]
                     sheet=sheet.name,
                     row_number=row_index + 1,
                 )
-                if sum(len(value) for value in rendered_rows) >= limit:
-                    break
-            if sum(len(value) for value in rendered_rows) >= limit:
-                break
         workbook.release_resources()
     elif suffix == ".ods":
         table_ns = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
@@ -334,14 +340,14 @@ def _spreadsheet_text(path: Path, *, limit: int) -> tuple[str, dict[str, object]
                     for cell in row.findall(f"{{{table_ns}}}table-cell")
                 ]
                 capture_row(values, sheet=sheet_name, row_number=row_number)
-                if sum(len(value) for value in rendered_rows) >= limit:
-                    break
     else:
         raise RuntimeError(f"Unsupported spreadsheet extension: {suffix or '(none)'}")
     text = "\n".join(rendered_rows)
     return text[:limit], {
         "rows_inspected": rows,
         "sheets_inspected": sheets,
+        "spreadsheet_rows": spreadsheet_rows,
+        "spreadsheet_row_count": len(spreadsheet_rows),
         "complaint_rows": complaint_rows,
         "complaint_row_count": len(complaint_rows),
     }

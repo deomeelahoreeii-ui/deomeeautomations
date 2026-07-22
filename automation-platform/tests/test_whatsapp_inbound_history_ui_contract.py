@@ -17,6 +17,7 @@ def test_crm_intake_workspace_is_split_into_focused_subnavigation() -> None:
     assert '"intake", "Capture"' in nav
     assert "Intake runs" in nav
     assert '"review", "Review"' in nav
+    assert '"spreadsheets", "Spreadsheets"' in nav
     assert '"packages", "Packages"' in nav
     assert "/crm/intake/batches" in nav
     assert "/crm/intake/review" in nav
@@ -80,3 +81,21 @@ def test_fetch_page_supports_received_only_date_range_intake() -> None:
     assert "files_stored" in source
     assert "files_failed" in source
     assert "terminalStatuses.has(batch.status)" in source
+    assert 'id="inbound-media-pdf"' in source
+    assert 'id="inbound-media-image"' in source
+    assert 'id="inbound-media-spreadsheet"' in source
+    assert "media_types: mediaTypes" in source
+
+
+def test_spreadsheets_have_a_separate_row_level_review_workspace() -> None:
+    listing = ROOT / "apps/web/src/pages/crm/intake/spreadsheets/index.astro"
+    detail = ROOT / "apps/web/src/pages/crm/intake/spreadsheets/[id]/index.astro"
+    list_source = listing.read_text(encoding="utf-8")
+    detail_source = detail.read_text(encoding="utf-8")
+    assert "DataTable" in list_source
+    assert "spreadsheetIntakeBatches" in list_source
+    assert "Rows are candidates, not cases" in list_source
+    assert "spreadsheetIntakeBatch" in detail_source
+    assert "reviewSpreadsheetIntakeRow" in detail_source
+    assert "Promote to case" in detail_source
+    assert "Nothing here is a complaint case yet" in detail_source

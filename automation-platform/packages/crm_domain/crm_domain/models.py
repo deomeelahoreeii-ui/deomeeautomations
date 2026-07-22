@@ -30,12 +30,18 @@ class ComplaintCase(SQLModel, table=True):
             "classification_sync_status IN ('not_synced', 'pending', 'synchronized', 'failed')",
             name="ck_crm_complaint_cases_classification_sync_status",
         ),
+        CheckConstraint(
+            "registry_status IN ('active', 'quarantined')",
+            name="ck_crm_complaint_cases_registry_status",
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     source_system: str = Field(default="crm_portal", index=True)
     complaint_number: str | None = Field(default=None, index=True)
     state: str = Field(default="candidate", index=True)
+    registry_status: str = Field(default="active", index=True, max_length=24)
+    quarantine_reason: str | None = Field(default=None, sa_column=Column(Text))
     complainant_name: str | None = Field(default=None, index=True)
     complainant_mobile: str | None = Field(default=None, index=True)
     complainant_cnic: str | None = Field(default=None, index=True)
@@ -209,6 +215,11 @@ class ComplaintDocument(SQLModel, table=True):
     source_dispatch_batch_id: uuid.UUID | None = Field(default=None, foreign_key="crm_dispatch_batches.id", index=True)
     source_dispatch_item_id: uuid.UUID | None = Field(default=None, foreign_key="crm_dispatch_items.id", index=True)
     source_sha256: str | None = Field(default=None, index=True)
+    duplicate_of_document_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="crm_complaint_documents.id",
+        index=True,
+    )
     original_filename: str | None = Field(default=None, index=True)
     mime_type: str | None = Field(default=None, index=True)
     role: str = Field(default="unclassified", index=True)
@@ -999,6 +1010,134 @@ class CrmDispatchTarget(SQLModel, table=True):
     error: str | None = Field(default=None, sa_column=Column(Text))
     sent_at: datetime | None = Field(default=None, index=True)
     completed_at: datetime | None = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class CrmPaperlessStatusSync(SQLModel, table=True):
+    """Durable, retryable projection of a CRM dispatch transition to Paperless."""
+
+    __tablename__ = "crm_paperless_status_syncs"
+    __table_args__ = (
+        UniqueConstraint(
+            "dispatch_item_id",
+            name="uq_crm_paperless_status_syncs_dispatch_item",
+        ),
+        CheckConstraint(
+            "state IN ('pending', 'syncing', 'succeeded', 'failed', 'blocked')",
+            name="ck_crm_paperless_status_syncs_state",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    dispatch_item_id: uuid.UUID = Field(foreign_key="crm_dispatch_items.id")
+    complaint_case_id: uuid.UUID = Field(
+        foreign_key="crm_complaint_cases.id", index=True
+    )
+    paperless_document_id: int | None = Field(default=None, index=True)
+    intended_status: str = Field(default="Submitted", index=True, max_length=80)
+    state: str = Field(default="pending", index=True, max_length=24)
+    observed_status_before: str | None = Field(default=None, index=True, max_length=80)
+    observed_status_after: str | None = Field(default=None, index=True, max_length=80)
+    attempts: int = 0
+    last_error: str | None = Field(default=None, sa_column=Column(Text))
+    last_attempted_at: datetime | None = Field(default=None, index=True)
+    completed_at: datetime | None = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class CrmSpreadsheetIntakeBatch(SQLModel, table=True):
+    """One immutable spreadsheet routed out of document-level complaint review."""
+
+    __tablename__ = "crm_spreadsheet_intake_batches"
+    __table_args__ = (
+        UniqueConstraint(
+            "processing_item_id",
+            name="uq_crm_spreadsheet_intake_batches_processing_item",
+        ),
+        CheckConstraint(
+            "status IN ('extracting', 'checking_paperless', 'awaiting_review', "
+            "'completed', 'rejected', 'failed')",
+            name="ck_crm_spreadsheet_intake_batches_status",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    processing_item_id: uuid.UUID = Field(
+        foreign_key="whatsapp_inbound_processing_items.id", index=True
+    )
+    run_id: uuid.UUID = Field(
+        foreign_key="whatsapp_inbound_processing_runs.id", index=True
+    )
+    source_document_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_complaint_documents.id", index=True
+    )
+    source_filename: str = Field(default="Spreadsheet", index=True, max_length=255)
+    source_sha256: str | None = Field(default=None, index=True, max_length=64)
+    status: str = Field(default="extracting", index=True, max_length=32)
+    total_rows: int = 0
+    candidate_rows: int = 0
+    invalid_rows: int = 0
+    existing_rows: int = 0
+    fresh_rows: int = 0
+    manual_review_rows: int = 0
+    approved_rows: int = 0
+    rejected_rows: int = 0
+    error: str | None = Field(default=None, sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+    completed_at: datetime | None = Field(default=None, index=True)
+
+
+class CrmSpreadsheetIntakeRow(SQLModel, table=True):
+    """A review candidate derived from one source spreadsheet row."""
+
+    __tablename__ = "crm_spreadsheet_intake_rows"
+    __table_args__ = (
+        UniqueConstraint(
+            "batch_id",
+            "source_locator",
+            name="uq_crm_spreadsheet_intake_rows_source",
+        ),
+        CheckConstraint(
+            "status IN ('candidate', 'existing', 'fresh', 'manual_review', "
+            "'approved', 'rejected', 'invalid')",
+            name="ck_crm_spreadsheet_intake_rows_status",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    batch_id: uuid.UUID = Field(
+        foreign_key="crm_spreadsheet_intake_batches.id", index=True
+    )
+    processing_item_id: uuid.UUID = Field(
+        foreign_key="whatsapp_inbound_processing_items.id", index=True
+    )
+    sheet_name: str = Field(default="Sheet", index=True, max_length=180)
+    row_number: int = Field(index=True)
+    source_locator: str = Field(index=True, max_length=320)
+    row_sha256: str = Field(index=True, max_length=64)
+    values_json: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON, nullable=False)
+    )
+    complaint_number: str | None = Field(default=None, index=True, max_length=80)
+    status: str = Field(default="candidate", index=True, max_length=32)
+    paperless_category: str = Field(default="not_checked", index=True, max_length=40)
+    paperless_reason: str | None = Field(default=None, sa_column=Column(Text))
+    paperless_document_ids: list[int | str] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False)
+    )
+    paperless_statuses: list[str] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False)
+    )
+    paperless_checked_at: datetime | None = Field(default=None, index=True)
+    complaint_case_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_complaint_cases.id", index=True
+    )
+    reviewer_note: str | None = Field(default=None, sa_column=Column(Text))
+    reviewed_by: str | None = Field(default=None, index=True, max_length=120)
+    reviewed_at: datetime | None = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
 

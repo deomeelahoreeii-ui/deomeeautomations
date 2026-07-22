@@ -67,6 +67,11 @@ from whatsapp_gateway.inbound.schemas import (
     RequestInboundHistory,
 )
 from whatsapp_gateway.inbound.status import inbound_status
+from whatsapp_gateway.inbound.spreadsheet_intake_api import (
+    list_spreadsheet_intake_batches,
+    read_spreadsheet_intake_batch,
+    review_spreadsheet_intake_row,
+)
 from whatsapp_gateway.inbound.upserts import (
     insert_idempotently as _insert_idempotently,
     upsert_inbound_attachment as _upsert_inbound_attachment,
@@ -109,4 +114,7 @@ router.post("/processing-runs/{run_id}/complaint-groups/{complaint_number}/revie
 router.post("/processing-items/{item_id}/review")(review_inbound_processing_item)
 router.get("/processing-items/{item_id}")(read_inbound_processing_item)
 router.get("/processing-items/{item_id}/content")(preview_inbound_processing_item)
+router.get("/spreadsheet-batches")(list_spreadsheet_intake_batches)
+router.get("/spreadsheet-batches/{batch_id}")(read_spreadsheet_intake_batch)
+router.post("/spreadsheet-rows/{row_id}/review")(review_spreadsheet_intake_row)
 router.get("/status")(inbound_status)

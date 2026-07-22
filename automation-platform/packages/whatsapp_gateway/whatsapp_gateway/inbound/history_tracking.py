@@ -98,6 +98,7 @@ def serialize_history_request(
         "date_from": item.date_from,
         "date_to": item.date_to,
         "received_only": item.received_only,
+        "media_types": item.media_types_json or [],
         "remote_jid": item.remote_jid,
         "anchor_message_id": item.anchor_message_id,
         "anchor_timestamp": item.anchor_timestamp,

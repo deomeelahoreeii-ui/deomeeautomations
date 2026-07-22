@@ -1,12 +1,13 @@
 ---
 interface Props {
-  active: "intake" | "runs" | "review" | "packages";
+  active: "intake" | "runs" | "review" | "spreadsheets" | "packages";
 }
 const { active } = Astro.props;
 const links = [
   ["intake", "Capture", "Find the conversation", "/crm/intake/"],
   ["runs", "Intake runs", "Verify captured evidence", "/crm/intake/batches"],
   ["review", "Review", "Decide complaint candidates", "/crm/intake/review"],
+  ["spreadsheets", "Spreadsheets", "Review workbook rows", "/crm/intake/spreadsheets"],
   ["packages", "Packages", "Download approved evidence", "/crm/intake/packages"],
 ];
 ---

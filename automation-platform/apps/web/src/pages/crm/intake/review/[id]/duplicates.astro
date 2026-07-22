@@ -1,0 +1,12 @@
+---
+import CrmDuplicateItemsTable from "../../../../../components/CrmDuplicateItemsTable.astro";
+import CrmIntakeNav from "../../../../../components/CrmIntakeNav.astro";
+import CrmReviewRunNav from "../../../../../components/CrmReviewRunNav.astro";
+import CrmLayout from "../../../../../layouts/CrmLayout.astro";
+const runId = Astro.params.id || "";
+---
+<CrmLayout title="Repeated Complaint Evidence" description="See exact files whose earlier decisions were reused without OCR, classification or another Paperless lookup." page="intake">
+  <a class="btn btn-sm" href="/crm/intake/review" slot="actions">← All processing runs</a><CrmIntakeNav active="review" /><CrmReviewRunNav runId={runId} active="duplicates" />
+  <section class="wa-health-banner"><span class="status-dot ready"></span><div><strong>Repeated content is processed once</strong><small>A new WhatsApp receipt is preserved for provenance, but its accepted decision is reused when the content identity and prior relationship are unambiguous.</small></div></section>
+  <CrmDuplicateItemsTable runId={runId} />
+</CrmLayout>

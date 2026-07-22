@@ -132,6 +132,8 @@ def _case_summary(
         "source_system": case.source_system,
         "complaint_number": case.complaint_number,
         "state": case.state,
+        "registry_status": case.registry_status,
+        "quarantine_reason": case.quarantine_reason,
         "complainant_name": case.complainant_name,
         "complainant_mobile": case.complainant_mobile,
         "complainant_cnic": case.complainant_cnic,
@@ -241,9 +243,12 @@ def list_complaint_cases(
     offset: int = Query(default=0, ge=0),
     sort: str = Query(default="updated_at", max_length=40),
     order: Literal["asc", "desc"] = Query(default="desc"),
+    include_quarantined: bool = Query(default=False),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     filters = []
+    if not include_quarantined:
+        filters.append(ComplaintCase.registry_status == "active")
     if state == "needs_review":
         filters.append(ComplaintCase.state.in_(["candidate", "review_required"]))
     elif state:
@@ -415,7 +420,11 @@ def queue_case_publication_batch(
 def complaint_case_statistics(
     session: Session = Depends(get_session),
 ) -> dict[str, int]:
-    cases = list(session.exec(select(ComplaintCase)).all())
+    cases = list(
+        session.exec(
+            select(ComplaintCase).where(ComplaintCase.registry_status == "active")
+        ).all()
+    )
     state_counts: dict[str, int] = {}
     for case in cases:
         state_counts[case.state] = state_counts.get(case.state, 0) + 1
@@ -463,7 +472,11 @@ def read_complaint_case(
     capture_counts: dict[uuid.UUID, int] = {}
     for document in documents:
         binary_key = document.source_sha256 or f"document:{document.id}"
-        canonical_id = canonical_by_binary.setdefault(binary_key, document.id)
+        canonical_id = (
+            document.duplicate_of_document_id
+            or canonical_by_binary.setdefault(binary_key, document.id)
+        )
+        canonical_by_binary.setdefault(binary_key, canonical_id)
         capture_counts[canonical_id] = capture_counts.get(canonical_id, 0) + 1
         if canonical_id != document.id:
             duplicate_of[document.id] = canonical_id

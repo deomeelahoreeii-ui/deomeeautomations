@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 
 from automation_core.config import Settings
 from automation_core.time import utcnow
+from crm_domain.models import CrmSpreadsheetIntakeBatch
 from whatsapp_gateway.directory.master_contacts import resolved_contact_name
 from whatsapp_gateway.inbound.processing_groups import complaint_group_summary
 from whatsapp_gateway.models import (
@@ -175,6 +176,13 @@ def _contact_display_name(session: Session, batch: WhatsAppInboundBatch) -> str:
 
 def serialize_processing_run(session: Session, run: WhatsAppInboundProcessingRun) -> dict[str, Any]:
     batch = session.get(WhatsAppInboundBatch, run.batch_id)
+    spreadsheet_batches = list(
+        session.exec(
+            select(CrmSpreadsheetIntakeBatch).where(
+                CrmSpreadsheetIntakeBatch.run_id == run.id
+            )
+        ).all()
+    )
     return {
         "id": str(run.id),
         "run_code": run.run_code,
@@ -198,6 +206,12 @@ def serialize_processing_run(session: Session, run: WhatsAppInboundProcessingRun
         "non_crm": run.non_crm,
         "unknown_items": run.unknown_items,
         "duplicate_items": run.duplicate_items,
+        "content_duplicate_items": run.content_duplicate_items,
+        "spreadsheet_batches": len(spreadsheet_batches),
+        "spreadsheet_rows": sum(item.total_rows for item in spreadsheet_batches),
+        "spreadsheet_candidate_rows": sum(
+            item.candidate_rows for item in spreadsheet_batches
+        ),
         "eligible_items": run.eligible_items,
         "review_items": run.review_items,
         "failed_items": run.failed_items,
@@ -236,6 +250,14 @@ def serialize_processing_item(
         "extracted_text": item.extracted_text or "",
         "extraction_method": item.extraction_method,
         "extracted_metadata": item.extracted_metadata_json or {},
+        "normalized_content_sha256": item.normalized_content_sha256,
+        "content_match_kind": item.content_match_kind,
+        "canonical_processing_item_id": (
+            str(item.canonical_processing_item_id)
+            if item.canonical_processing_item_id
+            else None
+        ),
+        "content_match": item.content_match_details_json or {},
         "paperless_category": item.paperless_category,
         "paperless_reason": item.paperless_reason,
         "paperless_document_ids": item.paperless_document_ids or [],
@@ -267,8 +289,20 @@ def recalculate_processing_run(session: Session, run: WhatsAppInboundProcessingR
     run.non_crm = sum(value in {"spreadsheet", "image", "general_official_document"} for value in categories)
     run.unknown_items = categories.count("unknown")
     run.duplicate_items = sum(item.status == "duplicate_in_paperless" for item in items)
-    run.eligible_items = sum(item.status in {"eligible", "approved"} for item in items)
-    run.review_items = sum(item.status in {"needs_review", "deferred"} or item.review_status == "deferred" for item in items)
+    run.content_duplicate_items = sum(bool(item.content_match_kind) for item in items)
+    run.eligible_items = sum(
+        item.status in {"eligible", "approved"} and not item.content_match_kind
+        for item in items
+    )
+    run.review_items = sum(
+        (
+            item.status in {"needs_review", "deferred"}
+            or item.review_status == "deferred"
+        )
+        and item.content_match_kind
+        not in {"exact_reused", "exact_pending", "exact_conflict", "normalized_reused"}
+        for item in items
+    )
     run.failed_items = sum(item.status in {"failed", "unsupported"} for item in items)
     run.updated_at = utcnow()
     session.add(run)

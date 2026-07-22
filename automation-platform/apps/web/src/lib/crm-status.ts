@@ -7,7 +7,7 @@ const CASE_STATES: Record<string, string> = {
   candidate: "Candidate",
   review_required: "Needs review",
   fresh: "Approved — ready for publication",
-  existing: "Already archived in Paperless",
+  existing: "Existing in Paperless",
   publishing: "Publishing to Paperless",
   published: "Published to Paperless",
   rejected: "Rejected",
@@ -17,7 +17,7 @@ const REVIEW_BUCKETS: Record<string, string> = {
   ready: "Ready for decision",
   manual_review: "Manual review",
   approved: "Approved",
-  existing: "Already in Paperless",
+  existing: "Existing in Paperless",
   rejected: "Rejected",
 };
 
@@ -31,6 +31,14 @@ const PAPERLESS_RESULTS: Record<string, string> = {
   not_checked: "Paperless not checked",
   not_applicable: "Paperless not applicable",
   existing: "Existing in Paperless",
+};
+
+const CONTENT_MATCH_RESULTS: Record<string, string> = {
+  exact_reused: "Exact file · decision reused",
+  exact_pending: "Exact file · shared review",
+  exact_conflict: "Exact file · relationship conflict",
+  normalized_reused: "Same normalized content · decision reused",
+  normalized_candidate: "Probable content duplicate",
 };
 
 export const caseStateLabel = (value: unknown) =>
@@ -51,6 +59,9 @@ export const paperlessResultLabel = (
 
 export const processingStatusLabel = (value: unknown) =>
   titleCase(value) || "Unknown";
+
+export const contentMatchLabel = (value: unknown) =>
+  CONTENT_MATCH_RESULTS[String(value || "")] || titleCase(value) || "Not repeated";
 
 export const paperlessLinkSummary = (
   documentId: unknown,

@@ -10,6 +10,10 @@ from crm_domain.identifiers import normalize_complaint_number
 from crm_domain.models import ComplaintCase, ComplaintDocument, ComplaintDocumentCaseLink
 from crm_domain.registry import promote_case_observations, record_paperless_match
 from whatsapp_gateway.inbound.crm_registry import persist_crm_capture
+from whatsapp_gateway.inbound.content_duplicates import (
+    propagate_exact_duplicate_decision,
+    resolve_exact_relationship_conflict,
+)
 from whatsapp_gateway.inbound.processing import update_review_decision
 from whatsapp_gateway.models import (
     WhatsAppInboundAttachment,
@@ -58,6 +62,7 @@ def _persist_approved_item(
         batch_item=batch_item,
         attachment=attachment,
         filename=filename,
+        materialize_case=True,
     )
     document = session.exec(
         select(ComplaintDocument).where(
@@ -154,6 +159,8 @@ def decide_complaint_group(
             case.state = "rejected"
             case.updated_at = utcnow()
             session.add(case)
+        for item in items:
+            propagate_exact_duplicate_decision(session, source_item=item)
         return case
 
     approved: list[tuple[ComplaintDocument, ComplaintCase]] = []
@@ -202,6 +209,8 @@ def decide_complaint_group(
         # not re-open, reject, or freshly approve the already-known case.
         case.state = existing_case_state
         session.add(case)
+    for item in items:
+        propagate_exact_duplicate_decision(session, source_item=item)
     return case
 
 
@@ -243,8 +252,18 @@ def approve_manual_item(
             ComplaintDocumentCaseLink.complaint_document_id == document.id,
         )
     ).first()
+    resolving_content_conflict = item.content_match_kind == "exact_conflict"
     is_duplicate = document.review_state == "duplicate"
-    if link and is_duplicate:
+    if resolving_content_conflict:
+        canonical = resolve_exact_relationship_conflict(
+            session,
+            item=item,
+            complaint_case_id=case.id,
+            role=role,
+            reviewed_by=reviewed_by,
+        )
+        is_duplicate = document.id != canonical.id
+    elif link and is_duplicate:
         link.review_state = "duplicate"
         link.confidence = 1.0
         link.reason = "Exact binary duplicate; retained only in the capture audit."
@@ -256,7 +275,7 @@ def approve_manual_item(
         link.reason = f"Linked as {role.replace('_', ' ')} by an operator during manual review."
         session.add(link)
     document.complaint_case_id = case.id
-    if not is_duplicate:
+    if not is_duplicate and not resolving_content_conflict:
         document.role = role
         document.review_state = "accepted"
         document.relationship_confidence = 1.0
@@ -264,7 +283,7 @@ def approve_manual_item(
     document.updated_at = utcnow()
     session.add(document)
 
-    if is_duplicate:
+    if is_duplicate and not resolving_content_conflict:
         role = "duplicate"
         if existing_case_state is not None:
             case.state = existing_case_state
@@ -281,6 +300,7 @@ def approve_manual_item(
     case.version += 1
     case.updated_at = utcnow()
     session.add(case)
+    propagate_exact_duplicate_decision(session, source_item=item)
     return ManualItemApproval(
         case=case,
         document=document,

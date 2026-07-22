@@ -73,6 +73,15 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
         </div>
       </fieldset>
 
+      <fieldset class="crm-capture-scope" id="capture-file-types">
+        <legend><span class="eyebrow">3 · Evidence types</span><strong>Which received files should be included?</strong></legend>
+        <div class="crm-scope-options">
+          <label><input id="inbound-media-pdf" type="checkbox" name="inbound-media" value="pdf" checked /><span><strong>PDF documents</strong><small>Complaint forms, letters and supporting documents.</small></span></label>
+          <label><input id="inbound-media-image" type="checkbox" name="inbound-media" value="image" checked /><span><strong>Images</strong><small>Scans and photographed complaint evidence.</small></span></label>
+          <label><input id="inbound-media-spreadsheet" type="checkbox" name="inbound-media" value="spreadsheet" /><span><strong>Spreadsheets and CSV</strong><small>Routed to a separate row-review workspace; rows never create cases automatically.</small></span></label>
+        </div>
+      </fieldset>
+
       <div class="crm-intake-submit-block">
         <label class="crm-auto-review-option"><input id="auto-classify" type="checkbox" checked /><span><strong>Continue to classification automatically</strong><small>When capture completes, open the complaint review workspace. No Paperless publication happens automatically.</small></span></label>
         <div class="crm-intake-submit-row">
@@ -174,6 +183,7 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
       return new Date(year, month - 1, day + (addDay ? 1 : 0)).toISOString();
     };
     const selectedScope = () => document.querySelector<HTMLInputElement>('input[name="inbound-scope"]:checked')?.value || "50";
+    const selectedMediaTypes = () => [...document.querySelectorAll<HTMLInputElement>('input[name="inbound-media"]:checked')].map((input) => input.value);
 
     function status(message: string, kind = "") {
       const node = el("inbound-form-status");
@@ -183,7 +193,7 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
 
     function syncButtonState() {
       const rangeUnavailable = selectedScope() === "range" && !bridgeSupportsDateRange;
-      historyButton.disabled = requestBusy || !selected || !bridgeReady || rangeUnavailable;
+      historyButton.disabled = requestBusy || !selected || !bridgeReady || rangeUnavailable || selectedMediaTypes().length === 0;
       historyButton.textContent = autoClassify.checked ? "Capture and classify" : "Start capture";
     }
 
@@ -196,6 +206,7 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
       params.set("auto", autoClassify.checked ? "1" : "0");
       dateFrom.value ? params.set("from", dateFrom.value) : params.delete("from");
       dateTo.value ? params.set("to", dateTo.value) : params.delete("to");
+      params.set("types", selectedMediaTypes().join(","));
       history.replaceState({}, "", url);
     }
 
@@ -437,6 +448,8 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
       const savedTo = params.get("to");
       if (savedFrom) dateFrom.value = savedFrom;
       if (savedTo) dateTo.value = savedTo;
+      const savedTypes = (params.get("types") || "pdf,image").split(",").filter((value) => ["pdf", "image", "spreadsheet"].includes(value));
+      document.querySelectorAll<HTMLInputElement>('input[name="inbound-media"]').forEach((input) => { input.checked = savedTypes.includes(input.value); });
       updateScope({ persist: false });
       const id = params.get("contact");
       if (!id) {
@@ -455,6 +468,8 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
         const scope = selectedScope();
         let count = scope === "50" ? 50 : scope === "200" ? 200 : scope === "custom" ? historyCount.valueAsNumber : 5000;
         if (!Number.isInteger(count) || count < 1 || count > 5000) throw new Error("Enter a whole number from 1 to 5,000.");
+        const mediaTypes = selectedMediaTypes();
+        if (!mediaTypes.length) throw new Error("Select at least one evidence type.");
         let rangeFrom: string | null = null;
         let rangeTo: string | null = null;
         if (scope === "range") {
@@ -471,6 +486,7 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
           all_history: scope === "all",
           date_from: rangeFrom,
           date_to: rangeTo,
+          media_types: mediaTypes as ("image" | "pdf" | "spreadsheet")[],
         });
         if (result.error) {
           if (result.error.code === "CONFLICT" && await recoverActiveRun()) return;
@@ -539,6 +555,7 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
     dateFrom.addEventListener("change", () => updateScope());
     dateTo.addEventListener("change", () => updateScope());
     autoClassify.addEventListener("change", () => { syncDraftUrl(); syncButtonState(); });
+    document.querySelectorAll<HTMLInputElement>('input[name="inbound-media"]').forEach((input) => input.addEventListener("change", () => { syncDraftUrl(); syncButtonState(); }));
     historyButton.addEventListener("click", () => void requestHistory());
     el("inbound-review-link").addEventListener("click", () => void startReview());
     document.addEventListener("click", (event) => {

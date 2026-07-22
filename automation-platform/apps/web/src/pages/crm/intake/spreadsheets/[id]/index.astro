@@ -1,0 +1,233 @@
+---
+import CrmIntakeNav from "../../../../../components/CrmIntakeNav.astro";
+import DataTable from "../../../../../components/DataTable.astro";
+import CrmLayout from "../../../../../layouts/CrmLayout.astro";
+
+const batchId = Astro.params.id ?? "";
+---
+
+<CrmLayout
+  title="Spreadsheet Row Review"
+  description="Decide which workbook rows are allowed to become durable complaint cases."
+  page="intake"
+>
+  <a class="btn btn-sm" href="/crm/intake/spreadsheets" slot="actions">← All workbooks</a>
+  <button class="btn btn-sm" id="refresh-sheet" slot="actions">↻ Refresh</button>
+
+  <CrmIntakeNav active="spreadsheets" />
+
+  <section class="master-card sheet-summary" aria-live="polite">
+    <div>
+      <p class="eyebrow">Spreadsheet candidate batch</p>
+      <h2 id="sheet-name">Loading workbook…</h2>
+      <p id="sheet-state">Rows remain isolated from Complaint Cases until you promote them.</p>
+    </div>
+    <div class="sheet-summary-actions">
+      <span class="badge" id="sheet-status">Loading…</span>
+      <a class="btn btn-sm" id="open-workbook" href="#" target="_blank" rel="noreferrer">Open original ↗</a>
+    </div>
+  </section>
+
+  <section class="wa-health-banner sheet-rule">
+    <span class="status-dot ready"></span>
+    <div>
+      <strong>Nothing here is a complaint case yet</strong>
+      <small>Paperless results are observations for the individual row. “Promote to case” is the only action that creates or reactivates a registry case.</small>
+    </div>
+  </section>
+
+  <section class="master-card crm-table-page">
+    <div class="inbound-card-heading">
+      <div>
+        <p class="eyebrow">Candidate rows</p>
+        <h2>Review extracted complaint numbers</h2>
+        <p>Filter first, inspect the source workbook, then make an explicit row decision.</p>
+      </div>
+      <span class="badge" id="row-count">Loading…</span>
+    </div>
+
+    <div class="toolbar row-filters">
+      <input class="input input-bordered input-sm" id="row-search" placeholder="Search complaint number, sheet or row values" />
+      <select class="select select-bordered select-sm" id="row-status">
+        <option value="">All decisions</option>
+        <option value="candidate">Not checked</option>
+        <option value="fresh">No Paperless match</option>
+        <option value="existing">Already in Paperless</option>
+        <option value="manual_review">Paperless check needs review</option>
+        <option value="approved">Promoted to case</option>
+        <option value="rejected">Rejected</option>
+        <option value="invalid">Invalid row</option>
+      </select>
+      <select class="select select-bordered select-sm" id="paperless-filter">
+        <option value="">All Paperless results</option>
+        <option value="fresh">No match</option>
+        <option value="submitted">Submitted</option>
+        <option value="uploaded_pending">Pending</option>
+        <option value="uploaded_not_relevant">Not relevant</option>
+        <option value="unavailable">Unavailable</option>
+        <option value="not_checked">Not checked</option>
+      </select>
+      <button class="btn btn-sm" id="clear-row-filters">Clear filters</button>
+    </div>
+
+    <div class="sheet-flash" id="sheet-flash" hidden></div>
+    <DataTable
+      id="spreadsheet-rows-table"
+      pageSize={25}
+      pageSizeOptions={[10, 25, 50, 100]}
+      emptyText="No spreadsheet rows match these filters."
+      ariaLabel="Spreadsheet intake candidate rows"
+    />
+  </section>
+
+  <style is:global>
+    .sheet-summary{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1.15rem 1.4rem;margin-top:1rem}.sheet-summary h2{margin:.1rem 0 .2rem;font-size:1.25rem}.sheet-summary p:last-child{margin:0;color:#6f7f94}.sheet-summary-actions{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;justify-content:flex-end}.sheet-rule{margin-top:1rem}.crm-table-page{padding:1.1rem;margin-top:1rem}.row-filters{display:grid;grid-template-columns:minmax(17rem,1fr) 13rem 14rem auto;gap:.55rem;margin:.9rem 0}.row-primary{display:block;font-weight:800;color:#28374b}.row-secondary{display:block;margin-top:.14rem;color:#758396;font-size:.7rem;line-height:1.35}.row-status-pill{display:inline-flex;border-radius:999px;padding:.28rem .55rem;background:#eef3f6;color:#42536a;font-size:.72rem;font-weight:800;text-transform:capitalize}.row-status-pill.existing,.row-status-pill.approved{background:#e3f5f7;color:#0b7282}.row-status-pill.fresh{background:#e8f7ef;color:#17704d}.row-status-pill.manual_review,.row-status-pill.invalid{background:#fff1d3;color:#8a5b08}.row-status-pill.rejected{background:#f6e8ea;color:#8a3440}.row-actions{display:flex;justify-content:flex-end;gap:.35rem;white-space:nowrap}.row-actions .btn{min-height:1.8rem;height:1.8rem}.sheet-flash{margin:.25rem 0 .8rem;padding:.7rem .85rem;border-radius:.55rem;background:#e8f7ef;color:#176543;font-size:.8rem;font-weight:700}.sheet-flash.error{background:#fbeaec;color:#923746}.row-values{max-width:23rem;white-space:normal}.row-paperless{max-width:18rem;white-space:normal}@media(max-width:900px){.row-filters{grid-template-columns:1fr 1fr}.sheet-summary{align-items:flex-start;flex-direction:column}.sheet-summary-actions{justify-content:flex-start}}@media(max-width:600px){.row-filters{grid-template-columns:1fr}}
+  </style>
+
+  <script define:vars={{ batchId }}>
+    import { actions } from "astro:actions";
+
+    await customElements.whenDefined("astro-data-table");
+    const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const table = el<any>("spreadsheet-rows-table");
+    const search = el<HTMLInputElement>("row-search");
+    const status = el<HTMLSelectElement>("row-status");
+    const paperless = el<HTMLSelectElement>("paperless-filter");
+    let searchTimer: number | undefined;
+
+    const stack = (top: unknown, bottom = "", className = "") => {
+      const wrapper = document.createElement("div");
+      if (className) wrapper.className = className;
+      const primary = document.createElement("strong");
+      primary.className = "row-primary";
+      primary.textContent = String(top || "—");
+      wrapper.append(primary);
+      if (bottom) {
+        const secondary = document.createElement("small");
+        secondary.className = "row-secondary";
+        secondary.textContent = bottom;
+        wrapper.append(secondary);
+      }
+      return wrapper;
+    };
+
+    const rowValues = (values: Record<string, unknown> | undefined) => {
+      const pairs = Object.entries(values || {}).filter(([, value]) => value !== null && value !== "");
+      const visible = pairs.slice(0, 3).map(([key, value]) => `${key}: ${String(value)}`).join(" · ");
+      return stack(visible || "No extracted values", pairs.length > 3 ? `+${pairs.length - 3} more fields` : "", "row-values");
+    };
+
+    const statusPill = (value: string) => {
+      const pill = document.createElement("span");
+      pill.className = `row-status-pill ${value}`;
+      pill.textContent = value === "approved" ? "Promoted" : value.replaceAll("_", " ");
+      return pill;
+    };
+
+    const paperlessResult = (row: any) => {
+      const statuses = (row.paperless_statuses || []).join(", ");
+      return stack(
+        String(row.paperless_category || "not_checked").replaceAll("_", " "),
+        statuses || row.paperless_reason || "No Paperless status recorded",
+        "row-paperless",
+      );
+    };
+
+    const showFlash = (message: string, isError = false) => {
+      const flash = el<HTMLDivElement>("sheet-flash");
+      flash.textContent = message;
+      flash.classList.toggle("error", isError);
+      flash.hidden = false;
+      window.setTimeout(() => { flash.hidden = true; }, 5000);
+    };
+
+    const decide = async (row: any, decision: "approved" | "rejected") => {
+      const verb = decision === "approved" ? "Promote this row to a complaint case?" : "Reject this row candidate?";
+      if (!window.confirm(`${verb}\n\n${row.complaint_number || row.source_locator}`)) return;
+      const result = await actions.whatsapp.reviewSpreadsheetIntakeRow({
+        id: row.id,
+        decision,
+        reviewedBy: "web-operator",
+      });
+      if (result.error) {
+        showFlash(String((result.error as any).message || result.error), true);
+        return;
+      }
+      const data = result.data as any;
+      showFlash(decision === "approved" ? `Complaint ${data.case?.complaint_number || row.complaint_number} is now an active case.` : "Row rejected; no complaint case was created.");
+      await table.refresh(false);
+    };
+
+    const actionCell = (row: any) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "row-actions";
+      if (row.status === "approved" && row.complaint_case_id) {
+        const open = document.createElement("a");
+        open.className = "btn btn-xs btn-primary";
+        open.href = `/crm/cases/${row.complaint_case_id}/overview`;
+        open.textContent = "Open case →";
+        wrapper.append(open);
+        return wrapper;
+      }
+      if (["rejected", "invalid"].includes(row.status)) return wrapper;
+      const reject = document.createElement("button");
+      reject.type = "button";
+      reject.className = "btn btn-xs";
+      reject.textContent = "Reject";
+      reject.addEventListener("click", () => void decide(row, "rejected"));
+      const approve = document.createElement("button");
+      approve.type = "button";
+      approve.className = "btn btn-xs btn-primary";
+      approve.textContent = "Promote to case";
+      approve.addEventListener("click", () => void decide(row, "approved"));
+      wrapper.append(reject, approve);
+      return wrapper;
+    };
+
+    await table.configure({
+      manualPagination: true,
+      getRowId: (row: any) => row.id,
+      columns: [
+        { accessorKey: "complaint_number", header: "Complaint", cell: ({ row }: any) => stack(row.original.complaint_number, `${row.original.sheet_name} · row ${row.original.row_number}`) },
+        { id: "values", header: "Extracted row", cell: ({ row }: any) => rowValues(row.original.values), enableSorting: false },
+        { accessorKey: "paperless_category", header: "Paperless observation", cell: ({ row }: any) => paperlessResult(row.original) },
+        { accessorKey: "status", header: "Decision", cell: ({ getValue }: any) => statusPill(String(getValue())) },
+        { id: "actions", header: "", cell: ({ row }: any) => actionCell(row.original), enableSorting: false, meta: { align: "right" } },
+      ],
+      loadPage: async (pageIndex: number, pageSize: number) => {
+        const result = await actions.whatsapp.spreadsheetIntakeBatch({
+          id: batchId,
+          search: search.value.trim() || undefined,
+          status: status.value || undefined,
+          paperlessCategory: paperless.value || undefined,
+          limit: pageSize,
+          offset: pageIndex * pageSize,
+        });
+        if (result.error) throw result.error;
+        const data = result.data as any;
+        const batch = data.batch;
+        el("sheet-name").textContent = batch.source_filename;
+        el("sheet-status").textContent = String(batch.status).replaceAll("_", " ");
+        el("sheet-state").textContent = `${batch.candidate_rows} awaiting decision · ${batch.approved_rows} promoted · ${batch.rejected_rows} rejected · ${batch.invalid_rows} invalid`;
+        el<HTMLAnchorElement>("open-workbook").href = batch.source_url;
+        el("row-count").textContent = `${data.total} row${data.total === 1 ? "" : "s"}`;
+        return { rows: data.items || [], total: Number(data.total || 0) };
+      },
+    });
+
+    async function refresh(reset = true) { await table.refresh(reset); }
+    search.addEventListener("input", () => {
+      if (searchTimer) window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(() => void refresh(), 250);
+    });
+    status.addEventListener("change", () => void refresh());
+    paperless.addEventListener("change", () => void refresh());
+    el("clear-row-filters").addEventListener("click", () => {
+      search.value = "";
+      status.value = "";
+      paperless.value = "";
+      void refresh();
+    });
+    el("refresh-sheet").addEventListener("click", () => void table.refresh(false));
+  </script>
+</CrmLayout>

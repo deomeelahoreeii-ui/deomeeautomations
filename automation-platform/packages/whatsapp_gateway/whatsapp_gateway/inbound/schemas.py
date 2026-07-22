@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -57,9 +57,14 @@ class RequestInboundHistory(BaseModel):
     all_history: bool = False
     date_from: datetime | None = None
     date_to: datetime | None = None
+    media_types: list[Literal["image", "pdf", "spreadsheet"]] = Field(
+        default_factory=lambda: ["image", "pdf", "spreadsheet"],
+        min_length=1,
+    )
 
     @model_validator(mode="after")
     def validate_date_range(self) -> "RequestInboundHistory":
+        self.media_types = list(dict.fromkeys(self.media_types))
         if self.date_from and self.date_to:
             date_from = self.date_from
             date_to = self.date_to

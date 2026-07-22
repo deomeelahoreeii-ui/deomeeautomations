@@ -1,0 +1,29 @@
+---
+import DataTable from "./DataTable.astro";
+
+interface Props { runId: string }
+const { runId } = Astro.props;
+---
+
+<section class="master-card crm-duplicate-items" data-duplicate-items data-run-id={runId}>
+  <div class="inbound-card-heading"><div><p class="eyebrow">Content identity</p><h2>Repeated evidence receipts</h2><p>Every receipt remains auditable, while extraction and decisions are reused from one canonical document.</p></div><span class="badge" data-duplicate-count>Loading…</span></div>
+  <label class="crm-duplicate-search"><span class="sr-only">Search repeated evidence</span><input class="input input-bordered input-sm" data-duplicate-search placeholder="Search filename, complaint, result or original sender" /></label>
+  <DataTable id="duplicate-evidence-items" pageSize={15} pageSizeOptions={[10,15,25,50]} emptyText="No repeated evidence was recognized in this run." ariaLabel="Repeated evidence receipts" />
+</section>
+
+<style>.crm-duplicate-items{padding:1.05rem 1.15rem}.crm-duplicate-items h2{margin:.12rem 0}.crm-duplicate-items p{margin:.25rem 0 0;color:#66758a}.crm-duplicate-search{display:block;width:min(34rem,100%);margin:.85rem 0}.crm-duplicate-search input{width:100%}.crm-duplicate-primary{display:block;color:#28384d;font-weight:800;overflow-wrap:anywhere}.crm-duplicate-secondary{display:block;margin-top:.15rem;color:#758396;font-size:.68rem}.crm-duplicate-state{display:inline-flex;border-radius:999px;background:#e8f4fa;padding:.25rem .5rem;color:#14677a;font-size:.68rem;font-weight:800}.crm-duplicate-state.conflict{background:#fff4dc;color:#8b5a0a}.crm-duplicate-actions{display:flex;justify-content:flex-end;gap:.35rem;flex-wrap:wrap}</style>
+
+<script>
+  import { actions } from "astro:actions";
+  import { contentMatchLabel } from "../lib/crm-status";
+  await customElements.whenDefined("astro-data-table");
+  const root=document.querySelector<HTMLElement>("[data-duplicate-items]")!,runId=root.dataset.runId!,table=root.querySelector<any>("astro-data-table"),search=root.querySelector<HTMLInputElement>("[data-duplicate-search]")!,count=root.querySelector<HTMLElement>("[data-duplicate-count]")!;let items:any[]=[];
+  const primary=(value:any,secondary="")=>{const wrap=document.createElement("div"),strong=document.createElement("strong");strong.className="crm-duplicate-primary";strong.textContent=String(value||"—");wrap.append(strong);if(secondary){const small=document.createElement("small");small.className="crm-duplicate-secondary";small.textContent=secondary;wrap.append(small)}return wrap};
+  const canonical=(item:any)=>item.content_match?.canonical||(item.content_match?.relationships||[])[0]||{};
+  const state=(item:any)=>{const span=document.createElement("span");span.className=`crm-duplicate-state ${item.content_match_kind==="exact_conflict"?"conflict":""}`;span.textContent=contentMatchLabel(item.content_match_kind);return span};
+  const actionsCell=(item:any)=>{const wrap=document.createElement("div");wrap.className="crm-duplicate-actions";const details=document.createElement("a");details.className="btn btn-xs";details.href=`/crm/intake/review/${runId}/items/${item.id}`;details.textContent="Receipt details";wrap.append(details);const sourceId=item.canonical_processing_item_id,sourceRun=canonical(item).run_id||runId;if(sourceId){const source=document.createElement("a");source.className="btn btn-xs";source.href=`/crm/intake/review/${sourceRun}/items/${sourceId}`;source.textContent="Canonical review";wrap.append(source)}const caseId=canonical(item).case_id;if(caseId){const link=document.createElement("a");link.className="btn btn-xs btn-primary";link.href=`/crm/cases/${caseId}/evidence`;link.textContent="Open case";wrap.append(link)}return wrap};
+  function filtered(){const term=search.value.trim().toLowerCase();return items.filter(item=>{const source=canonical(item);return!term||[item.filename,item.detected_complaint_number,item.content_match_kind,item.content_match?.decision,item.content_match?.reason,source.contact_identity,source.filename].some(value=>String(value||"").toLowerCase().includes(term))})}
+  async function render(){const rows=filtered();count.textContent=`${rows.length} receipt${rows.length===1?"":"s"}`;await table.setData(rows)}
+  await table.configure({data:[],getRowId:(row:any)=>row.id,columns:[{accessorKey:"filename",header:"Repeated receipt",cell:({row}:any)=>primary(row.original.filename,new Date(row.original.message_timestamp).toLocaleString())},{accessorKey:"detected_complaint_number",header:"Complaint",cell:({row}:any)=>primary(row.original.detected_complaint_number||"Relationship conflict",canonical(row.original).role?String(canonical(row.original).role).replaceAll("_"," "):"")},{accessorKey:"content_match_kind",header:"Resolution",cell:({row}:any)=>state(row.original)},{id:"canonical",header:"Canonical source",cell:({row}:any)=>primary(canonical(row.original).filename||"Earlier receipt",[canonical(row.original).contact_identity,canonical(row.original).received_at?new Date(canonical(row.original).received_at).toLocaleString():""].filter(Boolean).join(" · "))},{id:"reason",header:"Why",cell:({row}:any)=>primary(row.original.content_match?.decision||"—",row.original.content_match?.reason||"")},{id:"actions",header:"",cell:({row}:any)=>actionsCell(row.original),enableSorting:false,meta:{align:"right",minWidth:"15rem"}}]});
+  const result=await actions.whatsapp.inboundProcessingRun({id:runId,category:"content_duplicate"});if(result.error){table.showError(result.error.message)}else{items=(result.data as any).items||[];await render()}search.addEventListener("input",()=>void render());
+</script>

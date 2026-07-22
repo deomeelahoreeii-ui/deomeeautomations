@@ -17,6 +17,9 @@ from whatsapp_gateway.models import (
     WhatsAppAccount, WhatsAppActivity, WhatsAppDelivery,
     WhatsAppDispatchApproval, WhatsAppSettings,
 )
+from whatsapp_gateway.dispatch.source_reconciliation import (
+    reconcile_source_after_terminal_delivery,
+)
 
 
 async def _publish_approved_deliveries(approval_id: uuid.UUID, job_id: str) -> dict[str, int]:
@@ -149,3 +152,8 @@ async def _publish_approved_deliveries(approval_id: uuid.UUID, job_id: str) -> d
         return {"delivered": completed, "failed": failed, "total": len(deliveries)}
     finally:
         await client.close()
+
+
+_publish_approved_deliveries = reconcile_source_after_terminal_delivery(
+    _publish_approved_deliveries
+)

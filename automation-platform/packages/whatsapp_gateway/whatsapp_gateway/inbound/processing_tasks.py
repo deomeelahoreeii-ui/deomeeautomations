@@ -4,7 +4,6 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from celery import Task
 from celery.exceptions import SoftTimeLimitExceeded
 from sqlmodel import Session, select
 
@@ -18,21 +17,31 @@ from whatsapp_gateway.inbound.processing import (
     recalculate_processing_run,
     record_processing_event,
 )
-from whatsapp_gateway.inbound.processing_classifier import (
-    classify_extracted_document,
-    extract_document,
-)
+from whatsapp_gateway.inbound.processing_classifier import classify_extracted_document, extract_document
 from whatsapp_gateway.inbound.crm_registry import (
     associate_run_attachments,
     complaint_numbers_for_run,
     persist_crm_capture,
     persist_paperless_reconciliation,
 )
+from whatsapp_gateway.inbound.content_duplicates import (
+    AUTO_CONTENT_MATCH_KINDS,
+    resolve_exact_duplicate_before_extraction,
+    resolve_normalized_duplicate_after_extraction,
+)
 from whatsapp_gateway.inbound.processing_support import (
     materialize_source as _materialize_source,
     paperless_client as _paperless_client,
     paperless_configured as _paperless_configured,
     write_derived_record as _write_derived_record,
+)
+from whatsapp_gateway.inbound.processing_task_lifecycle import (
+    InboundProcessingTask,
+    post_classification_status as _post_classification_status,
+)
+from whatsapp_gateway.inbound.spreadsheet_intake import (
+    persist_spreadsheet_intake,
+    persist_spreadsheet_paperless_reconciliation,
 )
 from whatsapp_gateway.models import (
     WhatsAppInboundAttachment,
@@ -41,49 +50,6 @@ from whatsapp_gateway.models import (
     WhatsAppInboundProcessingItem,
     WhatsAppInboundProcessingRun,
 )
-
-
-class InboundProcessingTask(Task):
-    abstract = True
-
-    def on_failure(self, exc, task_id, args, kwargs, einfo) -> None:  # type: ignore[no-untyped-def]
-        run_id = str(args[0]) if args else str(kwargs.get("run_id") or "")
-        try:
-            value = uuid.UUID(run_id)
-        except (TypeError, ValueError):
-            return
-        with Session(engine) as session:
-            run = session.get(WhatsAppInboundProcessingRun, value)
-            if run is None or run.status not in {"queued", "extracting", "checking_paperless"}:
-                return
-            run.status = "failed"
-            run.error = str(exc)
-            run.finished_at = utcnow()
-            run.updated_at = utcnow()
-            session.add(run)
-            record_processing_event(
-                session,
-                run_id=run.id,
-                event_type="processing_run_failed",
-                message=f"Processing worker stopped unexpectedly: {exc}",
-                level="error",
-            )
-            session.commit()
-
-
-def _post_classification_status(item: WhatsAppInboundProcessingItem) -> str:
-    if item.primary_category == "unsupported":
-        return "unsupported"
-    if item.error and not item.detected_complaint_number:
-        return "failed"
-    if item.primary_category in {"possible_crm_complaint", "crm_supporting_document", "crm_reply_or_report", "unknown"}:
-        return "needs_review"
-    if item.primary_category == "crm_complaint":
-        extraction_needs_review = bool(
-            (item.extracted_metadata_json or {}).get("needs_review")
-        )
-        return "needs_review" if item.confidence < 0.80 or extraction_needs_review else "extracted"
-    return "extracted"
 
 
 @celery_app.task(
@@ -145,6 +111,36 @@ def process_inbound_batch(run_id: str) -> dict[str, object]:
                         or (attachment.original_filename if attachment else None)
                         or f"attachment-{item.id}"
                     )
+                    if resolve_exact_duplicate_before_extraction(
+                        session,
+                        item=item,
+                    ):
+                        recalculate_processing_run(session, run)
+                        record_processing_event(
+                            session,
+                            run_id=run.id,
+                            processing_item_id=item.id,
+                            event_type="content_duplicate_resolved",
+                            message=(
+                                f"[{position}/{len(item_ids)}] Reused an earlier content decision for {filename}."
+                            ),
+                            details={
+                                "content_match_kind": item.content_match_kind,
+                                "canonical_processing_item_id": (
+                                    str(item.canonical_processing_item_id)
+                                    if item.canonical_processing_item_id
+                                    else None
+                                ),
+                                "extraction_skipped": True,
+                            },
+                            level=(
+                                "warning"
+                                if item.content_match_kind == "exact_conflict"
+                                else "info"
+                            ),
+                        )
+                        session.commit()
+                        continue
                     suffix = Path(filename).suffix
                     destination = temp_root / f"{item.id}{suffix}"
                     item.status = "extracting"
@@ -212,13 +208,24 @@ def process_inbound_batch(run_id: str) -> dict[str, object]:
                         item.finished_at = utcnow()
                         item.updated_at = utcnow()
                         session.add(item)
-                        persist_crm_capture(
+                        content_reused = resolve_normalized_duplicate_after_extraction(
                             session,
                             item=item,
-                            batch_item=batch_item,
-                            attachment=attachment,
-                            filename=filename,
                         )
+                        if not content_reused:
+                            persist_crm_capture(
+                                session,
+                                item=item,
+                                batch_item=batch_item,
+                                attachment=attachment,
+                                filename=filename,
+                            )
+                            if item.primary_category == "spreadsheet":
+                                persist_spreadsheet_intake(
+                                    session,
+                                    item=item,
+                                    batch_item=batch_item,
+                                )
                         record_processing_event(
                             session,
                             run_id=run.id,
@@ -235,6 +242,7 @@ def process_inbound_batch(run_id: str) -> dict[str, object]:
                                 "complaint_number": item.detected_complaint_number,
                                 "confidence": item.confidence,
                                 "extraction_method": item.extraction_method,
+                                "content_match_kind": item.content_match_kind,
                             },
                         )
                     except Exception as exc:
@@ -314,6 +322,24 @@ def process_inbound_batch(run_id: str) -> dict[str, object]:
                 for item in items:
                     if item.status in {"failed", "unsupported"}:
                         continue
+                    if item.content_match_kind in AUTO_CONTENT_MATCH_KINDS:
+                        try:
+                            _write_derived_record(
+                                session=session,
+                                item=item,
+                                settings=settings,
+                                storage=storage,
+                            )
+                        except Exception as exc:
+                            record_processing_event(
+                                session,
+                                run_id=run.id,
+                                processing_item_id=item.id,
+                                event_type="classification_record_failed",
+                                message=f"Content duplicate resolved but its derived record could not be written: {exc}",
+                                level="warning",
+                            )
+                        continue
                     complaint_number = item.detected_complaint_number
                     if complaint_number and complaint_number in paperless_results:
                         result = paperless_results[complaint_number]
@@ -361,6 +387,13 @@ def process_inbound_batch(run_id: str) -> dict[str, object]:
                             message=f"Classification completed but the derived RustFS record could not be written: {exc}",
                             level="warning",
                         )
+                persist_spreadsheet_paperless_reconciliation(
+                    session,
+                    run_id=run.id,
+                    paperless_requested=run.paperless_check_requested,
+                    paperless_results=paperless_results,
+                    paperless_error=paperless_error,
+                )
                 run.paperless_error = paperless_error or None
                 run.paperless_check_status = (
                     "failed" if paperless_error else "completed"

@@ -25,6 +25,57 @@ class _Task:
     id = "crm-publication-task"
 
 
+def test_quarantined_legacy_spreadsheet_rows_do_not_pollute_registry_or_statistics() -> None:
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(
+            ComplaintCase(
+                complaint_number="104-6609317",
+                state="review_required",
+                registry_status="active",
+            )
+        )
+        session.add(
+            ComplaintCase(
+                complaint_number="104-6609318",
+                state="review_required",
+                registry_status="quarantined",
+                quarantine_reason=(
+                    "Legacy spreadsheet row was materialized before row approval."
+                ),
+            )
+        )
+        session.commit()
+
+    def session_override():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = session_override
+    try:
+        with TestClient(app) as client:
+            listing = client.get("/api/v1/crm/cases")
+            assert listing.status_code == 200, listing.text
+            assert listing.json()["total"] == 1
+            assert listing.json()["items"][0]["complaint_number"] == "104-6609317"
+
+            audit_listing = client.get(
+                "/api/v1/crm/cases", params={"include_quarantined": True}
+            )
+            assert audit_listing.status_code == 200, audit_listing.text
+            assert audit_listing.json()["total"] == 2
+
+            statistics = client.get("/api/v1/crm/cases/statistics")
+            assert statistics.status_code == 200, statistics.text
+            assert statistics.json()["unique_cases"] == 1
+            assert statistics.json()["needs_review"] == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_case_registry_filters_exact_paperless_status_and_paginates() -> None:
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
