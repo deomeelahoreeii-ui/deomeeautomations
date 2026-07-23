@@ -57,7 +57,10 @@ def test_published_complaints_export_import_requires_approval_before_native_lett
             statistics = client.get("/api/v1/crm/replies/statistics")
             assert statistics.json() == {
                 "published_cases": 2,
-                "awaiting_reply": 2,
+                "reply_eligible_cases": 3,
+                "accepted_awaiting_publication": 1,
+                "awaiting_reply": 3,
+                "actionable_replies": 3,
                 "replies_imported": 0,
                 "letters_generated": 0,
             }
@@ -66,7 +69,7 @@ def test_published_complaints_export_import_requires_approval_before_native_lett
             assert exported.status_code == 200
             assert "Complaint Number,Complaint Remarks" in exported.text
             assert "104-6000001,First complete complaint narrative." in exported.text
-            assert "104-6000003" not in exported.text
+            assert "104-6000003,Not published yet." in exported.text
 
             imported = client.post(
                 "/api/v1/crm/replies/imports",
@@ -134,7 +137,7 @@ def test_published_complaints_export_import_requires_approval_before_native_lett
                     assert "Respected Authority, first reply." not in content
 
             statistics = client.get("/api/v1/crm/replies/statistics")
-            assert statistics.json()["awaiting_reply"] == 0
+            assert statistics.json()["awaiting_reply"] == 1
             assert statistics.json()["letters_generated"] == 2
     finally:
         app.dependency_overrides.clear()

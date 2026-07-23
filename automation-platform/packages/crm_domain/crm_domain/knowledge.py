@@ -19,7 +19,11 @@ from sqlmodel import Session, select
 from automation_core.config import Settings, get_settings
 from automation_core.time import utcnow
 from crm_domain.models import ComplaintCase, ComplaintReply
-from crm_domain.case_scopes import reply_case_eligibility_clause
+from crm_domain.case_scopes import (
+    effective_reply_status,
+    effective_reply_text,
+    reply_case_eligibility_clause,
+)
 
 
 DEFAULT_APPROVED_STATUSES = ("Approved", "Issued")
@@ -177,8 +181,8 @@ class ComplaintKnowledgeArchive:
 
     def _record(self, case: ComplaintCase, reply: ComplaintReply | None) -> KnowledgeRecord:
         complaint_text = self._clean(case.remarks)
-        reply_text = self._clean(reply.reply_text) if reply else ""
-        approval_status = self._clean(case.frappe_reply_approval_status)
+        reply_text = effective_reply_text(case, reply)
+        approval_status = effective_reply_status(case, reply)
         approved = bool(reply_text) and approval_status.casefold() in self.approved_statuses
         issues: list[str] = []
         if not complaint_text:

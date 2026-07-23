@@ -11,7 +11,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
       <header class="crm-card-heading"><div><p class="eyebrow">Higher-office register</p><h2>Sent compliance batches</h2><p>Each row is one immutable submission batch. Expand its packets to review complaints, destinations and delivery outcomes.</p></div><button id="refresh-submissions" class="btn btn-sm" type="button">↻ Refresh</button></header>
       <div class="dispatch-history-toolbar">
         <label class="crm-field"><span>Search</span><input id="submission-search" class="input input-bordered" placeholder="Batch, complaint or letter number…" /></label>
-        <label class="crm-field"><span>Register view</span><select id="submission-phase" class="select select-bordered"><option value="sent">Sent / attempted</option><option value="in_progress">In progress</option><option value="attention">Needs attention</option><option value="all">All active submissions</option></select></label>
+        <label class="crm-field"><span>Register view</span><select id="submission-phase" class="select select-bordered"><option value="sent">Sent to higher office</option><option value="in_progress">In progress</option><option value="attention">Needs attention</option><option value="all">All attempted or active</option></select></label>
         <div class="crm-field"><span>Result</span><strong id="submission-count">Loading…</strong></div>
       </div>
       <DataTable id="sent-compliances-table" pageSize={25} pageSizeOptions={[10,25,50,100]} emptyText="No compliance submission batches match this view." ariaLabel="Sent compliance batches" />

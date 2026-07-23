@@ -16,7 +16,7 @@ const batchId = Astro.params.id ?? "";
 
   <CrmIntakeNav active="spreadsheets" />
 
-  <section class="master-card sheet-summary" aria-live="polite">
+  <section class="master-card sheet-summary" id="spreadsheet-batch-page" data-batch-id={batchId} aria-live="polite">
     <div>
       <p class="eyebrow">Spreadsheet candidate batch</p>
       <h2 id="sheet-name">Loading workbook…</h2>
@@ -84,11 +84,12 @@ const batchId = Astro.params.id ?? "";
     .sheet-summary{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1.15rem 1.4rem;margin-top:1rem}.sheet-summary h2{margin:.1rem 0 .2rem;font-size:1.25rem}.sheet-summary p:last-child{margin:0;color:#6f7f94}.sheet-summary-actions{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;justify-content:flex-end}.sheet-rule{margin-top:1rem}.crm-table-page{padding:1.1rem;margin-top:1rem}.row-filters{display:grid;grid-template-columns:minmax(17rem,1fr) 13rem 14rem auto;gap:.55rem;margin:.9rem 0}.row-primary{display:block;font-weight:800;color:#28374b}.row-secondary{display:block;margin-top:.14rem;color:#758396;font-size:.7rem;line-height:1.35}.row-status-pill{display:inline-flex;border-radius:999px;padding:.28rem .55rem;background:#eef3f6;color:#42536a;font-size:.72rem;font-weight:800;text-transform:capitalize}.row-status-pill.existing,.row-status-pill.approved{background:#e3f5f7;color:#0b7282}.row-status-pill.fresh{background:#e8f7ef;color:#17704d}.row-status-pill.manual_review,.row-status-pill.invalid{background:#fff1d3;color:#8a5b08}.row-status-pill.rejected{background:#f6e8ea;color:#8a3440}.row-actions{display:flex;justify-content:flex-end;gap:.35rem;white-space:nowrap}.row-actions .btn{min-height:1.8rem;height:1.8rem}.sheet-flash{margin:.25rem 0 .8rem;padding:.7rem .85rem;border-radius:.55rem;background:#e8f7ef;color:#176543;font-size:.8rem;font-weight:700}.sheet-flash.error{background:#fbeaec;color:#923746}.row-values{max-width:23rem;white-space:normal}.row-paperless{max-width:18rem;white-space:normal}@media(max-width:900px){.row-filters{grid-template-columns:1fr 1fr}.sheet-summary{align-items:flex-start;flex-direction:column}.sheet-summary-actions{justify-content:flex-start}}@media(max-width:600px){.row-filters{grid-template-columns:1fr}}
   </style>
 
-  <script define:vars={{ batchId }}>
+  <script>
     import { actions } from "astro:actions";
 
     await customElements.whenDefined("astro-data-table");
     const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const batchId = el<HTMLElement>("spreadsheet-batch-page").dataset.batchId!;
     const table = el<any>("spreadsheet-rows-table");
     const search = el<HTMLInputElement>("row-search");
     const status = el<HTMLSelectElement>("row-status");
@@ -203,7 +204,7 @@ const batchId = Astro.params.id ?? "";
           limit: pageSize,
           offset: pageIndex * pageSize,
         });
-        if (result.error) throw result.error;
+        if (result.error) throw new Error(result.error.message);
         const data = result.data as any;
         const batch = data.batch;
         el("sheet-name").textContent = batch.source_filename;
@@ -213,6 +214,10 @@ const batchId = Astro.params.id ?? "";
         el("row-count").textContent = `${data.total} row${data.total === 1 ? "" : "s"}`;
         return { rows: data.items || [], total: Number(data.total || 0) };
       },
+    }).catch((error: unknown) => {
+      el("sheet-name").textContent = "Workbook could not be loaded";
+      el("sheet-status").textContent = "Load failed";
+      table.showError(error instanceof Error ? error.message : "Spreadsheet rows could not be loaded.");
     });
 
     async function refresh(reset = true) { await table.refresh(reset); }

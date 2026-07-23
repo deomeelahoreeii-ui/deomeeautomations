@@ -19,8 +19,14 @@ from automation_core.config import Settings
 from automation_core.time import utcnow
 from crm_domain.identifiers import normalize_complaint_number
 from crm_domain.case_scopes import (
+    APPROVED_REPLY_STATUSES,
+    effective_reply_status,
     formal_letter_case_eligibility_clause,
     is_reply_case_eligible,
+    is_reply_actionable,
+    is_reply_awaiting,
+    reply_actionable_clause,
+    reply_awaiting_clause,
     reply_case_eligibility_clause,
 )
 from crm_domain.models import (
@@ -257,35 +263,23 @@ class CrmBulkOperationService:
         return batch
 
     def statistics(self) -> dict[str, Any]:
-        eligible = (
-            self.session.scalar(
-                select(func.count())
-                .select_from(ComplaintCase)
-                .where(reply_case_eligibility_clause())
-            )
-            or 0
-        )
-        imported = (
-            self.session.scalar(
-                select(func.count())
-                .select_from(ComplaintCase)
-                .join(ComplaintReply, ComplaintReply.complaint_case_id == ComplaintCase.id)
-                .where(reply_case_eligibility_clause())
-            )
-            or 0
-        )
-        generated = (
-            self.session.scalar(
-                select(func.count())
-                .select_from(ComplaintCase)
-                .join(ComplaintReply, ComplaintReply.complaint_case_id == ComplaintCase.id)
-                .where(
-                    reply_case_eligibility_clause(),
-                    ComplaintReply.generated_at.is_not(None),
+        rows = list(
+            self.session.exec(
+                select(ComplaintCase, ComplaintReply)
+                .join(
+                    ComplaintReply,
+                    ComplaintReply.complaint_case_id == ComplaintCase.id,
+                    isouter=True,
                 )
-            )
-            or 0
+                .where(reply_case_eligibility_clause())
+            ).all()
         )
+        imported = sum(reply is not None for _case, reply in rows)
+        generated = sum(
+            bool(reply and reply.generated_at) for _case, reply in rows
+        )
+        awaiting = sum(is_reply_awaiting(case, reply) for case, reply in rows)
+        actionable = sum(is_reply_actionable(case, reply) for case, reply in rows)
         batch_counts = dict(
             self.session.exec(
                 select(CrmBulkOperationBatch.operation_type, func.count()).group_by(
@@ -300,8 +294,13 @@ class CrmBulkOperationService:
                 .where(ComplaintCase.state == "published")
             )
             or 0,
-            "reply_eligible_cases": eligible,
-            "awaiting_reply": max(0, eligible - imported),
+            "reply_eligible_cases": len(rows),
+            "accepted_awaiting_publication": sum(
+                case.state in {"fresh", "publishing"} for case, _reply in rows
+            ),
+            "awaiting_reply": awaiting,
+            "actionable_replies": actionable,
+            "completed_replies": len(rows) - actionable,
             "replies_imported": imported,
             "letters_generated": generated,
             "classification_export_batches": int(batch_counts.get("classification_export", 0)),
@@ -406,18 +405,8 @@ class CrmBulkOperationService:
         )
         actionable = issued = 0
         for case, reply in rows:
-            local_pending = bool(
-                reply
-                and reply.reply_text.strip()
-                and reply.source_kind in {"bulk_import", "manual_editor"}
-                and reply.sync_status in {"not_synced", "pending", "failed", "conflict"}
-            )
-            status = (
-                reply.workspace_status
-                if local_pending and reply is not None
-                else case.frappe_reply_approval_status or "Not Prepared"
-            )
-            if local_pending or status not in {"Approved", "Issued"}:
+            status = effective_reply_status(case, reply)
+            if is_reply_actionable(case, reply):
                 actionable += 1
             if status == "Issued":
                 issued += 1
@@ -538,8 +527,10 @@ class CrmBulkOperationService:
         case_ids: list[uuid.UUID] | None = None,
         actor: str = "web-operator",
     ) -> dict[str, Any]:
-        if scope not in {"awaiting", "all", "selected"}:
-            raise BulkOperationValidationError("Export scope must be awaiting, all or selected")
+        if scope not in {"awaiting", "actionable", "all", "selected"}:
+            raise BulkOperationValidationError(
+                "Export scope must be awaiting, actionable, all or selected"
+            )
         statement = (
             select(ComplaintCase, ComplaintReply)
             .join(
@@ -549,7 +540,9 @@ class CrmBulkOperationService:
             .order_by(ComplaintCase.complaint_number)
         )
         if scope == "awaiting":
-            statement = statement.where(ComplaintReply.id.is_(None))
+            statement = statement.where(reply_awaiting_clause())
+        elif scope == "actionable":
+            statement = statement.where(reply_actionable_clause())
         elif scope == "selected":
             unique_ids = list(dict.fromkeys(case_ids or []))
             if not unique_ids:
@@ -559,7 +552,9 @@ class CrmBulkOperationService:
             statement = statement.where(ComplaintCase.id.in_(unique_ids))
         rows = list(self.session.exec(statement).all())
         if not rows:
-            raise BulkOperationValidationError("No published complaints match the export scope")
+            raise BulkOperationValidationError(
+                "No reply-eligible complaints match the export scope"
+            )
 
         now = utcnow()
         batch = self._create_batch(
@@ -783,18 +778,18 @@ class CrmBulkOperationService:
                             f"Complaint {number} was not in {parent.batch_number}",
                         )
                     elif case is not None:
-                        if existing and existing.reply_text.strip() == reply_text:
+                        effective_status = effective_reply_status(case, existing)
+                        if effective_status in APPROVED_REPLY_STATUSES:
+                            status = "invalid"
+                            error_code = "reply_already_completed"
+                            error_message = (
+                                f"Complaint {number} already has an {effective_status.lower()} "
+                                "reply; revise it explicitly in the Reply Editor"
+                            )
+                        elif existing and existing.reply_text.strip() == reply_text:
                             action = "unchanged"
                         elif existing:
                             action = "update"
-                        if (
-                            case.frappe_reply_approval_status in {"Approved", "Issued"}
-                            and existing
-                            and existing.reply_text.strip() != reply_text
-                        ):
-                            status = "invalid"
-                            error_code = "approved_reply_conflict"
-                            error_message = f"Complaint {number} has an approved or issued reply; revise it in the Reply Editor"
                 item = CrmBulkOperationItem(
                     batch_id=batch.id,
                     complaint_case_id=case.id if case else None,
@@ -921,6 +916,29 @@ class CrmBulkOperationService:
                 existing = self.session.exec(
                     select(ComplaintReply).where(ComplaintReply.complaint_case_id == case.id)
                 ).first()
+                if not is_reply_case_eligible(
+                    case,
+                    has_local_reply=existing is not None,
+                ):
+                    item.status = "failed"
+                    item.error_code = "complaint_not_reply_eligible_at_commit"
+                    item.error_message = (
+                        "Complaint left the reply lifecycle before import commit"
+                    )
+                    item.processed_at = now
+                    batch.failed_items += 1
+                    self.session.add(item)
+                    continue
+                if not is_reply_actionable(case, existing):
+                    item.status = "failed"
+                    item.error_code = "reply_completed_before_commit"
+                    item.error_message = (
+                        "Reply was approved or issued after validation; no bulk overwrite occurred"
+                    )
+                    item.processed_at = now
+                    batch.failed_items += 1
+                    self.session.add(item)
+                    continue
                 before_version = existing.version if existing else None
                 if existing and existing.reply_text.strip() == reply_text:
                     item.status = "unchanged"

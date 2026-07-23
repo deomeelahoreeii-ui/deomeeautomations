@@ -11,6 +11,16 @@ import master_data.models  # noqa: F401
 import whatsapp_gateway.models  # noqa: F401
 from automation_core.config import Settings
 from crm_domain.bulk_operations import CrmBulkOperationService
+from crm_domain.ai_pipeline import CrmAiPipelineService
+from crm_domain.case_scopes import (
+    downward_dispatch_case_eligibility_clause,
+    is_reply_actionable,
+    is_reply_awaiting,
+    is_reply_case_eligible,
+    reply_actionable_clause,
+    reply_awaiting_clause,
+    reply_case_eligibility_clause,
+)
 from crm_domain.models import (
     ComplaintAuditEvent,
     ComplaintCase,
@@ -261,3 +271,189 @@ def test_reply_case_state_repair_is_dry_run_first_audited_and_idempotent(
 
         repeated = repair_reply_import_case_states(session, reply_import.id, apply=True)
         assert repeated["candidate_count"] == 0
+
+
+def test_reply_lifecycle_predicates_queues_exports_and_overwrite_guards_agree(
+    tmp_path: Path,
+) -> None:
+    db = engine()
+    cfg = settings(tmp_path)
+    with Session(db) as session:
+        cases = {
+            name: ComplaintCase(
+                complaint_number=f"104-71000{index:02d}",
+                state=state,
+                registry_status="active",
+                remarks=f"Lifecycle fixture {name}.",
+                category="Others",
+                frappe_ticket_id=ticket,
+                frappe_reply_approval_status=reply_status,
+                frappe_reply_text_snapshot=reply_text,
+            )
+            for index, (name, state, ticket, reply_status, reply_text) in enumerate(
+                [
+                    ("candidate", "candidate", None, None, None),
+                    ("review", "review_required", None, None, None),
+                    ("existing_bare", "existing", None, None, None),
+                    ("fresh", "fresh", None, None, None),
+                    ("publishing", "publishing", None, None, None),
+                    ("published_awaiting", "published", None, None, None),
+                    (
+                        "published_approved",
+                        "published",
+                        None,
+                        "Approved",
+                        "Approved remote reply.",
+                    ),
+                    (
+                        "existing_issued",
+                        "existing",
+                        "HD-LIFECYCLE",
+                        "Issued",
+                        "Issued remote reply.",
+                    ),
+                    ("existing_local", "existing", None, None, None),
+                    ("rejected_ticket", "rejected", "HD-REJECTED", None, None),
+                ],
+                start=1,
+            )
+        }
+        session.add_all(cases.values())
+        session.flush()
+        local_reply = ComplaintReply(
+            complaint_case_id=cases["existing_local"].id,
+            reply_text="Imported local draft.",
+            source_filename="lifecycle.csv",
+            source_row=2,
+            source_kind="bulk_import",
+            workspace_status="Imported Draft",
+            sync_status="not_synced",
+        )
+        session.add(local_reply)
+        session.commit()
+
+        replies = {local_reply.complaint_case_id: local_reply}
+        expected_eligible = {
+            "fresh",
+            "publishing",
+            "published_awaiting",
+            "published_approved",
+            "existing_issued",
+            "existing_local",
+        }
+        expected_awaiting = {"fresh", "publishing", "published_awaiting"}
+        expected_actionable = expected_awaiting | {"existing_local"}
+
+        python_eligible = {
+            name
+            for name, case in cases.items()
+            if is_reply_case_eligible(case, has_local_reply=case.id in replies)
+        }
+        assert python_eligible == expected_eligible
+        assert {
+            name
+            for name in expected_eligible
+            if is_reply_awaiting(cases[name], replies.get(cases[name].id))
+        } == expected_awaiting
+        assert {
+            name
+            for name in expected_eligible
+            if is_reply_actionable(cases[name], replies.get(cases[name].id))
+        } == expected_actionable
+
+        eligible_ids = set(
+            session.exec(
+                select(ComplaintCase.id).where(reply_case_eligibility_clause())
+            ).all()
+        )
+        awaiting_ids = set(
+            session.exec(
+                select(ComplaintCase.id)
+                .join(
+                    ComplaintReply,
+                    ComplaintReply.complaint_case_id == ComplaintCase.id,
+                    isouter=True,
+                )
+                .where(reply_case_eligibility_clause(), reply_awaiting_clause())
+            ).all()
+        )
+        actionable_ids = set(
+            session.exec(
+                select(ComplaintCase.id)
+                .join(
+                    ComplaintReply,
+                    ComplaintReply.complaint_case_id == ComplaintCase.id,
+                    isouter=True,
+                )
+                .where(reply_case_eligibility_clause(), reply_actionable_clause())
+            ).all()
+        )
+        assert eligible_ids == {cases[name].id for name in expected_eligible}
+        assert awaiting_ids == {cases[name].id for name in expected_awaiting}
+        assert actionable_ids == {cases[name].id for name in expected_actionable}
+        downward_ids = set(
+            session.exec(
+                select(ComplaintCase.id).where(
+                    downward_dispatch_case_eligibility_clause()
+                )
+            ).all()
+        )
+        assert downward_ids == {
+            cases[name].id
+            for name in {
+                "existing_bare",
+                "fresh",
+                "published_awaiting",
+                "existing_local",
+            }
+        }
+
+        workspace = ComplaintReplyWorkspaceService(session, cfg, NoopHelpdeskClient())
+        stats = workspace.statistics()
+        assert stats["reply_eligible_cases"] == 6
+        assert stats["accepted_awaiting_publication"] == 2
+        assert stats["awaiting_reply"] == 3
+        assert stats["actionable_replies"] == 4
+        assert stats["completed_replies"] == 2
+        assert workspace.list_cases(scope="actionable", page_size=100)["total"] == 4
+        assert workspace.list_cases(scope="all", page_size=100)["total"] == 6
+
+        bulk = CrmBulkOperationService(session, cfg)
+        awaiting_export = bulk.create_export_batch(scope="awaiting")
+        actionable_export = bulk.create_export_batch(scope="actionable")
+        all_export = bulk.create_export_batch(scope="all")
+        assert awaiting_export["total_items"] == 3
+        assert actionable_export["total_items"] == 4
+        assert all_export["total_items"] == 6
+
+        ai = CrmAiPipelineService(session, cfg)
+        classification_export = ai.create_classification_export_batch(
+            scope="awaiting_reply"
+        )
+        assert classification_export["total_items"] == 3
+
+        validation = bulk.validate_import_batch(
+            content=(
+                "Complaint Number,Reply\n"
+                f'{cases["published_approved"].complaint_number},"Attempted overwrite"\n'
+            ).encode(),
+            filename="overwrite.csv",
+            parent_batch_id=uuid.UUID(all_export["id"]),
+        )
+        validation_items = session.exec(
+            select(CrmBulkOperationItem).where(
+                CrmBulkOperationItem.batch_id == uuid.UUID(validation["id"])
+            )
+        ).all()
+        protected = next(
+            item
+            for item in validation_items
+            if item.complaint_case_id == cases["published_approved"].id
+        )
+        assert protected.status == "invalid"
+        assert protected.error_code == "reply_already_completed"
+        assert session.exec(
+            select(ComplaintReply).where(
+                ComplaintReply.complaint_case_id == cases["published_approved"].id
+            )
+        ).first() is None

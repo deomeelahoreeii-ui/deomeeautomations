@@ -34,7 +34,12 @@ from crm_domain.models import (
     CrmPaperlessStatusSync,
     CrmUpwardSubmissionClaim,
 )
-from crm_domain.case_scopes import downward_dispatch_case_eligibility_clause
+from crm_domain.case_scopes import (
+    ATTEMPTED_UPWARD_TARGET_STATUSES,
+    SENT_DISPATCH_TARGET_STATUSES,
+    downward_dispatch_case_eligibility_clause,
+    is_downward_dispatch_case_eligible,
+)
 from crm_domain.official_letters import OfficialLetterService
 from whatsapp_gateway.configuration.defaults import ensure_defaults
 from whatsapp_gateway.models import (
@@ -99,11 +104,6 @@ class CrmDispatchConflict(CrmDispatchValidationError):
             "existing_batch_number": batch.batch_number,
             "existing_batch_url": f"/crm/dispatch/batches/{batch.id}/",
         }
-
-
-ATTEMPTED_UPWARD_TARGET_STATUSES = frozenset(
-    {"queued", "sent_pending_confirmation", "delivered", "failed", "timed_out"}
-)
 
 
 def _actively_claimed_official_letter_ids():
@@ -889,14 +889,7 @@ class CrmDispatchService:
                 )
             return {"items": items, "total": total, "page": page, "page_size": page_size}
 
-        current_approved = select(ComplaintReplyRevision.complaint_case_id).where(
-            ComplaintReplyRevision.is_current.is_(True),
-            ComplaintReplyRevision.approval_status.in_(["Approved", "Issued"]),
-        )
-        filters = [
-            downward_dispatch_case_eligibility_clause(),
-            ComplaintCase.id.not_in(current_approved),
-        ]
+        filters = [downward_dispatch_case_eligibility_clause()]
         if search.strip():
             filters.append(
                 or_(
@@ -1054,23 +1047,23 @@ class CrmDispatchService:
         if direction == "downward":
             for case_id in selected:
                 case = self.session.get(ComplaintCase, case_id)
-                if case is None or not bool(
-                    case.registry_status == "active"
-                    and case.state in {"fresh", "existing", "published", "review_required"}
+                approved = (
+                    self.session.scalar(
+                        select(ComplaintReplyRevision.id).where(
+                            ComplaintReplyRevision.complaint_case_id == case.id,
+                            ComplaintReplyRevision.is_current.is_(True),
+                            ComplaintReplyRevision.approval_status.in_(["Approved", "Issued"]),
+                        )
+                    )
+                    if case is not None
+                    else None
+                )
+                if case is None or not is_downward_dispatch_case_eligible(
+                    case,
+                    has_approved_revision=approved is not None,
                 ):
                     raise CrmDispatchValidationError(
-                        "Only active fresh or published complaints can be assigned for compliance"
-                    )
-                approved = self.session.scalar(
-                    select(ComplaintReplyRevision.id).where(
-                        ComplaintReplyRevision.complaint_case_id == case.id,
-                        ComplaintReplyRevision.is_current.is_(True),
-                        ComplaintReplyRevision.approval_status.in_(["Approved", "Issued"]),
-                    )
-                )
-                if approved:
-                    raise CrmDispatchValidationError(
-                        f"Complaint {case.complaint_number or case.id} already has an approved reply; submit it upward instead"
+                        "Only active, accepted complaints without a completed reply can be assigned for compliance"
                     )
                 item = CrmDispatchItem(
                     batch_id=batch.id,
@@ -2299,16 +2292,14 @@ class CrmDispatchService:
             for value in target.preview_delivery_ids_json:
                 try:
                     expected_preview_delivery_ids.append(uuid.UUID(str(value)))
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     continue
             deliveries = (
                 list(
                     self.session.scalars(
                         select(WhatsAppDelivery).where(
                             WhatsAppDelivery.approval_id == approval.id,
-                            WhatsAppDelivery.preview_delivery_id.in_(
-                                expected_preview_delivery_ids
-                            ),
+                            WhatsAppDelivery.preview_delivery_id.in_(expected_preview_delivery_ids),
                         )
                     ).all()
                 )
@@ -2410,9 +2401,7 @@ class CrmDispatchService:
             "sent_pending_confirmation",
             "excluded",
         }:
-            batch.status = (
-                "completed_with_errors" if pending_confirmation else "completed"
-            )
+            batch.status = "completed_with_errors" if pending_confirmation else "completed"
             batch.completed_at = utcnow()
             batch.error_summary = (
                 "Some messages were sent but still await final WhatsApp confirmation."
@@ -2523,20 +2512,47 @@ class CrmDispatchService:
             )
             or 0
         )
-        approved_cases = select(ComplaintReplyRevision.complaint_case_id).where(
-            ComplaintReplyRevision.is_current.is_(True),
-            ComplaintReplyRevision.approval_status.in_(["Approved", "Issued"]),
-        )
         ready_downward = int(
             self.session.scalar(
                 select(func.count())
                 .select_from(ComplaintCase)
-                .where(
-                    downward_dispatch_case_eligibility_clause(),
-                    ComplaintCase.id.not_in(approved_cases),
-                )
+                .where(downward_dispatch_case_eligibility_clause())
             )
             or 0
+        )
+        sent_claim_ids = (
+            select(CrmUpwardSubmissionClaim.id)
+            .join(
+                CrmDispatchItem,
+                CrmDispatchItem.id == CrmUpwardSubmissionClaim.dispatch_item_id,
+            )
+            .join(
+                CrmDispatchTarget,
+                CrmDispatchTarget.dispatch_item_id == CrmDispatchItem.id,
+            )
+            .where(
+                CrmUpwardSubmissionClaim.released_at.is_(None),
+                CrmDispatchTarget.business_status.in_(tuple(SENT_DISPATCH_TARGET_STATUSES)),
+            )
+            .distinct()
+        )
+        failed_claim_ids = (
+            select(CrmUpwardSubmissionClaim.id)
+            .join(
+                CrmDispatchItem,
+                CrmDispatchItem.id == CrmUpwardSubmissionClaim.dispatch_item_id,
+            )
+            .join(
+                CrmDispatchTarget,
+                CrmDispatchTarget.dispatch_item_id == CrmDispatchItem.id,
+            )
+            .where(
+                CrmUpwardSubmissionClaim.status == "sent",
+                CrmUpwardSubmissionClaim.released_at.is_(None),
+                CrmDispatchTarget.business_status.in_(("failed", "timed_out")),
+                CrmUpwardSubmissionClaim.id.not_in(sent_claim_ids),
+            )
+            .distinct()
         )
         return {
             "ready_to_dispatch": ready_upward + ready_downward,
@@ -2547,11 +2563,22 @@ class CrmDispatchService:
             "sending": count(CrmDispatchBatch.status.in_(["approved", "queued", "sending"])),
             "completed_with_errors": count(CrmDispatchBatch.status == "completed_with_errors"),
             "sent_upward": int(
+                self.session.scalar(select(func.count()).select_from(sent_claim_ids.subquery()))
+                or 0
+            ),
+            "attempted_upward": int(
                 self.session.scalar(
                     select(func.count())
                     .select_from(CrmUpwardSubmissionClaim)
-                    .where(CrmUpwardSubmissionClaim.status == "sent")
+                    .where(
+                        CrmUpwardSubmissionClaim.status == "sent",
+                        CrmUpwardSubmissionClaim.released_at.is_(None),
+                    )
                 )
+                or 0
+            ),
+            "failed_upward": int(
+                self.session.scalar(select(func.count()).select_from(failed_claim_ids.subquery()))
                 or 0
             ),
             "reserved_upward": int(
@@ -2627,6 +2654,14 @@ class CrmDispatchService:
             )
             .where(CrmDispatchTarget.business_status.in_(tuple(ATTEMPTED_UPWARD_TARGET_STATUSES)))
         )
+        sent_batch_ids = (
+            select(CrmDispatchItem.batch_id)
+            .join(
+                CrmDispatchTarget,
+                CrmDispatchTarget.dispatch_item_id == CrmDispatchItem.id,
+            )
+            .where(CrmDispatchTarget.business_status.in_(tuple(SENT_DISPATCH_TARGET_STATUSES)))
+        )
         reserved_batch_ids = (
             select(CrmDispatchItem.batch_id)
             .join(
@@ -2654,7 +2689,7 @@ class CrmDispatchService:
         )
         filters: list[Any] = [CrmDispatchBatch.direction == "upward"]
         if phase == "sent":
-            filters.append(CrmDispatchBatch.id.in_(attempted_batch_ids))
+            filters.append(CrmDispatchBatch.id.in_(sent_batch_ids))
         elif phase == "in_progress":
             filters.append(CrmDispatchBatch.id.in_(reserved_batch_ids))
         elif phase == "attention":

@@ -17,6 +17,11 @@ from crm_domain.models import (
     ComplaintDocument,
     ComplaintDocumentCaseLink,
     ComplaintMatch,
+    CrmDispatchBatch,
+    CrmDispatchItem,
+    CrmDispatchTarget,
+    CrmPaperlessStatusSync,
+    CrmUpwardSubmissionClaim,
     PaperlessPublication,
 )
 
@@ -43,9 +48,7 @@ def test_quarantined_legacy_spreadsheet_rows_do_not_pollute_registry_or_statisti
                 complaint_number="104-6609318",
                 state="review_required",
                 registry_status="quarantined",
-                quarantine_reason=(
-                    "Legacy spreadsheet row was materialized before row approval."
-                ),
+                quarantine_reason=("Legacy spreadsheet row was materialized before row approval."),
             )
         )
         session.commit()
@@ -62,9 +65,7 @@ def test_quarantined_legacy_spreadsheet_rows_do_not_pollute_registry_or_statisti
             assert listing.json()["total"] == 1
             assert listing.json()["items"][0]["complaint_number"] == "104-6609317"
 
-            audit_listing = client.get(
-                "/api/v1/crm/cases", params={"include_quarantined": True}
-            )
+            audit_listing = client.get("/api/v1/crm/cases", params={"include_quarantined": True})
             assert audit_listing.status_code == 200, audit_listing.text
             assert audit_listing.json()["total"] == 2
 
@@ -364,6 +365,15 @@ def test_batch_publication_is_atomic_and_requires_verified_case_data(monkeypatch
                 "published": 0,
                 "existing": 0,
                 "rejected": 0,
+                "reply_eligible": 2,
+                "awaiting_reply": 2,
+                "actionable_replies": 2,
+                "completed_replies": 0,
+                "downward_dispatched": 0,
+                "upward_in_progress": 0,
+                "upward_attempted": 0,
+                "upward_sent": 0,
+                "dispatch_attention": 0,
             }
             blocked = client.post(
                 "/api/v1/crm/cases/publication-batches",
@@ -401,5 +411,175 @@ def test_batch_publication_is_atomic_and_requires_verified_case_data(monkeypatch
             assert all(
                 session.get(ComplaintCase, case_id).state == "publishing" for case_id in case_ids
             )
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_case_registry_projects_reply_dispatch_and_latest_paperless_lifecycles() -> None:
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        completed = ComplaintCase(
+            complaint_number="104-6609401",
+            state="published",
+            registry_status="active",
+            canonical_paperless_document_id=9401,
+            frappe_reply_approval_status="Issued",
+            frappe_reply_text_snapshot="The complaint was answered.",
+        )
+        awaiting = ComplaintCase(
+            complaint_number="104-6609402",
+            state="fresh",
+            registry_status="active",
+            remarks="Recently approved complaint awaiting a reply.",
+        )
+        failed = ComplaintCase(
+            complaint_number="104-6609403",
+            state="published",
+            registry_status="active",
+            frappe_reply_approval_status="Issued",
+            frappe_reply_text_snapshot="The complaint was answered but dispatch failed.",
+        )
+        session.add_all([completed, awaiting, failed])
+        session.flush()
+        session.add(
+            ComplaintMatch(
+                complaint_case_id=completed.id,
+                paperless_document_id=9401,
+                proposed_decision="existing",
+                final_decision="existing",
+                score=1.0,
+                reason="Original intake observation.",
+                signals_json={
+                    "paperless_category": "uploaded_pending",
+                    "paperless_statuses": ["Pending"],
+                },
+            )
+        )
+        batch = CrmDispatchBatch(
+            batch_number="CRM-DSP-CASE-LIFECYCLE",
+            status="completed",
+            direction="upward",
+            total_items=2,
+            successful_items=1,
+            failed_items=1,
+        )
+        session.add(batch)
+        session.flush()
+        item = CrmDispatchItem(
+            batch_id=batch.id,
+            complaint_case_id=completed.id,
+            official_letter_id=uuid.uuid4(),
+            complaint_number_snapshot=completed.complaint_number or "",
+            packet_sha256="a" * 64,
+            route_status="ready",
+            compliance_status="submitted",
+        )
+        session.add(item)
+        session.flush()
+        failed_item = CrmDispatchItem(
+            batch_id=batch.id,
+            complaint_case_id=failed.id,
+            official_letter_id=uuid.uuid4(),
+            complaint_number_snapshot=failed.complaint_number or "",
+            packet_sha256="b" * 64,
+            route_status="ready",
+            compliance_status="incorporated",
+        )
+        session.add(failed_item)
+        session.flush()
+        session.add_all(
+            [
+                CrmDispatchTarget(
+                    dispatch_item_id=item.id,
+                    dispatch_profile_id=uuid.uuid4(),
+                    selection_source="manual",
+                    business_status="delivered",
+                ),
+                CrmUpwardSubmissionClaim(
+                    official_letter_id=item.official_letter_id,
+                    dispatch_item_id=item.id,
+                    status="sent",
+                ),
+                CrmPaperlessStatusSync(
+                    dispatch_item_id=item.id,
+                    complaint_case_id=completed.id,
+                    paperless_document_id=9401,
+                    intended_status="Submitted",
+                    state="succeeded",
+                    observed_status_before="Pending",
+                    observed_status_after="Submitted",
+                ),
+                CrmDispatchTarget(
+                    dispatch_item_id=failed_item.id,
+                    dispatch_profile_id=uuid.uuid4(),
+                    selection_source="manual",
+                    business_status="failed",
+                    error="Higher-office delivery rejected by gateway.",
+                ),
+                CrmUpwardSubmissionClaim(
+                    official_letter_id=failed_item.official_letter_id,
+                    dispatch_item_id=failed_item.id,
+                    status="sent",
+                ),
+            ]
+        )
+        session.commit()
+
+    def session_override():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = session_override
+    try:
+        with TestClient(app) as client:
+            listing = client.get("/api/v1/crm/cases")
+            assert listing.status_code == 200, listing.text
+            rows = {row["complaint_number"]: row for row in listing.json()["items"]}
+
+            completed_row = rows["104-6609401"]
+            assert completed_row["lifecycle"]["reply"] == {
+                "eligible": True,
+                "status": "Issued",
+                "awaiting": False,
+                "actionable": False,
+                "completed": True,
+            }
+            assert completed_row["lifecycle"]["dispatch"]["upward"]["status"] == "delivered"
+            assert completed_row["lifecycle"]["dispatch"]["upward_attempted"] is True
+            assert completed_row["lifecycle"]["dispatch"]["upward_sent"] is True
+            assert completed_row["paperless_result"]["category"] == "submitted"
+            assert completed_row["paperless_result"]["statuses"] == ["Submitted"]
+            assert completed_row["paperless_result"]["status_sync"]["state"] == "succeeded"
+
+            awaiting_row = rows["104-6609402"]
+            assert awaiting_row["lifecycle"]["reply"]["awaiting"] is True
+            assert awaiting_row["lifecycle"]["reply"]["actionable"] is True
+
+            failed_row = rows["104-6609403"]
+            assert failed_row["lifecycle"]["dispatch"]["upward"]["status"] == "failed"
+            assert failed_row["lifecycle"]["dispatch"]["upward_attempted"] is True
+            assert failed_row["lifecycle"]["dispatch"]["upward_sent"] is False
+            assert failed_row["lifecycle"]["dispatch"]["attention"] is True
+
+            assert (
+                client.get("/api/v1/crm/cases", params={"reply": "awaiting"}).json()["total"] == 1
+            )
+            assert (
+                client.get("/api/v1/crm/cases", params={"dispatch": "upward_sent"}).json()["total"]
+                == 1
+            )
+            assert (
+                client.get("/api/v1/crm/cases", params={"dispatch": "attention"}).json()["total"]
+                == 1
+            )
+            stats = client.get("/api/v1/crm/cases/statistics").json()
+            assert stats["awaiting_reply"] == 1
+            assert stats["completed_replies"] == 2
+            assert stats["upward_attempted"] == 2
+            assert stats["upward_sent"] == 1
+            assert stats["dispatch_attention"] == 1
     finally:
         app.dependency_overrides.clear()

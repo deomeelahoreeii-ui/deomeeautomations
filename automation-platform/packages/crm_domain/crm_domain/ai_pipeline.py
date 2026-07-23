@@ -24,7 +24,13 @@ from crm_domain.bulk_operations import (
     _safe_name,
     _sha256_bytes,
 )
-from crm_domain.case_scopes import reply_case_eligibility_clause
+from crm_domain.case_scopes import (
+    is_reply_actionable,
+    is_reply_awaiting,
+    is_reply_case_eligible,
+    reply_awaiting_clause,
+    reply_case_eligibility_clause,
+)
 from crm_domain.default_reply_sop import (
     DEFAULT_REPLY_SOP_CONTENT,
     DEFAULT_REPLY_SOP_NAME,
@@ -445,34 +451,40 @@ class CrmAiPipelineService:
 
     def statistics(self) -> dict[str, Any]:
         active = self.active_prompt_version()
-        eligible = (
-            self.session.scalar(
-                select(func.count())
-                .select_from(ComplaintCase)
-                .where(reply_case_eligibility_clause())
-            )
-            or 0
-        )
-        classified = (
-            self.session.scalar(
-                select(func.count())
-                .select_from(ComplaintCase)
-                .where(
-                    reply_case_eligibility_clause(),
-                    ComplaintCase.category_id.is_not(None),
+        rows = list(
+            self.session.exec(
+                select(ComplaintCase, ComplaintReply)
+                .join(
+                    ComplaintReply,
+                    ComplaintReply.complaint_case_id == ComplaintCase.id,
+                    isouter=True,
                 )
-            )
-            or 0
+                .where(reply_case_eligibility_clause())
+            ).all()
+        )
+        classified = sum(case.category_id is not None for case, _reply in rows)
+        awaiting = sum(is_reply_awaiting(case, reply) for case, reply in rows)
+        actionable = sum(is_reply_actionable(case, reply) for case, reply in rows)
+        classified_awaiting = sum(
+            case.category_id is not None and is_reply_awaiting(case, reply)
+            for case, reply in rows
         )
         review = (
             self.session.scalar(
                 select(func.count())
                 .select_from(CrmComplaintClassification)
-                .where(CrmComplaintClassification.status == "review_required")
+                .join(
+                    ComplaintCase,
+                    ComplaintCase.id
+                    == CrmComplaintClassification.complaint_case_id,
+                )
+                .where(
+                    CrmComplaintClassification.status == "review_required",
+                    reply_case_eligibility_clause(),
+                )
             )
             or 0
         )
-        replies = self.session.scalar(select(func.count()).select_from(ComplaintReply)) or 0
         suggestions = (
             self.session.scalar(
                 select(func.count())
@@ -482,12 +494,18 @@ class CrmAiPipelineService:
             or 0
         )
         return {
-            "published_cases": int(eligible),
-            "reply_eligible_cases": int(eligible),
-            "awaiting_classification": max(0, int(eligible) - int(classified)),
+            "published_cases": sum(case.state == "published" for case, _reply in rows),
+            "reply_eligible_cases": len(rows),
+            "accepted_awaiting_publication": sum(
+                case.state in {"fresh", "publishing"} for case, _reply in rows
+            ),
+            "awaiting_classification": len(rows) - int(classified),
             "classified_cases": int(classified),
+            "classified_awaiting_reply": int(classified_awaiting),
             "needs_review": int(review),
-            "awaiting_reply": max(0, int(eligible) - int(replies)),
+            "awaiting_reply": int(awaiting),
+            "actionable_replies": int(actionable),
+            "completed_replies": len(rows) - int(actionable),
             "pending_taxonomy_suggestions": int(suggestions),
             "active_prompt_version": active.version_label,
             "active_prompt_version_id": str(active.id),
@@ -522,11 +540,23 @@ class CrmAiPipelineService:
         actor: str = "web-operator",
     ) -> dict[str, Any]:
         self.ensure_defaults()
-        if scope not in {"unclassified", "all", "selected"}:
-            raise AiPipelineError("Classification scope must be unclassified, all or selected")
-        statement = select(ComplaintCase).where(reply_case_eligibility_clause())
+        if scope not in {"unclassified", "awaiting_reply", "all", "selected"}:
+            raise AiPipelineError(
+                "Classification scope must be unclassified, awaiting_reply, all or selected"
+            )
+        statement = (
+            select(ComplaintCase)
+            .join(
+                ComplaintReply,
+                ComplaintReply.complaint_case_id == ComplaintCase.id,
+                isouter=True,
+            )
+            .where(reply_case_eligibility_clause())
+        )
         if scope == "unclassified":
             statement = statement.where(ComplaintCase.category_id.is_(None))
+        elif scope == "awaiting_reply":
+            statement = statement.where(reply_awaiting_clause())
         elif scope == "selected":
             selected = list(dict.fromkeys(case_ids or []))
             if not selected:
@@ -990,6 +1020,23 @@ class CrmAiPipelineService:
                 batch.failed_items += 1
                 self.session.add(item)
                 continue
+            local_reply = self.session.exec(
+                select(ComplaintReply).where(
+                    ComplaintReply.complaint_case_id == case.id
+                )
+            ).first()
+            if not is_reply_case_eligible(
+                case,
+                has_local_reply=local_reply is not None,
+            ):
+                item.status = "failed"
+                item.error_code = "complaint_not_reply_eligible_at_commit"
+                item.error_message = (
+                    "Complaint left the reply lifecycle before classification commit."
+                )
+                batch.failed_items += 1
+                self.session.add(item)
+                continue
             details = item.details_json or {}
             category_name = clean_name(str(details.get("category") or ""))
             sub_name = clean_name(str(details.get("subcategory") or ""))
@@ -1200,7 +1247,10 @@ class CrmAiPipelineService:
     def review_queue(
         self, *, search: str = "", page: int = 1, page_size: int = 25
     ) -> dict[str, Any]:
-        filters: list[Any] = [CrmComplaintClassification.status == "review_required"]
+        filters: list[Any] = [
+            CrmComplaintClassification.status == "review_required",
+            reply_case_eligibility_clause(),
+        ]
         if search.strip():
             term = f"%{search.strip()}%"
             filters.append(
@@ -2244,7 +2294,7 @@ class CrmAiPipelineService:
             )
         )
         if scope == "awaiting":
-            statement = statement.where(ComplaintReply.id.is_(None))
+            statement = statement.where(reply_awaiting_clause())
         elif scope == "selected":
             selected = list(dict.fromkeys(case_ids or []))
             if not selected:
@@ -2272,7 +2322,10 @@ class CrmAiPipelineService:
             ]
             if not selected:
                 raise AiPipelineError("The classification batch has no classified complaints")
-            statement = statement.where(ComplaintCase.id.in_(selected), ComplaintReply.id.is_(None))
+            statement = statement.where(
+                ComplaintCase.id.in_(selected),
+                reply_awaiting_clause(),
+            )
         rows = list(self.session.exec(statement.order_by(ComplaintCase.complaint_number)).all())
         if not rows:
             raise AiPipelineError("No classified complaints match the reply context scope")

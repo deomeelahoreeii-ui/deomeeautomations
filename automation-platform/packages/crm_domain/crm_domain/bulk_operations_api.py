@@ -27,7 +27,10 @@ MAX_REPLY_FILE_BYTES = 5 * 1024 * 1024
 
 
 class ExportBatchInput(BaseModel):
-    scope: str = Field(default="awaiting", pattern="^(awaiting|all|selected)$")
+    scope: str = Field(
+        default="awaiting",
+        pattern="^(awaiting|actionable|all|selected)$",
+    )
     case_ids: list[uuid.UUID] = Field(default_factory=list, max_length=1000)
     actor: str = Field(default="web-operator", max_length=120)
 

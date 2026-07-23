@@ -19,7 +19,10 @@ MAX_AI_CSV_BYTES = 5 * 1024 * 1024
 
 
 class ClassificationExportInput(BaseModel):
-    scope: str = Field(default="unclassified", pattern="^(unclassified|all|selected)$")
+    scope: str = Field(
+        default="unclassified",
+        pattern="^(unclassified|awaiting_reply|all|selected)$",
+    )
     case_ids: list[uuid.UUID] = Field(default_factory=list, max_length=1000)
     actor: str = Field(default="web-operator", max_length=120)
 

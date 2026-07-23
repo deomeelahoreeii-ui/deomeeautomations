@@ -99,3 +99,9 @@ def test_spreadsheets_have_a_separate_row_level_review_workspace() -> None:
     assert "reviewSpreadsheetIntakeRow" in detail_source
     assert "Promote to case" in detail_source
     assert "Nothing here is a complaint case yet" in detail_source
+    assert "define:vars" not in list_source
+    assert "define:vars" not in detail_source
+    assert 'data-run-id={runId || ""}' in list_source
+    assert "data-batch-id={batchId}" in detail_source
+    assert "Load failed" in list_source
+    assert "Load failed" in detail_source

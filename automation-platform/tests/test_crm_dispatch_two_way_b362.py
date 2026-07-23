@@ -473,9 +473,7 @@ def test_refresh_maps_only_each_targets_exact_frozen_deliveries(
         session.flush()
 
         delivery_ids: list[uuid.UUID] = []
-        for target, status_value in zip(
-            targets, ["delivered", "failed"], strict=True
-        ):
+        for target, status_value in zip(targets, ["delivered", "failed"], strict=True):
             preview_delivery_id = uuid.UUID(target.preview_delivery_ids_json[0])
             frozen = session.get(WhatsAppDispatchPreviewDelivery, preview_delivery_id)
             assert frozen is not None
@@ -489,9 +487,7 @@ def test_refresh_maps_only_each_targets_exact_frozen_deliveries(
                 message=frozen.message,
                 status_subject=f"whatsapp.status.test.{uuid.uuid4().hex}",
                 status=status_value,
-                error=(
-                    "gateway rejected delivery" if status_value == "failed" else None
-                ),
+                error=("gateway rejected delivery" if status_value == "failed" else None),
                 completed_at=utcnow(),
             )
             session.add(delivery)
@@ -512,12 +508,8 @@ def test_refresh_maps_only_each_targets_exact_frozen_deliveries(
                 .order_by(CrmDispatchTarget.id)
             ).all()
         )
-        assert persisted_targets[0].whatsapp_delivery_ids_json == [
-            str(delivery_ids[0])
-        ]
-        assert persisted_targets[1].whatsapp_delivery_ids_json == [
-            str(delivery_ids[1])
-        ]
+        assert persisted_targets[0].whatsapp_delivery_ids_json == [str(delivery_ids[0])]
+        assert persisted_targets[1].whatsapp_delivery_ids_json == [str(delivery_ids[1])]
         assert [target.business_status for target in persisted_targets] == [
             "delivered",
             "failed",
@@ -800,6 +792,9 @@ def test_attempted_upward_packet_stays_out_of_queue_and_is_grouped_by_batch(
         assert sent["items"][0]["batch_number"] == created["batch"]["batch_number"]
         assert sent["items"][0]["packet_count"] == 1
         assert sent["items"][0]["target_counts"] == {"delivered": 1}
+        assert service.statistics()["sent_upward"] == 1
+        assert service.statistics()["attempted_upward"] == 1
+        assert service.statistics()["failed_upward"] == 0
 
 
 def test_failed_attempt_is_not_reintroduced_as_a_new_submission(
@@ -837,7 +832,11 @@ def test_failed_attempt_is_not_reintroduced_as_a_new_submission(
         assert refreshed["batch"]["status"] == "failed"
         assert service.eligible_sources(direction="upward")["total"] == 0
         assert service.list_upward_submissions(phase="attention")["total"] == 1
-        assert service.list_upward_submissions(phase="sent")["total"] == 1
+        assert service.list_upward_submissions(phase="sent")["total"] == 0
+        assert service.list_upward_submissions(phase="all")["total"] == 1
+        assert service.statistics()["sent_upward"] == 0
+        assert service.statistics()["attempted_upward"] == 1
+        assert service.statistics()["failed_upward"] == 1
 
 
 def test_failed_retry_creates_immutable_attempt_job_and_preserves_failure_audit(
@@ -941,13 +940,10 @@ def test_failed_retry_creates_immutable_attempt_job_and_preserves_failure_audit(
         persisted_delivery = session.get(WhatsAppDelivery, delivery.id)
         audit = session.scalar(
             select(WhatsAppActivity).where(
-                WhatsAppActivity.event_type
-                == "approved_delivery_retry_requested"
+                WhatsAppActivity.event_type == "approved_delivery_retry_requested"
             )
         )
-        outbox = session.scalar(
-            select(TaskOutbox).where(TaskOutbox.job_id == retry_job.id)
-        )
+        outbox = session.scalar(select(TaskOutbox).where(TaskOutbox.job_id == retry_job.id))
 
         assert persisted_original is not None
         assert persisted_original.status == JobStatus.succeeded.value

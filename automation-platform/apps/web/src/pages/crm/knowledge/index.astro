@@ -12,7 +12,7 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
   <section class="knowledge-metrics">
     <article class="master-card"><span>Approved pairs</span><strong id="metric-approved">—</strong><small>Approved/Issued reply plus complaint text</small></article>
     <article class="master-card"><span>AI eligible</span><strong id="metric-eligible">—</strong><small>Marked eligible in Helpdesk</small></article>
-    <article class="master-card"><span>Awaiting reply</span><strong id="metric-awaiting">—</strong><small>Published complaints without reply text</small></article>
+    <article class="master-card"><span>Awaiting reply</span><strong id="metric-awaiting">—</strong><small>Accepted complaints without reply text</small></article>
     <article class="master-card"><span>Categories</span><strong id="metric-categories">—</strong><small>Across the current filter</small></article>
   </section>
 
@@ -35,7 +35,7 @@ import CrmLayout from "../../../layouts/CrmLayout.astro";
       <label><span>Category</span><select class="select select-bordered select-sm" id="filter-category"><option value="">All categories</option></select></label>
       <label><span>Subcategory</span><select class="select select-bordered select-sm" id="filter-subcategory"><option value="">All subcategories</option></select></label>
       <label><span>Complaint source</span><select class="select select-bordered select-sm" id="filter-source"><option value="">All sources</option></select></label>
-      <label><span>Reply scope</span><select class="select select-bordered select-sm" id="filter-scope"><option value="approved">Approved / Issued only</option><option value="with_reply">All records with reply text</option><option value="awaiting">Awaiting reply</option><option value="all">All published complaints</option></select></label>
+      <label><span>Reply scope</span><select class="select select-bordered select-sm" id="filter-scope"><option value="approved">Approved / Issued only</option><option value="with_reply">All records with reply text</option><option value="awaiting">Awaiting reply</option><option value="all">All reply-eligible complaints</option></select></label>
       <label><span>Date from</span><div class="date-control"><input type="date" id="filter-date-from" /></div></label>
       <label><span>Date to</span><div class="date-control"><input type="date" id="filter-date-to" /></div></label>
       <label class="knowledge-search"><span>Search complaint, reply, number or category</span><input class="input input-bordered input-sm" id="filter-search" placeholder="Search text…" /></label>

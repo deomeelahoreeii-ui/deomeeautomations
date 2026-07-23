@@ -14,7 +14,19 @@ from sqlmodel import Session, select
 from automation_core.config import Settings
 from automation_core.time import utcnow
 from crm_domain.json_safe import json_safe
-from crm_domain.case_scopes import reply_case_eligibility_clause
+from crm_domain.case_scopes import (
+    APPROVED_REPLY_STATUSES,
+    PENDING_REPLY_SYNC_STATUSES,
+    effective_reply_status,
+    effective_reply_text,
+    has_pending_local_reply,
+    is_reply_case_eligible,
+    is_reply_actionable,
+    is_reply_awaiting,
+    pending_local_reply_clause,
+    reply_actionable_case_clause,
+    reply_case_eligibility_clause,
+)
 from crm_domain.models import (
     ComplaintAuditEvent,
     ComplaintCase,
@@ -44,7 +56,6 @@ REPLY_STATUSES = (
     "Issued",
     "Rejected",
 )
-APPROVED_REPLY_STATUSES = {"Approved", "Issued"}
 STATUS_TO_HELPDESK = {
     "Draft": "Reply Under Preparation",
     "Pending Approval": "Pending Approval",
@@ -583,6 +594,14 @@ class ComplaintReplyWorkspaceService:
         actor: str = "web-operator",
     ) -> dict[str, Any]:
         case = self._require_case(case_id)
+        existing_workspace = self._workspace_reply(case.id)
+        if not is_reply_case_eligible(
+            case,
+            has_local_reply=existing_workspace is not None,
+        ):
+            raise ReplyValidationError(
+                "This complaint has not been accepted into the reply lifecycle"
+            )
         status = clean_name(reply_status)
         if status == "Not Started":
             status = "Not Prepared"
@@ -1004,11 +1023,7 @@ class ComplaintReplyWorkspaceService:
         local_snapshot = self._workspace_reply_snapshot(reply)
         local_text = _text(reply.reply_text) if reply else ""
         remote_text = remote_reply["final_reply"]
-        local_pending = bool(
-            reply
-            and reply.source_kind in {"bulk_import", "manual_editor"}
-            and reply.sync_status in {"not_synced", "pending", "failed", "conflict"}
-        )
+        local_pending = has_pending_local_reply(reply)
         conflict = bool(local_pending and local_text and remote_text and local_text != remote_text)
         use_local = bool(reply and local_text and (local_pending or not remote_text or live_error))
         if use_local and reply is not None:
@@ -1156,28 +1171,26 @@ class ComplaintReplyWorkspaceService:
         }
         effective_statuses: list[str] = []
         awaiting_reply = 0
+        actionable = 0
         for case in cases:
             local = replies.get(case.id)
-            local_pending = bool(
-                local
-                and local.reply_text.strip()
-                and local.source_kind in {"bulk_import", "manual_editor"}
-                and local.sync_status in {"not_synced", "pending", "failed", "conflict"}
-            )
-            status = (
-                local.workspace_status
-                if local_pending and local is not None
-                else case.frappe_reply_approval_status or "Not Prepared"
-            )
+            status = effective_reply_status(case, local)
             effective_statuses.append(status)
-            if status == "Not Prepared" and not _text(case.frappe_reply_text_snapshot):
+            if is_reply_awaiting(case, local):
                 awaiting_reply += 1
+            if is_reply_actionable(case, local):
+                actionable += 1
         statuses = Counter(effective_statuses)
         return {
             "published_cases": sum(case.state == "published" for case in cases),
             "reply_eligible_cases": len(cases),
+            "accepted_awaiting_publication": sum(
+                case.state in {"fresh", "publishing"} for case in cases
+            ),
             "awaiting_classification": sum(case.category_id is None for case in cases),
             "awaiting_reply": awaiting_reply,
+            "actionable_replies": actionable,
+            "completed_replies": len(cases) - actionable,
             "imported_drafts": statuses.get("Imported Draft", 0),
             "draft_replies": statuses.get("Draft", 0),
             "pending_approval": statuses.get("Pending Approval", 0),
@@ -1189,7 +1202,8 @@ class ComplaintReplyWorkspaceService:
             "ai_ready": sum(
                 case.frappe_ai_eligible
                 and bool(case.frappe_reply_hash)
-                and (case.frappe_reply_approval_status or "") in APPROVED_REPLY_STATUSES
+                and effective_reply_status(case, replies.get(case.id))
+                in APPROVED_REPLY_STATUSES
                 for case in cases
             ),
             "statuses": dict(statuses),
@@ -1215,20 +1229,10 @@ class ComplaintReplyWorkspaceService:
             raise ReplyValidationError("Reply queue scope must be actionable or all")
         filters: list[Any] = [reply_case_eligibility_clause()]
         pending_local_ids = select(ComplaintReply.complaint_case_id).where(
-            ComplaintReply.sync_status.in_(("not_synced", "pending", "failed", "conflict")),
-            ComplaintReply.source_kind.in_(("bulk_import", "manual_editor")),
-            ComplaintReply.reply_text != "",
+            pending_local_reply_clause()
         )
         if scope == "actionable":
-            filters.append(
-                or_(
-                    ComplaintCase.id.in_(pending_local_ids),
-                    ComplaintCase.frappe_reply_approval_status.is_(None),
-                    ComplaintCase.frappe_reply_approval_status.not_in(
-                        tuple(APPROVED_REPLY_STATUSES)
-                    ),
-                )
-            )
+            filters.append(reply_actionable_case_clause())
         if source_batch_id:
             filters.append(
                 ComplaintCase.id.in_(
@@ -1259,9 +1263,7 @@ class ComplaintReplyWorkspaceService:
                     ComplaintCase.id.in_(
                         select(ComplaintReply.complaint_case_id).where(
                             ComplaintReply.workspace_status == "Imported Draft",
-                            ComplaintReply.sync_status.in_(
-                                ("not_synced", "pending", "failed", "conflict")
-                            ),
+                            ComplaintReply.sync_status.in_(tuple(PENDING_REPLY_SYNC_STATUSES)),
                         )
                     )
                 )
@@ -1273,7 +1275,7 @@ class ComplaintReplyWorkspaceService:
                             select(ComplaintReply.complaint_case_id).where(
                                 ComplaintReply.workspace_status == normalized,
                                 ComplaintReply.sync_status.in_(
-                                    ("not_synced", "pending", "failed", "conflict")
+                                    tuple(PENDING_REPLY_SYNC_STATUSES)
                                 ),
                             )
                         ),
@@ -1334,22 +1336,9 @@ class ComplaintReplyWorkspaceService:
         items: list[dict[str, Any]] = []
         for case in rows:
             local = reply_map.get(case.id)
-            local_pending = bool(
-                local
-                and local.reply_text.strip()
-                and local.source_kind in {"bulk_import", "manual_editor"}
-                and local.sync_status in {"not_synced", "pending", "failed", "conflict"}
-            )
-            reply_text = (
-                local.reply_text
-                if local_pending and local is not None
-                else _text(case.frappe_reply_text_snapshot)
-            )
-            status = (
-                local.workspace_status
-                if local_pending and local is not None
-                else case.frappe_reply_approval_status or "Not Prepared"
-            )
+            local_pending = has_pending_local_reply(local)
+            reply_text = effective_reply_text(case, local)
+            status = effective_reply_status(case, local)
             items.append(
                 {
                     "case_id": str(case.id),

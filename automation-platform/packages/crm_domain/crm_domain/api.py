@@ -13,6 +13,7 @@ from sqlmodel import Session, select
 from automation_core.database import get_session
 from automation_core.celery_app import celery_app
 from automation_core.time import utcnow
+from crm_domain.case_lifecycle import complaint_lifecycle_projection
 from crm_domain.identifiers import normalize_complaint_number
 from crm_domain.models import (
     ComplaintCategory,
@@ -24,6 +25,7 @@ from crm_domain.models import (
     ComplaintSubcategory,
     DocumentExtraction,
     PaperlessPublication,
+    CrmPaperlessStatusSync,
 )
 
 
@@ -125,8 +127,22 @@ def _case_summary(
     publication_blockers: list[str] | None = None,
     publication_error: str | None = None,
     paperless_result: dict[str, object] | None = None,
+    lifecycle: dict[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = publication_blockers or []
+    publication_status = (
+        "published"
+        if case.state == "published"
+        else "publishing"
+        if case.state == "publishing"
+        else "existing"
+        if case.state == "existing" or case.canonical_paperless_document_id
+        else "ready"
+        if case.state == "fresh" and not blockers
+        else "blocked"
+        if case.state == "fresh"
+        else "not_approved"
+    )
     return {
         "id": str(case.id),
         "source_system": case.source_system,
@@ -180,8 +196,28 @@ def _case_summary(
         "frappe_applicable_policy": case.frappe_applicable_policy,
         "document_count": document_count,
         "publication_ready": case.state == "fresh" and not blockers,
+        "publication_status": publication_status,
         "publication_blockers": blockers,
         "publication_error": publication_error,
+        "lifecycle": lifecycle
+        or {
+            "reply": {
+                "eligible": False,
+                "status": "Not eligible",
+                "awaiting": False,
+                "actionable": False,
+                "completed": False,
+            },
+            "dispatch": {
+                "downward": {"status": "not_started"},
+                "upward": {"status": "not_started"},
+                "attention": False,
+                "upward_attempted": False,
+                "upward_sent": False,
+                "upward_in_progress": False,
+                "downward_sent": False,
+            },
+        },
         "created_at": case.created_at,
         "updated_at": case.updated_at,
     }
@@ -211,19 +247,50 @@ def _paperless_result(session: Session, case: ComplaintCase) -> dict[str, object
     if match is None:
         match = session.exec(query.order_by(ComplaintMatch.created_at.desc())).first()
     if match is None:
-        return {
+        result: dict[str, object] = {
             "category": "existing" if case.canonical_paperless_document_id else "not_checked",
             "statuses": [],
             "reason": "",
             "document_id": case.canonical_paperless_document_id,
         }
-    signals = match.signals_json or {}
-    return {
-        "category": signals.get("paperless_category") or match.proposed_decision,
-        "statuses": list(signals.get("paperless_statuses") or []),
-        "reason": match.reason,
-        "document_id": match.paperless_document_id or case.canonical_paperless_document_id,
-    }
+    else:
+        signals = match.signals_json or {}
+        result = {
+            "category": signals.get("paperless_category") or match.proposed_decision,
+            "statuses": list(signals.get("paperless_statuses") or []),
+            "reason": match.reason,
+            "document_id": match.paperless_document_id or case.canonical_paperless_document_id,
+        }
+
+    # Intake matching is a historical observation. A later dispatch-owned
+    # Paperless status synchronization is the authoritative lifecycle event and
+    # must replace a stale "Pending" match in the case registry.
+    status_sync = session.exec(
+        select(CrmPaperlessStatusSync)
+        .where(CrmPaperlessStatusSync.complaint_case_id == case.id)
+        .order_by(CrmPaperlessStatusSync.updated_at.desc())
+    ).first()
+    if status_sync is not None:
+        result["status_sync"] = {
+            "state": status_sync.state,
+            "intended_status": status_sync.intended_status,
+            "status_before": status_sync.observed_status_before,
+            "status_after": status_sync.observed_status_after,
+            "last_error": status_sync.last_error,
+            "completed_at": status_sync.completed_at,
+        }
+        if status_sync.state == "succeeded":
+            current_status = (
+                status_sync.observed_status_after or status_sync.intended_status
+            ).strip()
+            if current_status:
+                result["category"] = current_status.casefold().replace(" ", "_")
+                result["statuses"] = [current_status]
+                result["reason"] = (
+                    f"Paperless status synchronized after dispatch: {current_status}."
+                )
+                result["document_id"] = status_sync.paperless_document_id or result["document_id"]
+    return result
 
 
 @router.get("")
@@ -233,6 +300,8 @@ def list_complaint_cases(
     publication: str = Query(default="", max_length=20),
     paperless: str = Query(default="", max_length=40),
     helpdesk_status: str = Query(default="", max_length=40),
+    reply: str = Query(default="", max_length=40),
+    dispatch: str = Query(default="", max_length=40),
     category: str = Query(default="", max_length=120),
     district: str = Query(default="", max_length=120),
     tehsil: str = Query(default="", max_length=120),
@@ -304,6 +373,7 @@ def list_complaint_cases(
         .where(*filters)
         .group_by(ComplaintCase.id)
     ).all()
+    lifecycle = complaint_lifecycle_projection(session, [case for case, _count in rows])
     items = [
         _case_summary(
             case,
@@ -311,6 +381,7 @@ def list_complaint_cases(
             _publication_blockers(session, case),
             _latest_publication_error(session, case.id),
             _paperless_result(session, case),
+            lifecycle.get(case.id),
         )
         for case, document_count in rows
     ]
@@ -341,6 +412,40 @@ def list_complaint_cases(
             item
             for item in items
             if any(blocker_term in str(value).casefold() for value in item["publication_blockers"])
+        ]
+    if reply:
+        items = [
+            item
+            for item in items
+            if (
+                (reply == "awaiting" and item["lifecycle"]["reply"]["awaiting"])
+                or (reply == "actionable" and item["lifecycle"]["reply"]["actionable"])
+                or (reply == "completed" and item["lifecycle"]["reply"]["completed"])
+                or (reply == "ineligible" and not item["lifecycle"]["reply"]["eligible"])
+            )
+        ]
+    if dispatch:
+        items = [
+            item
+            for item in items
+            if (
+                (dispatch == "upward_sent" and item["lifecycle"]["dispatch"]["upward_sent"])
+                or (
+                    dispatch == "upward_attempted"
+                    and item["lifecycle"]["dispatch"]["upward_attempted"]
+                )
+                or (
+                    dispatch == "upward_in_progress"
+                    and item["lifecycle"]["dispatch"]["upward_in_progress"]
+                )
+                or (dispatch == "downward_sent" and item["lifecycle"]["dispatch"]["downward_sent"])
+                or (dispatch == "attention" and item["lifecycle"]["dispatch"]["attention"])
+                or (
+                    dispatch == "not_started"
+                    and item["lifecycle"]["dispatch"]["downward"]["status"] == "not_started"
+                    and item["lifecycle"]["dispatch"]["upward"]["status"] == "not_started"
+                )
+            )
         ]
     sort_keys = {
         "complaint_number": "complaint_number",
@@ -421,9 +526,7 @@ def complaint_case_statistics(
     session: Session = Depends(get_session),
 ) -> dict[str, int]:
     cases = list(
-        session.exec(
-            select(ComplaintCase).where(ComplaintCase.registry_status == "active")
-        ).all()
+        session.exec(select(ComplaintCase).where(ComplaintCase.registry_status == "active")).all()
     )
     state_counts: dict[str, int] = {}
     for case in cases:
@@ -433,6 +536,9 @@ def complaint_case_statistics(
     ready_to_publish = sum(
         not _publication_blockers(session, case) for case in awaiting_publication
     )
+    lifecycle = complaint_lifecycle_projection(session, cases)
+    reply_lifecycles = [item["reply"] for item in lifecycle.values()]
+    dispatch_lifecycles = [item["dispatch"] for item in lifecycle.values()]
     return {
         "unique_cases": len(cases),
         "needs_review": state_counts.get("candidate", 0) + state_counts.get("review_required", 0),
@@ -444,6 +550,15 @@ def complaint_case_statistics(
         "published": state_counts.get("published", 0),
         "existing": state_counts.get("existing", 0),
         "rejected": state_counts.get("rejected", 0),
+        "reply_eligible": sum(item["eligible"] for item in reply_lifecycles),
+        "awaiting_reply": sum(item["awaiting"] for item in reply_lifecycles),
+        "actionable_replies": sum(item["actionable"] for item in reply_lifecycles),
+        "completed_replies": sum(item["completed"] for item in reply_lifecycles),
+        "downward_dispatched": sum(item["downward_sent"] for item in dispatch_lifecycles),
+        "upward_in_progress": sum(item["upward_in_progress"] for item in dispatch_lifecycles),
+        "upward_attempted": sum(item["upward_attempted"] for item in dispatch_lifecycles),
+        "upward_sent": sum(item["upward_sent"] for item in dispatch_lifecycles),
+        "dispatch_attention": sum(item["attention"] for item in dispatch_lifecycles),
     }
 
 
@@ -472,9 +587,8 @@ def read_complaint_case(
     capture_counts: dict[uuid.UUID, int] = {}
     for document in documents:
         binary_key = document.source_sha256 or f"document:{document.id}"
-        canonical_id = (
-            document.duplicate_of_document_id
-            or canonical_by_binary.setdefault(binary_key, document.id)
+        canonical_id = document.duplicate_of_document_id or canonical_by_binary.setdefault(
+            binary_key, document.id
         )
         canonical_by_binary.setdefault(binary_key, canonical_id)
         capture_counts[canonical_id] = capture_counts.get(canonical_id, 0) + 1
@@ -524,6 +638,7 @@ def read_complaint_case(
             len(canonical_by_binary),
             _publication_blockers(session, case),
             paperless_result=_paperless_result(session, case),
+            lifecycle=complaint_lifecycle_projection(session, [case]).get(case.id),
         ),
         "capture_count": len(documents),
         "complainant_address": case.complainant_address,

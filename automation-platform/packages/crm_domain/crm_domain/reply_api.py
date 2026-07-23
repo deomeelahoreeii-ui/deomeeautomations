@@ -16,7 +16,15 @@ from crm_domain.bulk_operations import (
     BulkOperationValidationError,
     CrmBulkOperationService,
 )
-from crm_domain.case_scopes import reply_case_eligibility_clause
+from crm_domain.case_scopes import (
+    effective_reply_status,
+    effective_reply_text,
+    is_reply_actionable,
+    is_reply_awaiting,
+    reply_actionable_clause,
+    reply_awaiting_clause,
+    reply_case_eligibility_clause,
+)
 from crm_domain.models import ComplaintCase, ComplaintReply
 
 
@@ -48,7 +56,14 @@ def reply_statistics(session: Session = Depends(get_session)) -> dict[str, int]:
     replied = [reply for _case, reply in rows if reply is not None]
     return {
         "published_cases": sum(case.state == "published" for case, _reply in rows),
-        "awaiting_reply": len(rows) - len(replied),
+        "reply_eligible_cases": len(rows),
+        "accepted_awaiting_publication": sum(
+            case.state in {"fresh", "publishing"} for case, _reply in rows
+        ),
+        "awaiting_reply": sum(is_reply_awaiting(case, reply) for case, reply in rows),
+        "actionable_replies": sum(
+            is_reply_actionable(case, reply) for case, reply in rows
+        ),
         "replies_imported": len(replied),
         "letters_generated": sum(reply.generated_at is not None for reply in replied),
     }
@@ -56,7 +71,10 @@ def reply_statistics(session: Session = Depends(get_session)) -> dict[str, int]:
 
 @router.get("")
 def list_replies(
-    view: str = Query(default="published", pattern="^(published|awaiting|imported|generated)$"),
+    view: str = Query(
+        default="eligible",
+        pattern="^(eligible|published|actionable|awaiting|imported|generated)$",
+    ),
     search: str = Query(default="", max_length=300),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=100, ge=1, le=500),
@@ -70,8 +88,10 @@ def list_replies(
         .where(reply_case_eligibility_clause())
     )
     filters = []
-    if view == "awaiting":
-        filters.append(ComplaintReply.id.is_(None))
+    if view == "actionable":
+        filters.append(reply_actionable_clause())
+    elif view == "awaiting":
+        filters.append(reply_awaiting_clause())
     elif view == "imported":
         filters.append(ComplaintReply.id.is_not(None))
     elif view == "generated":
@@ -100,7 +120,10 @@ def list_replies(
                 "complaint_number": case.complaint_number,
                 "complaint_remarks": case.remarks,
                 "paperless_document_id": case.canonical_paperless_document_id,
-                "reply": reply.reply_text if reply else None,
+                "reply": effective_reply_text(case, reply) or None,
+                "reply_status": effective_reply_status(case, reply),
+                "reply_actionable": is_reply_actionable(case, reply),
+                "awaiting_reply": is_reply_awaiting(case, reply),
                 "reply_version": reply.version if reply else None,
                 "source_filename": reply.source_filename if reply else None,
                 "imported_at": reply.imported_at if reply else None,
@@ -117,7 +140,7 @@ def list_replies(
 
 @router.get("/complaints.csv")
 def export_complaints_csv(
-    scope: str = Query(default="awaiting", pattern="^(awaiting|all)$"),
+    scope: str = Query(default="awaiting", pattern="^(awaiting|actionable|all)$"),
     session: Session = Depends(get_session),
 ) -> Response:
     """Compatibility CSV endpoint. New UI creates durable export batches."""
@@ -126,11 +149,13 @@ def export_complaints_csv(
     writer.writerow(["Complaint Number", "Complaint Remarks"])
     count = 0
     for case, reply in _reply_eligible_rows(session):
-        if scope == "awaiting" and reply is not None:
+        if scope == "awaiting" and not is_reply_awaiting(case, reply):
+            continue
+        if scope == "actionable" and not is_reply_actionable(case, reply):
             continue
         writer.writerow([case.complaint_number or "", case.remarks or ""])
         count += 1
-    filename = f"crm-published-complaints-{scope}-{count}.csv"
+    filename = f"crm-reply-eligible-complaints-{scope}-{count}.csv"
     return Response(
         content="\ufeff" + output.getvalue(),
         media_type="text/csv; charset=utf-8",
