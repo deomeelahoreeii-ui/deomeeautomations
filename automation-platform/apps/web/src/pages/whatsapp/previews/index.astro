@@ -228,7 +228,10 @@ import WhatsAppLayout from "../../../layouts/WhatsAppLayout.astro";
           { label: "View delivery audit", onClick: () => { window.location.href = `/whatsapp/previews/${row.original.id}`; } },
         ] : [
           { label: "Review", onClick: () => { window.location.href = `/whatsapp/previews/${row.original.id}`; } },
-          {label:"Delete permanently",tone:"danger",onClick:async()=>{if(!await confirmAction("Permanently delete this preview?","Frozen deliveries and managed attachment copies will be removed.","Delete permanently"))return;const result=await actions.whatsapp.hardDeletePreview({id:row.original.id});if(result.error)await showError(result.error);else{await showSuccess("Preview deleted","The frozen batch was removed.");await table.refresh(true);}}},
+          ...(row.original.source_kind === "crm_dispatch_batch" ? [{
+            label: "Manage in CRM",
+            onClick: () => { window.location.href = `/crm/dispatch/batches/${row.original.source_reference_id}`; },
+          }] : [{label:"Delete permanently",tone:"danger",onClick:async()=>{if(!await confirmAction("Permanently delete this preview?","Frozen deliveries and managed attachment copies will be removed.","Delete permanently"))return;const result=await actions.whatsapp.hardDeletePreview({id:row.original.id});if(result.error)await showError(result.error);else{await showSuccess("Preview deleted","The frozen batch was removed.");await table.refresh(true);}}}]),
         ]) },
       ]});
     } catch (error) { await showError(error); }

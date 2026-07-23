@@ -10,3 +10,13 @@ wheels/
 .venv
 .env
 scraper-debug/
+
+# Runtime data is owned by PostgreSQL/RustFS, never Git.
+drop-raw-files/
+output-files/
+unmapped-officer-reports/
+archived-files/
+last_scrape_metadata.json
+portal_login_request.json
+portal_login_approval.json
+login_failed.lock

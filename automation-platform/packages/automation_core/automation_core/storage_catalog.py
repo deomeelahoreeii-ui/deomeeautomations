@@ -151,6 +151,13 @@ def archive_artifact(
     session.add(artifact)
     session.flush()
     try:
+        if artifact.sha256:
+            current_sha256 = sha256_file(path)
+            if current_sha256 != artifact.sha256:
+                raise ObjectStorageError(
+                    "Local artifact changed after registration: "
+                    f"expected {artifact.sha256}, found {current_sha256}"
+                )
         stored = store_path(
             session,
             path,
@@ -169,6 +176,7 @@ def archive_artifact(
         artifact.storage_status = "ready"
         artifact.storage_error = None
         artifact.archived_at = utcnow()
+        artifact.local_evicted_at = None
         session.add(artifact)
         return True
     except Exception as exc:
@@ -209,6 +217,7 @@ def archive_source_file(
         source_file.storage_status = "ready"
         source_file.storage_error = None
         source_file.archived_at = utcnow()
+        source_file.local_evicted_at = None
         session.add(source_file)
         return True
     except Exception as exc:
@@ -244,6 +253,10 @@ def hydrate_stored_object(
 def ensure_artifact_local(session: Session, artifact: Artifact) -> Path:
     local = Path(artifact.path).expanduser().resolve(strict=False)
     if local.is_file() and (not artifact.sha256 or sha256_file(local) == artifact.sha256):
+        artifact.last_hydrated_at = utcnow()
+        artifact.local_evicted_at = None
+        session.add(artifact)
+        session.flush()
         return local
     if artifact.stored_object_id is None:
         raise ObjectStorageError(f"Artifact has no durable object: {artifact.name}")
@@ -259,6 +272,8 @@ def ensure_artifact_local(session: Session, artifact: Artifact) -> Path:
     )
     hydrate_stored_object(stored, destination)
     artifact.path = str(destination)
+    artifact.last_hydrated_at = utcnow()
+    artifact.local_evicted_at = None
     session.add(artifact)
     session.flush()
     return destination
@@ -267,6 +282,10 @@ def ensure_artifact_local(session: Session, artifact: Artifact) -> Path:
 def ensure_source_file_local(session: Session, source_file: SourceFile) -> Path:
     local = Path(source_file.stored_path).expanduser().resolve(strict=False)
     if local.is_file() and sha256_file(local) == source_file.sha256:
+        source_file.last_hydrated_at = utcnow()
+        source_file.local_evicted_at = None
+        session.add(source_file)
+        session.flush()
         return local
     if source_file.stored_object_id is None:
         raise ObjectStorageError(f"Source file has no durable object: {source_file.original_name}")
@@ -274,6 +293,10 @@ def ensure_source_file_local(session: Session, source_file: SourceFile) -> Path:
     if stored is None or stored.status != "ready":
         raise ObjectStorageError(f"Source file durable object is unavailable: {source_file.original_name}")
     hydrate_stored_object(stored, local)
+    source_file.last_hydrated_at = utcnow()
+    source_file.local_evicted_at = None
+    session.add(source_file)
+    session.flush()
     return local
 
 

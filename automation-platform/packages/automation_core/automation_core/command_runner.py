@@ -100,22 +100,32 @@ def run_streamed_command(
         bufsize=1,
     )
 
-    assert process.stdout is not None
-    for line in process.stdout:
-        append_job_log(job_id, line.rstrip())
-
-    return_code = process.wait()
-    artifact_count = discover_artifacts(
-        job_id,
-        output_dir,
-        modified_after=started_mtime,
-        module_key=module_key,
-    )
-    for extra_output_dir in additional_output_dirs:
-        artifact_count += discover_artifacts(
+    return_code = -1
+    try:
+        assert process.stdout is not None
+        for line in process.stdout:
+            append_job_log(job_id, line.rstrip())
+        return_code = process.wait()
+    except BaseException:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        raise
+    finally:
+        artifact_count = discover_artifacts(
             job_id,
-            extra_output_dir,
+            output_dir,
             modified_after=started_mtime,
             module_key=module_key,
         )
+        for extra_output_dir in additional_output_dirs:
+            artifact_count += discover_artifacts(
+                job_id,
+                extra_output_dir,
+                modified_after=started_mtime,
+                module_key=module_key,
+            )
     return CommandRunResult(return_code=return_code, artifact_count=artifact_count)

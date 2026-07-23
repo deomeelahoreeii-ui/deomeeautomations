@@ -3,17 +3,52 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlmodel import Session
 
 from master_data.models import School, SchoolHead, Wing
 from whatsapp_gateway.models import (
     WhatsAppContactLink, WhatsAppDispatchPreview, WhatsAppDispatchPreviewArtifact,
-    WhatsAppDispatchPreviewDelivery,
+    WhatsAppDispatchPreviewDelivery, WhatsAppDispatchApproval,
 )
 from whatsapp_gateway.previews.artifact_storage import is_managed_preview_artifact
 from whatsapp_gateway.previews.staleness import preview_is_stale, preview_stale_reasons
 from whatsapp_gateway.previews.state import summarize_preview_state
+
+
+def preview_deletion_block_reason(
+    session: Session,
+    preview: WhatsAppDispatchPreview,
+) -> str | None:
+    """Return why a frozen preview cannot be deleted from the generic gateway UI.
+
+    Approved previews are immutable audit records. CRM previews are owned by the
+    originating dispatch batch, whose targets keep foreign-key references to the
+    frozen plan and must control any detach/recompile transition themselves.
+    """
+
+    if session.scalar(
+        select(WhatsAppDispatchApproval.id).where(
+            WhatsAppDispatchApproval.preview_id == preview.id
+        )
+    ):
+        return "Approved previews are retained as immutable delivery audit records."
+    if preview.source_kind == "crm_dispatch_batch":
+        return (
+            "CRM dispatch previews are owned by their CRM batch. Recompile or "
+            "cancel the plan from CRM Dispatch instead."
+        )
+    return None
+
+
+def ensure_preview_deletable(
+    session: Session,
+    preview: WhatsAppDispatchPreview,
+) -> None:
+    reason = preview_deletion_block_reason(session, preview)
+    if reason:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=reason)
 
 def preview_dict(session: Session, preview: WhatsAppDispatchPreview, *, check_files: bool = False) -> dict[str, Any]:
     stale_reasons = preview_stale_reasons(session, preview, check_files=check_files)
@@ -91,6 +126,7 @@ def delete_preview_records(
     preview: WhatsAppDispatchPreview,
 ) -> set[Path]:
     """Delete one immutable preview and return managed files eligible for cleanup."""
+    ensure_preview_deletable(session, preview)
     deliveries = session.scalars(
         select(WhatsAppDispatchPreviewDelivery).where(
             WhatsAppDispatchPreviewDelivery.preview_id == preview.id

@@ -13,6 +13,7 @@ from sqlmodel import Session, select
 
 from automation_core.config import get_settings
 from automation_core.models import Artifact, Job
+from automation_core.storage_catalog import ensure_artifact_local
 from master_data.models import Wing
 from whatsapp_gateway.rendering.antidengue.evidence import (
     evidence_metadata,
@@ -93,8 +94,8 @@ def _source(session: Session, job: Job) -> tuple[Artifact, Path, list[str], list
     artifacts = session.scalars(select(Artifact).where(Artifact.job_id == job.id).order_by(Artifact.created_at, Artifact.id)).all()
     for artifact in artifacts:
         if not artifact.name.lower().split("/")[-1].startswith("simple activity timing review"): continue
-        path = Path(artifact.path).expanduser().resolve(strict=False)
-        if not path.is_file(): continue
+        try: path = ensure_artifact_local(session, artifact)
+        except Exception: continue
         workbook = load_workbook(path, read_only=True, data_only=True)
         try:
             sheet = workbook["Review Required"] if "Review Required" in workbook.sheetnames else workbook.active

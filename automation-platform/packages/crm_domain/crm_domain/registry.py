@@ -11,6 +11,7 @@ from automation_core.time import utcnow
 from crm_domain.fields import extract_field_observations
 from crm_domain.identifiers import normalize_complaint_number
 from crm_domain.models import (
+    ComplaintAuditEvent,
     ComplaintCase,
     ComplaintDocument,
     ComplaintDocumentCaseLink,
@@ -18,6 +19,7 @@ from crm_domain.models import (
     ComplaintMatch,
     DocumentExtraction,
 )
+from crm_domain.case_scopes import paperless_match_target_state
 
 
 EXTRACTOR_NAME = "deomee-crm-structured-text"
@@ -155,9 +157,9 @@ def _promote_safe_fields(case: ComplaintCase, values: dict[str, str]) -> None:
             and current
             and candidate
             and len(candidate) > len(current)
-            and _normalized_text(candidate).casefold().startswith(
-                _normalized_text(current).casefold()
-            )
+            and _normalized_text(candidate)
+            .casefold()
+            .startswith(_normalized_text(current).casefold())
         ):
             # This is not a conflicting OCR guess: it is a strict continuation
             # of the exact canonical prefix already accepted by the operator.
@@ -226,9 +228,7 @@ def _record_binary_duplicate_signal(
         )
     ).first()
     matched_case_id = (
-        canonical_link.complaint_case_id
-        if canonical_link
-        else canonical.complaint_case_id
+        canonical_link.complaint_case_id if canonical_link else canonical.complaint_case_id
     )
     existing = session.exec(
         select(ComplaintMatch).where(
@@ -322,9 +322,7 @@ def record_captured_document(
     duplicate_of = _record_binary_duplicate_signal(session, document=document, case=case)
     if duplicate_of is not None:
         reason = f"Exact binary duplicate of complaint document {duplicate_of.id}."
-        document.duplicate_of_document_id = (
-            duplicate_of.duplicate_of_document_id or duplicate_of.id
-        )
+        document.duplicate_of_document_id = duplicate_of.duplicate_of_document_id or duplicate_of.id
         document.review_state = "duplicate"
         document.relationship_reason = reason
         document.updated_at = utcnow()
@@ -446,33 +444,55 @@ def record_paperless_match(
             ComplaintMatch.proposed_decision == proposed,
         )
     ).first()
-    if existing is not None:
-        return existing
-    match = ComplaintMatch(
-        complaint_case_id=complaint_case.id,
-        processing_item_id=processing_item_id,
-        paperless_document_id=paperless_document_id,
-        proposed_decision=proposed,
-        # A missing Paperless match is evidence, not an authorization to publish.
-        # Only existing-document matches can be finalized automatically; a fresh
-        # complaint always requires an explicit reviewer decision.
-        final_decision=proposed if category in {"submitted", "uploaded_not_relevant", "uploaded_pending"} else None,
-        score=1.0 if paperless_document_id is not None else 0.0,
-        reason=reason,
-        signals_json={
-            "exact_complaint_number": bool(paperless_document_id),
-            "paperless_category": category,
-            "paperless_statuses": statuses,
-        },
-    )
-    session.add(match)
+    match = existing
+    if match is None:
+        match = ComplaintMatch(
+            complaint_case_id=complaint_case.id,
+            processing_item_id=processing_item_id,
+            paperless_document_id=paperless_document_id,
+            proposed_decision=proposed,
+            # A missing Paperless match is evidence, not an authorization to publish.
+            # Only existing-document matches can be finalized automatically; a fresh
+            # complaint always requires an explicit reviewer decision.
+            final_decision=proposed
+            if category in {"submitted", "uploaded_not_relevant", "uploaded_pending"}
+            else None,
+            score=1.0 if paperless_document_id is not None else 0.0,
+            reason=reason,
+            signals_json={
+                "exact_complaint_number": bool(paperless_document_id),
+                "paperless_category": category,
+                "paperless_statuses": statuses,
+            },
+        )
+        session.add(match)
+    before_state = complaint_case.state
     if paperless_document_id is not None:
         complaint_case.canonical_paperless_document_id = paperless_document_id
-        complaint_case.state = "existing"
+        proposed_state = "existing"
     elif category == "fresh":
-        complaint_case.state = "review_required"
+        proposed_state = "review_required"
     else:
-        complaint_case.state = "review_required"
+        proposed_state = "review_required"
+    complaint_case.state = paperless_match_target_state(before_state, proposed_state)
     complaint_case.updated_at = utcnow()
     session.add(complaint_case)
+    if complaint_case.state != before_state:
+        session.add(
+            ComplaintAuditEvent(
+                complaint_case_id=complaint_case.id,
+                entity_type="complaint_case",
+                entity_id=str(complaint_case.id),
+                event_type="paperless_match_state_transition",
+                actor="paperless-reconciler",
+                before_json={"state": before_state},
+                after_json={"state": complaint_case.state},
+                details_json={
+                    "proposed_state": proposed_state,
+                    "paperless_category": category,
+                    "paperless_document_id": paperless_document_id,
+                    "processing_item_id": str(processing_item_id) if processing_item_id else None,
+                },
+            )
+        )
     return match

@@ -36,6 +36,10 @@ import { InboundMessageStore } from "./lib/inbound-message-store.js";
 import { createInboundCapture } from "./lib/inbound-capture.js";
 import { createInboundMediaResponder } from "./lib/inbound-media.js";
 import { createInboundHistoryResponder, inboundHistorySocketOptions } from "./lib/inbound-history.js";
+import {
+  classifyQueueFailure,
+  QueueFailureAction,
+} from "./lib/delivery-reliability.js";
 
 const log = createLogger("worker");
 const sc = StringCodec();
@@ -706,6 +710,7 @@ function workerHealthPayload() {
   return {
     ready,
     status,
+    deliveryProtocolVersion: 2,
     checkedAt: new Date().toISOString(),
     workerId: config.workerId,
     whatsappConnected: isWhatsAppConnected,
@@ -931,6 +936,7 @@ async function publishDeliveryStatus(payload, status, details = {}) {
     canonicalTarget: details.identityResolution?.canonicalTarget || payload.target,
     complaintCode: payload.complaintCode,
     deliveryCount: details.deliveryCount,
+    dispatchAttemptId: payload.dispatchAttemptId,
     dispatchRoute: payload.dispatchRoute,
     error: details.error,
     errorCode: details.errorCode,
@@ -1151,6 +1157,7 @@ async function appendDeliveryAudit(payload, status, details = {}) {
     operation: payload?.operation || null,
     recipientName: payload?.recipientName || null,
     dispatchRoute: payload?.dispatchRoute || null,
+    dispatchAttemptId: payload?.dispatchAttemptId || null,
     identity: details.identityResolution || null,
     knownLidTarget: details.identityResolution?.knownLidTarget || null,
     targetPolicy: details.identityResolution?.policy || config.directJidPolicy,
@@ -1635,9 +1642,36 @@ async function handleQueueMessage(msg, sock) {
     }
 
     const isPermanent = error instanceof ValidationError;
-    const exceededRetries = msg.info.deliveryCount >= config.natsMaxDeliver;
+    const failureAction = classifyQueueFailure({
+      error,
+      deliveryCount: msg.info.deliveryCount,
+      maxDeliver: config.natsMaxDeliver,
+      permanent: isPermanent,
+    });
 
-    if (isPermanent || exceededRetries) {
+    if (failureAction === QueueFailureAction.PAUSE_CONNECTION) {
+      lastConnectionStatus = "degraded";
+      lastDisconnectInfo = {
+        statusCode: null,
+        error: error.message,
+        closedAt: new Date().toISOString(),
+      };
+      log.warn("WhatsApp transport became unavailable; pausing queue consumption", {
+        jobId: payload.jobId,
+        target: payload.target,
+        deliveryCount: msg.info.deliveryCount,
+        error: error.message,
+      });
+      if (activeSocket === sock) {
+        await stopSocket();
+      }
+      scheduleReconnect("send detected unavailable WhatsApp transport");
+      // Deliberately do not ack, nak, or terminate this message.  Closing the
+      // consumer preserves it for redelivery after the socket reconnects.
+      return QueueFailureAction.PAUSE_CONNECTION;
+    }
+
+    if (failureAction === QueueFailureAction.TERMINATE_MESSAGE) {
       const reason = isPermanent
         ? error.message
         : `Exceeded max delivery attempts (${config.natsMaxDeliver})`;
@@ -1682,6 +1716,7 @@ async function handleQueueMessage(msg, sock) {
   } finally {
     clearInterval(heartbeat);
   }
+  return null;
 }
 
 async function startNatsConsumer(sock) {
@@ -1775,7 +1810,10 @@ async function startNatsConsumer(sock) {
         break;
       }
 
-      await handleQueueMessage(msg, sock);
+      const outcome = await handleQueueMessage(msg, sock);
+      if (outcome === QueueFailureAction.PAUSE_CONNECTION) {
+        break;
+      }
     }
   } catch (error) {
     log.error("NATS consumer failed", {

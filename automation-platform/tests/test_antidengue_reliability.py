@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event
 from sqlalchemy.dialects import postgresql
@@ -14,6 +15,7 @@ import antidengue_automation.models  # noqa: F401
 import automation_core.models  # noqa: F401
 import master_data.models  # noqa: F401
 import whatsapp_gateway.models  # noqa: F401
+from antidengue_automation.api import retry_antidengue_failed_deliveries
 from antidengue_automation.models import AntiDengueScheduleExecution
 from antidengue_automation.scheduling import (
     cancel_execution,
@@ -32,6 +34,9 @@ from whatsapp_gateway.models import (
     WhatsAppAccount,
     WhatsAppApplication,
     WhatsAppAudience,
+    WhatsAppActivity,
+    WhatsAppDelivery,
+    WhatsAppDispatchApproval,
     WhatsAppDispatchPreview,
     WhatsAppDispatchProfile,
     WhatsAppReportType,
@@ -41,6 +46,7 @@ from whatsapp_gateway.dispatch.task_entrypoints import (
     compile_dispatch_preview_job,
     send_approved_preview_job,
 )
+from whatsapp_gateway.dispatch.recovery import recover_active_dispatch_jobs
 from whatsapp_gateway.previews.compiler.capabilities import (
     PREVIEW_COMPILER_PROTOCOL, PREVIEW_COMPILER_QUEUE,
     compiler_build_id, compiler_capabilities, compiler_fingerprint,
@@ -366,6 +372,244 @@ def test_send_worker_snapshots_retry_delivery_ids_before_session_closes(monkeypa
         assert persisted is not None and persisted.status == JobStatus.succeeded.value
 
 
+def test_failed_send_worker_reconciles_source_after_persisting_terminal_job(
+    monkeypatch,
+) -> None:
+    engine = memory_engine()
+    approval_id = uuid.uuid4()
+    with Session(engine) as session:
+        job = add_job(
+            session,
+            job_type=JobType.whatsapp_dispatch_send.value,
+            title="Failing frozen dispatch",
+            parameters={"approval_id": str(approval_id)},
+        )
+        session.commit()
+        job_id = job.id
+
+    async def fail_publish(_approval_id, _job_id):
+        raise RuntimeError("broker unavailable")
+
+    observed: list[uuid.UUID] = []
+    monkeypatch.setattr("whatsapp_gateway.dispatch.task_entrypoints.engine", engine)
+    monkeypatch.setattr(
+        "whatsapp_gateway.dispatch.task_entrypoints._publish_approved_deliveries",
+        fail_publish,
+    )
+    monkeypatch.setattr(
+        "whatsapp_gateway.dispatch.task_entrypoints.reconcile_approval_source",
+        observed.append,
+    )
+
+    with pytest.raises(RuntimeError, match="broker unavailable"):
+        send_approved_preview_job.run(str(job_id))
+
+    with Session(engine) as session:
+        persisted = session.get(Job, job_id)
+        assert persisted is not None
+        assert persisted.status == JobStatus.failed.value
+    assert observed == [approval_id]
+
+
+def test_antidengue_retry_creates_new_attempt_and_never_reuses_terminal_job(
+    monkeypatch,
+) -> None:
+    engine = memory_engine()
+    with Session(engine) as session:
+        profile = seed_profile(session)
+        original_job = add_job(
+            session,
+            job_type=JobType.whatsapp_dispatch_send.value,
+            title="Original failed send",
+            parameters={},
+        )
+        original_job.status = JobStatus.succeeded.value
+        original_job.result = {"delivered": 0, "failed": 1}
+        preview = WhatsAppDispatchPreview(
+            preview_key=f"AD-{uuid.uuid4()}",
+            application_id=profile.application_id,
+            dispatch_profile_id=profile.id,
+            profile_version=profile.version,
+            application_name="AntiDengue",
+            report_type_name="School activity",
+            audience_name="All routes",
+            profile_name=profile.name,
+            account_name="Primary",
+            status="ready",
+            content_sha256="a" * 64,
+        )
+        session.add_all([original_job, preview])
+        session.flush()
+        approval = WhatsAppDispatchApproval(
+            preview_id=preview.id,
+            job_id=original_job.id,
+            approved_by="test",
+            preview_content_sha256=preview.content_sha256,
+            approved_content_sha256=preview.content_sha256,
+            delivery_count=1,
+            status="failed",
+        )
+        execution = AntiDengueScheduleExecution(
+            execution_key=f"manual:{uuid.uuid4()}",
+            execution_code=f"ADS-{uuid.uuid4().hex[:12]}",
+            trigger_type="manual_send",
+            scheduled_for=datetime.now(UTC),
+            status="failed",
+            dispatch_policy="auto_send_when_clean",
+            login_mode="auto",
+            dispatch_profile_id=profile.id,
+            dispatch_profile_ids=[str(profile.id)],
+            preview_id=preview.id,
+            send_job_id=original_job.id,
+        )
+        session.add_all([approval, execution])
+        session.flush()
+        delivery = WhatsAppDelivery(
+            approval_id=approval.id,
+            account_id=profile.account_id,
+            recipient_type="contact",
+            recipient_name="Test recipient",
+            target="923001234567@s.whatsapp.net",
+            message="Test",
+            status_subject=f"whatsapp.status.test.{uuid.uuid4().hex}",
+            status="failed",
+            error="Connection Closed",
+        )
+        session.add(delivery)
+        session.commit()
+        original_job_id = original_job.id
+
+        monkeypatch.setattr(
+            "antidengue_automation.api.publish_pending_tasks",
+            lambda _session, limit=10: {
+                "published": 0,
+                "failed": 0,
+                "cancelled": 0,
+            },
+        )
+        result = retry_antidengue_failed_deliveries(preview.id, session)
+
+        session.expire_all()
+        persisted_original = session.get(Job, original_job_id)
+        retry_job = session.get(Job, uuid.UUID(result["retry_job_id"]))
+        persisted_execution = session.get(AntiDengueScheduleExecution, execution.id)
+        persisted_delivery = session.get(WhatsAppDelivery, delivery.id)
+        audit = session.exec(
+            select(WhatsAppActivity).where(
+                WhatsAppActivity.event_type
+                == "approved_delivery_retry_requested"
+            )
+        ).one()
+
+        assert persisted_original is not None
+        assert persisted_original.status == JobStatus.succeeded.value
+        assert persisted_original.result == {"delivered": 0, "failed": 1}
+        assert retry_job is not None and retry_job.id != persisted_original.id
+        assert retry_job.parameters["retry_of_job_id"] == str(original_job_id)
+        assert persisted_execution is not None
+        assert persisted_execution.send_job_id == retry_job.id
+        assert persisted_delivery is not None
+        assert persisted_delivery.status == "queued"
+        assert persisted_delivery.queue_sequence is None
+        assert audit.details["previous_error"] == "Connection Closed"
+
+
+def test_restart_recovery_preserves_broker_accepted_attempt_as_ambiguous(
+    monkeypatch,
+) -> None:
+    engine = memory_engine()
+    with Session(engine) as session:
+        profile = seed_profile(session)
+        job = add_job(
+            session,
+            job_type=JobType.whatsapp_dispatch_send.value,
+            title="Interrupted dispatch",
+            parameters={},
+        )
+        preview = WhatsAppDispatchPreview(
+            preview_key=f"AD-{uuid.uuid4()}",
+            application_id=profile.application_id,
+            dispatch_profile_id=profile.id,
+            profile_version=profile.version,
+            application_name="AntiDengue",
+            report_type_name="School activity",
+            audience_name="All routes",
+            profile_name=profile.name,
+            account_name="Primary",
+            status="ready",
+            content_sha256="b" * 64,
+        )
+        session.add_all([job, preview])
+        session.flush()
+        approval = WhatsAppDispatchApproval(
+            preview_id=preview.id,
+            job_id=job.id,
+            approved_by="test",
+            preview_content_sha256=preview.content_sha256,
+            approved_content_sha256=preview.content_sha256,
+            delivery_count=2,
+            status="sending",
+        )
+        session.add(approval)
+        session.flush()
+        safe_failure = WhatsAppDelivery(
+            approval_id=approval.id,
+            account_id=profile.account_id,
+            recipient_type="contact",
+            recipient_name="Not published",
+            target="923001234567@s.whatsapp.net",
+            message="Test",
+            status_subject=f"whatsapp.status.test.{uuid.uuid4().hex}",
+        )
+        ambiguous = WhatsAppDelivery(
+            approval_id=approval.id,
+            account_id=profile.account_id,
+            recipient_type="contact",
+            recipient_name="Broker accepted",
+            target="923007654321@s.whatsapp.net",
+            message="Test",
+            status_subject=f"whatsapp.status.test.{uuid.uuid4().hex}",
+            provider_result={
+                "dispatchAttemptId": "attempt-1",
+                "queueAccepted": True,
+            },
+        )
+        session.add_all([safe_failure, ambiguous])
+        job.parameters = {"approval_id": str(approval.id)}
+        job.status = JobStatus.running.value
+        session.add(job)
+        stage_task(
+            session,
+            job=job,
+            task_name="whatsapp_gateway.send_approved_preview",
+            queue="antidengue",
+            args=[str(job.id)],
+        )
+        session.commit()
+
+        monkeypatch.setattr(
+            "whatsapp_gateway.dispatch.recovery.reconcile_approval_source",
+            lambda _approval_id: {"reconciled": False},
+        )
+        stats = recover_active_dispatch_jobs(session, all_active=True)
+
+        session.expire_all()
+        assert session.get(Job, job.id).status == JobStatus.failed.value
+        assert session.get(WhatsAppDispatchApproval, approval.id).status == "failed"
+        assert session.get(WhatsAppDelivery, safe_failure.id).status == "failed"
+        recovered_ambiguous = session.get(WhatsAppDelivery, ambiguous.id)
+        assert recovered_ambiguous.status == "timed_out"
+        assert "outcome is ambiguous" in recovered_ambiguous.error
+        assert session.exec(select(TaskOutbox)).one().status == "cancelled"
+        assert stats == {
+            "jobs_failed": 1,
+            "deliveries_failed": 1,
+            "deliveries_ambiguous": 1,
+            "outbox_cancelled": 1,
+            "sources_reconciled": 0,
+        }
+
+
 def test_manual_api_reuses_equivalent_active_execution(monkeypatch) -> None:
     engine = memory_engine()
     with Session(engine) as session:
@@ -570,9 +814,19 @@ def test_scheduler_lock_connection_never_owns_work_transactions() -> None:
 
 def test_dashboard_preserves_json_content_type_with_idempotency_header() -> None:
     source = Path("apps/web/src/pages/index.astro").read_text(encoding="utf-8")
-    fetch_block = source[source.index("const response = await fetch"):source.index("const data = await response.json")]
+    fetch_block = source[
+        source.index("response = await fetch"):source.index(
+            "const data = await response.json"
+        )
+    ]
     assert fetch_block.index("...init") < fetch_block.index('headers: { "Content-Type": "application/json"')
     assert '"Idempotency-Key": requestKey' in source
+
+
+def test_dashboard_explains_transport_failures_instead_of_exposing_fetch_error() -> None:
+    source = Path("apps/web/src/pages/index.astro").read_text(encoding="utf-8")
+    assert "Could not reach the platform API" in source
+    assert "allows requests from ${location.origin}" in source
 
 
 def test_recovery_script_delegates_to_canonical_equivalence_logic() -> None:

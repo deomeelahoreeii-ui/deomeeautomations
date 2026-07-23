@@ -202,6 +202,9 @@ export function createJobPayload(input) {
   return {
     attachmentTextMode,
     batchId: input.batchId ? String(input.batchId).trim() : null,
+    dispatchAttemptId: input.dispatchAttemptId
+      ? String(input.dispatchAttemptId).trim()
+      : null,
     complaintCode: input.complaintCode ? String(input.complaintCode).trim() : null,
     delayMs,
     dispatchRoute:
@@ -234,6 +237,8 @@ export function resolveJobPayload(raw) {
     batchId: raw.batch_id ?? raw.batchId,
     complaintCode: raw.complaint_code ?? raw.complaintCode,
     delayMs: raw.delay_ms ?? raw.delayMs,
+    dispatchAttemptId:
+      raw.dispatch_attempt_id ?? raw.dispatchAttemptId,
     excelFilename: raw.excel_filename ?? raw.excelFilename,
     excelPath: raw.excel_path ?? raw.excelPath,
     imagePath: raw.image_path ?? raw.imagePath,

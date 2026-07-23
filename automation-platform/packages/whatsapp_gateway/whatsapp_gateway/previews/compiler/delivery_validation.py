@@ -99,10 +99,17 @@ def resolve_recipient(ctx: CompileContext, state: DeliveryState) -> None:
                 WhatsAppDirectoryContact.account_id == account.id,
                 or_(WhatsAppDirectoryContact.phone_jid == state.target,
                     WhatsAppDirectoryContact.canonical_key == state.target))) if state.target else None
+            # Master Data authorizes dynamic recipients; directory presence only enriches identity.
             if state.directory_contact and not state.directory_contact.active:
-                state.problems.append(issue("inactive_contact", "warning", "The matched directory contact is inactive; delivery will use the authoritative Master Data number."))
+                state.problems.append(issue(
+                    "inactive_directory_contact", "info",
+                    "The synchronized directory identity is inactive; this dynamic route uses the current active officer mobile from Master Data.",
+                ))
             elif state.directory_contact is None and state.target:
-                state.problems.append(issue("master_data_phone_target", "warning", "This AEO will be addressed directly from the verified Master Data mobile number."))
+                state.problems.append(issue(
+                    "master_data_phone_target", "info",
+                    "This dynamic AEO route uses the current active officer mobile from Master Data; a synchronized directory identity is not required.",
+                ))
     elif not state.source_skipped:
         if profile.delivery_mode == "groups":
             state.problems.append(issue("delivery_mode_mismatch", "blocked", "An individual route cannot use a groups-only profile."))

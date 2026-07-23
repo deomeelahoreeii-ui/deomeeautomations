@@ -46,6 +46,28 @@ def utc_datetime_column(*, nullable: bool, index: bool = True) -> Column:
     return Column(UTCDateTime(), nullable=nullable, index=index)
 
 
+class AntiDengueRuntimeState(SQLModel, table=True):
+    """Mutable operational cursor state owned by PostgreSQL, never the source tree."""
+
+    __tablename__ = "antidengue_runtime_state"
+
+    state_key: str = Field(primary_key=True, max_length=120)
+    value_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    updated_by_job_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid,
+            ForeignKey("jobs.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=utcnow,
+        sa_column=utc_datetime_column(nullable=False),
+    )
+
+
 class AntiDengueDeadlinePolicy(SQLModel, table=True):
     """Versioned operational deadline used by all AntiDengue delivery surfaces."""
 

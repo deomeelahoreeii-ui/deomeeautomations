@@ -17,8 +17,9 @@ from automation_core.time import utcnow
 from automation_core.task_delivery import discarded_missing_job_delivery
 from whatsapp_gateway.dispatch.approved_delivery import _publish_approved_deliveries
 from whatsapp_gateway.dispatch.retry_delivery import _publish_selected_approved_deliveries
+from whatsapp_gateway.dispatch.source_reconciliation import reconcile_approval_source
 from whatsapp_gateway.models import (
-    WhatsAppDelivery, WhatsAppDispatchApproval,
+    WhatsAppActivity, WhatsAppDelivery, WhatsAppDispatchApproval,
 )
 from whatsapp_gateway.preview_service import compile_antidengue_preview
 from whatsapp_gateway.previews.compiler.capabilities import (
@@ -158,17 +159,55 @@ def send_approved_preview_job(job_id: str) -> dict[str, Any]:
                 approval.error = str(exc)
                 approval.completed_at = utcnow()
                 session.add(approval)
-                for delivery in session.scalars(
-                    select(WhatsAppDelivery).where(
-                        WhatsAppDelivery.approval_id == approval.id,
-                        WhatsAppDelivery.status == "queued",
+                failed_statement = select(WhatsAppDelivery).where(
+                    WhatsAppDelivery.approval_id == approval.id,
+                    WhatsAppDelivery.status == "queued",
+                )
+                if delivery_ids:
+                    failed_statement = failed_statement.where(
+                        WhatsAppDelivery.id.in_(delivery_ids)
                     )
-                ):
-                    delivery.status = "failed"
-                    delivery.error = str(exc)
+                for delivery in session.scalars(failed_statement):
+                    queue_was_accepted = bool(
+                        (delivery.provider_result or {}).get("queueAccepted")
+                    )
+                    delivery.status = (
+                        "timed_out" if queue_was_accepted else "failed"
+                    )
+                    delivery.error = (
+                        "Dispatch execution was interrupted after the broker accepted "
+                        "this attempt; outcome is ambiguous and requires reconciliation."
+                        if queue_was_accepted
+                        else str(exc)
+                    )
                     delivery.completed_at = utcnow()
                     session.add(delivery)
+                    session.add(
+                        WhatsAppActivity(
+                            account_id=delivery.account_id,
+                            level="error",
+                            event_type="approved_delivery_dispatch_interrupted",
+                            message=(
+                                f"Approved delivery {delivery.status} after dispatch "
+                                f"interruption for {delivery.recipient_name}"
+                            ),
+                            details={
+                                "delivery_id": str(delivery.id),
+                                "approval_id": str(approval.id),
+                                "dispatch_job_id": job_id,
+                                "queue_was_accepted": queue_was_accepted,
+                                "error": delivery.error,
+                            },
+                        )
+                    )
                 session.commit()
             append_log(session, job_id, str(exc), level="error")
             mark_job_failed(session, job_id, str(exc))
+        try:
+            reconcile_approval_source(approval_id)
+        except Exception:
+            logger.exception(
+                "dispatch.source_reconciliation.failed_after_dispatch_error",
+                extra={"context": {"approval_id": str(approval_id)}},
+            )
         raise

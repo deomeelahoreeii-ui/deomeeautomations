@@ -64,6 +64,14 @@ class ActorInput(BaseModel):
     actor: str = Field(default="web-operator", max_length=120)
 
 
+class FinalPacketInput(BaseModel):
+    confirmation_token: str = Field(min_length=64, max_length=64)
+    approved_revision_id: uuid.UUID
+    configuration_updated_at: str = Field(max_length=80)
+    supersede_current: bool = False
+    actor: str = Field(default="web-operator", max_length=120)
+
+
 def _service(session: Session, settings: Settings) -> OfficialLetterService:
     return OfficialLetterService(session, settings)
 
@@ -223,6 +231,38 @@ def prepare_case(
 ) -> dict[str, Any]:
     try:
         return _service(session, settings).prepare_case(case_id)
+    except OfficialLetterError as exc:
+        _raise(exc)
+
+
+@router.get("/cases/{case_id}/final-packet/prepare")
+def prepare_final_packet(
+    case_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    try:
+        return _service(session, settings).prepare_final_packet(case_id)
+    except OfficialLetterError as exc:
+        _raise(exc)
+
+
+@router.post("/cases/{case_id}/final-packet")
+def create_final_packet(
+    case_id: uuid.UUID,
+    payload: FinalPacketInput,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    try:
+        return _service(session, settings).create_final_packet(
+            case_id,
+            confirmation_token=payload.confirmation_token,
+            approved_revision_id=payload.approved_revision_id,
+            configuration_updated_at=payload.configuration_updated_at,
+            supersede_current=payload.supersede_current,
+            actor=payload.actor,
+        )
     except OfficialLetterError as exc:
         _raise(exc)
 

@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlmodel import Session
 
 from automation_core.models import Artifact, Job
+from automation_core.storage_catalog import ensure_artifact_local
 from whatsapp_gateway.rendering.antidengue.models import DormantSourceRow, REQUIRED_COLUMNS
 
 
@@ -71,8 +72,8 @@ def _canonical_report_artifact(
         ),
     )
     for artifact in candidates:
-        path = Path(artifact.path).expanduser().resolve(strict=False)
         try:
+            path = ensure_artifact_local(session, artifact)
             rows = _report_rows(path)
         except Exception:
             continue

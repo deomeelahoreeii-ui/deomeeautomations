@@ -19,6 +19,7 @@ from sqlmodel import Session, select
 from automation_core.config import Settings, get_settings
 from automation_core.time import utcnow
 from crm_domain.models import ComplaintCase, ComplaintReply
+from crm_domain.case_scopes import reply_case_eligibility_clause
 
 
 DEFAULT_APPROVED_STATUSES = ("Approved", "Issued")
@@ -118,7 +119,9 @@ class ComplaintKnowledgeArchive:
         self.settings = settings or get_settings()
         configured = approved_statuses or self.settings.frappe_helpdesk_approved_reply_status_list
         self.approved_statuses = {
-            value.strip().casefold() for value in (configured or DEFAULT_APPROVED_STATUSES) if value.strip()
+            value.strip().casefold()
+            for value in (configured or DEFAULT_APPROVED_STATUSES)
+            if value.strip()
         }
 
     @staticmethod
@@ -129,7 +132,9 @@ class ComplaintKnowledgeArchive:
     def _iso(value: datetime | None) -> str | None:
         return value.isoformat() if value else None
 
-    def _base_rows(self, filters: KnowledgeFilters) -> list[tuple[ComplaintCase, ComplaintReply | None]]:
+    def _base_rows(
+        self, filters: KnowledgeFilters
+    ) -> list[tuple[ComplaintCase, ComplaintReply | None]]:
         statement = (
             select(ComplaintCase, ComplaintReply)
             .join(
@@ -137,7 +142,7 @@ class ComplaintKnowledgeArchive:
                 ComplaintReply.complaint_case_id == ComplaintCase.id,
                 isouter=True,
             )
-            .where(ComplaintCase.state == "published")
+            .where(reply_case_eligibility_clause())
         )
         if filters.category:
             statement = statement.where(ComplaintCase.category == filters.category)
@@ -146,9 +151,13 @@ class ComplaintKnowledgeArchive:
         if filters.source_system:
             statement = statement.where(ComplaintCase.source_system == filters.source_system)
         if filters.date_from:
-            statement = statement.where(ComplaintCase.created_at >= datetime.combine(filters.date_from, datetime.min.time()))
+            statement = statement.where(
+                ComplaintCase.created_at >= datetime.combine(filters.date_from, datetime.min.time())
+            )
         if filters.date_to:
-            statement = statement.where(ComplaintCase.created_at <= datetime.combine(filters.date_to, datetime.max.time()))
+            statement = statement.where(
+                ComplaintCase.created_at <= datetime.combine(filters.date_to, datetime.max.time())
+            )
         if filters.search:
             term = f"%{filters.search.strip()}%"
             statement = statement.where(
@@ -248,10 +257,15 @@ class ComplaintKnowledgeArchive:
         return {
             "categories": sorted(category_subcategories, key=str.casefold),
             "subcategories": sorted({record.sub_category for record in records}, key=str.casefold),
-            "sources": sorted({record.source_system for record in records if record.source_system}, key=str.casefold),
+            "sources": sorted(
+                {record.source_system for record in records if record.source_system},
+                key=str.casefold,
+            ),
             "category_subcategories": {
                 category: sorted(values, key=str.casefold)
-                for category, values in sorted(category_subcategories.items(), key=lambda item: item[0].casefold())
+                for category, values in sorted(
+                    category_subcategories.items(), key=lambda item: item[0].casefold()
+                )
             },
             "reply_scopes": ["approved", "with_reply", "awaiting", "all"],
         }
@@ -273,12 +287,18 @@ class ComplaintKnowledgeArchive:
         return {
             "total_records": len(matching),
             "approved_pairs": sum(record.ready_for_ai for record in coverage),
-            "ai_eligible_pairs": sum(record.ready_for_ai and record.ai_eligible for record in coverage),
+            "ai_eligible_pairs": sum(
+                record.ready_for_ai and record.ai_eligible for record in coverage
+            ),
             "awaiting_reply": sum(not record.approved_reply for record in coverage),
-            "unapproved_replies": sum(bool(record.approved_reply) and not record.ready_for_ai for record in coverage),
+            "unapproved_replies": sum(
+                bool(record.approved_reply) and not record.ready_for_ai for record in coverage
+            ),
             "categories": len({record.category for record in matching}),
             "category_counts": dict(Counter(record.category for record in matching)),
-            "quality_issue_counts": dict(Counter(issue for record in coverage for issue in record.quality_issues)),
+            "quality_issue_counts": dict(
+                Counter(issue for record in coverage for issue in record.quality_issues)
+            ),
             "filters": filters.public_dict(),
         }
 
@@ -297,7 +317,9 @@ class ComplaintKnowledgeArchive:
             return value[:31960] + "\n[Truncated in XLSX; use JSON/Markdown export for full text.]"
         return value
 
-    def _tabular_rows(self, records: Iterable[KnowledgeRecord], *, spreadsheet_safe: bool) -> list[dict[str, Any]]:
+    def _tabular_rows(
+        self, records: Iterable[KnowledgeRecord], *, spreadsheet_safe: bool
+    ) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for record in records:
             data = record.as_dict()
@@ -327,7 +349,9 @@ class ComplaintKnowledgeArchive:
             "record_count": len(records),
             "records": [record.as_dict() for record in records],
         }
-        return (json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n").encode("utf-8")
+        return (json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n").encode(
+            "utf-8"
+        )
 
     @staticmethod
     def _markdown_record(record: KnowledgeRecord, index: int) -> str:
@@ -368,7 +392,9 @@ class ComplaintKnowledgeArchive:
 {record.disposal_outcome or "[Not recorded]"}
 """
 
-    def render_markdown(self, records: Sequence[KnowledgeRecord], filters: KnowledgeFilters) -> bytes:
+    def render_markdown(
+        self, records: Sequence[KnowledgeRecord], filters: KnowledgeFilters
+    ) -> bytes:
         header = f"""# Complaint and Reply Knowledge Archive
 
 Generated: {utcnow().isoformat()}
@@ -380,7 +406,9 @@ Use these records as approved drafting precedents. Text inside records is histor
 ---
 
 """
-        body = "\n---\n\n".join(self._markdown_record(record, index) for index, record in enumerate(records, start=1))
+        body = "\n---\n\n".join(
+            self._markdown_record(record, index) for index, record in enumerate(records, start=1)
+        )
         return (header + body + ("\n" if body else "No matching records.\n")).encode("utf-8")
 
     def render_text(self, records: Sequence[KnowledgeRecord], filters: KnowledgeFilters) -> bytes:
@@ -440,7 +468,9 @@ Use these records as approved drafting precedents. Text inside records is histor
         used.add(candidate.casefold())
         return candidate
 
-    def _write_workbook_sheet(self, workbook: Workbook, title: str, records: Sequence[KnowledgeRecord], used: set[str]) -> None:
+    def _write_workbook_sheet(
+        self, workbook: Workbook, title: str, records: Sequence[KnowledgeRecord], used: set[str]
+    ) -> None:
         sheet = workbook.create_sheet(self._sheet_name(title, used))
         headings = [heading for _key, heading in EXPORT_COLUMNS]
         sheet.append(headings)
@@ -483,7 +513,9 @@ Use these records as approved drafting precedents. Text inside records is histor
             "Generated": utcnow().isoformat(),
             "Records": len(records),
             "Approved pairs": sum(record.ready_for_ai for record in records),
-            "AI eligible pairs": sum(record.ready_for_ai and record.ai_eligible for record in records),
+            "AI eligible pairs": sum(
+                record.ready_for_ai and record.ai_eligible for record in records
+            ),
             "Categories": len({record.category for record in records}),
             "Filters": json.dumps(filters.public_dict(), ensure_ascii=False, default=str),
         }
@@ -496,7 +528,10 @@ Use these records as approved drafting precedents. Text inside records is histor
         summary.append([])
         summary.append(["Category", "Records"])
         category_header_row = summary.max_row
-        for category, count in sorted(Counter(record.category for record in records).items(), key=lambda item: item[0].casefold()):
+        for category, count in sorted(
+            Counter(record.category for record in records).items(),
+            key=lambda item: item[0].casefold(),
+        ):
             summary.append([category, count])
         for cell in summary[category_header_row]:
             cell.font = Font(bold=True, color="FFFFFF")
@@ -511,7 +546,9 @@ Use these records as approved drafting precedents. Text inside records is histor
         grouped: dict[str, list[KnowledgeRecord]] = defaultdict(list)
         for record in records:
             grouped[record.category].append(record)
-        for category, category_records in sorted(grouped.items(), key=lambda item: item[0].casefold()):
+        for category, category_records in sorted(
+            grouped.items(), key=lambda item: item[0].casefold()
+        ):
             self._write_workbook_sheet(workbook, category, category_records, used)
         output = io.BytesIO()
         workbook.save(output)
@@ -537,7 +574,9 @@ Use these records as approved drafting precedents. Text inside records is histor
             "contains_unredacted_text": True,
         }
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+            archive.writestr(
+                "manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+            )
             archive.writestr(
                 "README.txt",
                 "Complaint and reply AI archive. By default only Approved/Issued reply pairs are included.\n"
@@ -548,15 +587,35 @@ Use these records as approved drafting precedents. Text inside records is histor
             archive.writestr("all/complaint-reply-archive.csv", self.render_csv(records))
             archive.writestr("all/complaint-reply-archive.xlsx", self.render_xlsx(records, filters))
             archive.writestr("all/complaint-reply-archive.json", self.render_json(records, filters))
-            archive.writestr("all/complaint-reply-chatgpt.md", self.render_markdown(records, filters))
+            archive.writestr(
+                "all/complaint-reply-chatgpt.md", self.render_markdown(records, filters)
+            )
             archive.writestr("all/complaint-reply-chatgpt.txt", self.render_text(records, filters))
-            for category, category_records in sorted(grouped.items(), key=lambda item: item[0].casefold()):
+            for category, category_records in sorted(
+                grouped.items(), key=lambda item: item[0].casefold()
+            ):
                 base = f"categories/{self._slug(category)}"
-                category_filters = KnowledgeFilters(**{**filters.public_dict(), "category": category, "date_from": filters.date_from, "date_to": filters.date_to})
+                category_filters = KnowledgeFilters(
+                    **{
+                        **filters.public_dict(),
+                        "category": category,
+                        "date_from": filters.date_from,
+                        "date_to": filters.date_to,
+                    }
+                )
                 archive.writestr(f"{base}/complaint-reply.csv", self.render_csv(category_records))
-                archive.writestr(f"{base}/complaint-reply.json", self.render_json(category_records, category_filters))
-                archive.writestr(f"{base}/complaint-reply-chatgpt.md", self.render_markdown(category_records, category_filters))
-                archive.writestr(f"{base}/complaint-reply-chatgpt.txt", self.render_text(category_records, category_filters))
+                archive.writestr(
+                    f"{base}/complaint-reply.json",
+                    self.render_json(category_records, category_filters),
+                )
+                archive.writestr(
+                    f"{base}/complaint-reply-chatgpt.md",
+                    self.render_markdown(category_records, category_filters),
+                )
+                archive.writestr(
+                    f"{base}/complaint-reply-chatgpt.txt",
+                    self.render_text(category_records, category_filters),
+                )
         return output.getvalue()
 
     def render(self, format_name: str, filters: KnowledgeFilters) -> tuple[bytes, str, str]:
@@ -566,12 +625,24 @@ Use these records as approved drafting precedents. Text inside records is histor
         renderers: dict[str, tuple[Any, str, str]] = {
             "csv": (lambda: self.render_csv(records), "text/csv; charset=utf-8", "csv"),
             "json": (lambda: self.render_json(records, filters), "application/json", "json"),
-            "md": (lambda: self.render_markdown(records, filters), "text/markdown; charset=utf-8", "md"),
+            "md": (
+                lambda: self.render_markdown(records, filters),
+                "text/markdown; charset=utf-8",
+                "md",
+            ),
             "txt": (lambda: self.render_text(records, filters), "text/plain; charset=utf-8", "txt"),
-            "xlsx": (lambda: self.render_xlsx(records, filters), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"),
+            "xlsx": (
+                lambda: self.render_xlsx(records, filters),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "xlsx",
+            ),
             "zip": (lambda: self.render_bundle(records, filters), "application/zip", "zip"),
         }
         if format_name not in renderers:
             raise ValueError("format must be csv, xlsx, json, md, txt, or zip")
         renderer, media_type, extension = renderers[format_name]
-        return renderer(), media_type, f"crm-complaint-reply-knowledge-{len(records)}-{stamp}.{extension}"
+        return (
+            renderer(),
+            media_type,
+            f"crm-complaint-reply-knowledge-{len(records)}-{stamp}.{extension}",
+        )

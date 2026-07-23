@@ -12,12 +12,17 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-from sqlalchemy import func, or_
+from sqlalchemy import distinct, func, or_
 from sqlmodel import Session, select
 
 from automation_core.config import Settings
 from automation_core.time import utcnow
 from crm_domain.identifiers import normalize_complaint_number
+from crm_domain.case_scopes import (
+    formal_letter_case_eligibility_clause,
+    is_reply_case_eligible,
+    reply_case_eligibility_clause,
+)
 from crm_domain.models import (
     ComplaintAuditEvent,
     ComplaintCase,
@@ -27,6 +32,8 @@ from crm_domain.models import (
     CrmBulkOperationArtifact,
     CrmBulkOperationBatch,
     CrmBulkOperationItem,
+    CrmDispatchItem,
+    CrmDispatchTarget,
 )
 from crm_domain.official_letters import OfficialLetterError, OfficialLetterService
 
@@ -218,7 +225,9 @@ class CrmBulkOperationService:
             "skipped_items": batch.skipped_items,
             "duplicate_items": batch.duplicate_items,
             "processed_items": processed,
-            "progress_percent": round((processed / batch.total_items) * 100) if batch.total_items else 0,
+            "progress_percent": round((processed / batch.total_items) * 100)
+            if batch.total_items
+            else 0,
             "created_by": batch.created_by,
             "error_summary": batch.error_summary,
             "created_at": batch.created_at,
@@ -248,39 +257,58 @@ class CrmBulkOperationService:
         return batch
 
     def statistics(self) -> dict[str, Any]:
-        published = self.session.scalar(
-            select(func.count()).select_from(ComplaintCase).where(ComplaintCase.state == "published")
-        ) or 0
-        imported = self.session.scalar(
-            select(func.count())
-            .select_from(ComplaintCase)
-            .join(ComplaintReply, ComplaintReply.complaint_case_id == ComplaintCase.id)
-            .where(ComplaintCase.state == "published")
-        ) or 0
-        generated = self.session.scalar(
-            select(func.count())
-            .select_from(ComplaintCase)
-            .join(ComplaintReply, ComplaintReply.complaint_case_id == ComplaintCase.id)
-            .where(
-                ComplaintCase.state == "published",
-                ComplaintReply.generated_at.is_not(None),
+        eligible = (
+            self.session.scalar(
+                select(func.count())
+                .select_from(ComplaintCase)
+                .where(reply_case_eligibility_clause())
             )
-        ) or 0
+            or 0
+        )
+        imported = (
+            self.session.scalar(
+                select(func.count())
+                .select_from(ComplaintCase)
+                .join(ComplaintReply, ComplaintReply.complaint_case_id == ComplaintCase.id)
+                .where(reply_case_eligibility_clause())
+            )
+            or 0
+        )
+        generated = (
+            self.session.scalar(
+                select(func.count())
+                .select_from(ComplaintCase)
+                .join(ComplaintReply, ComplaintReply.complaint_case_id == ComplaintCase.id)
+                .where(
+                    reply_case_eligibility_clause(),
+                    ComplaintReply.generated_at.is_not(None),
+                )
+            )
+            or 0
+        )
         batch_counts = dict(
             self.session.exec(
-                select(CrmBulkOperationBatch.operation_type, func.count())
-                .group_by(CrmBulkOperationBatch.operation_type)
+                select(CrmBulkOperationBatch.operation_type, func.count()).group_by(
+                    CrmBulkOperationBatch.operation_type
+                )
             ).all()
         )
         return {
-            "published_cases": published,
-            "awaiting_reply": max(0, published - imported),
+            "published_cases": self.session.scalar(
+                select(func.count())
+                .select_from(ComplaintCase)
+                .where(ComplaintCase.state == "published")
+            )
+            or 0,
+            "reply_eligible_cases": eligible,
+            "awaiting_reply": max(0, eligible - imported),
             "replies_imported": imported,
             "letters_generated": generated,
             "classification_export_batches": int(batch_counts.get("classification_export", 0)),
             "classification_import_batches": int(batch_counts.get("classification_import", 0)),
             "reply_context_batches": int(batch_counts.get("reply_context_export", 0)),
-            "export_batches": int(batch_counts.get("reply_export", 0)) + int(batch_counts.get("reply_context_export", 0)),
+            "export_batches": int(batch_counts.get("reply_export", 0))
+            + int(batch_counts.get("reply_context_export", 0)),
             "import_batches": int(batch_counts.get("reply_import", 0)),
             "letter_batches": int(batch_counts.get("formal_letters", 0)),
         }
@@ -309,9 +337,12 @@ class CrmBulkOperationService:
                     CrmBulkOperationBatch.created_by.ilike(like),
                 )
             )
-        total = self.session.scalar(
-            select(func.count()).select_from(CrmBulkOperationBatch).where(*filters)
-        ) or 0
+        total = (
+            self.session.scalar(
+                select(func.count()).select_from(CrmBulkOperationBatch).where(*filters)
+            )
+            or 0
+        )
         rows = self.session.exec(
             select(CrmBulkOperationBatch)
             .where(*filters)
@@ -329,7 +360,11 @@ class CrmBulkOperationService:
     def batch_detail(self, batch_id: uuid.UUID) -> dict[str, Any]:
         batch = self._require_batch(batch_id)
         payload = self._batch_payload(batch)
-        parent = self.session.get(CrmBulkOperationBatch, batch.parent_batch_id) if batch.parent_batch_id else None
+        parent = (
+            self.session.get(CrmBulkOperationBatch, batch.parent_batch_id)
+            if batch.parent_batch_id
+            else None
+        )
         children = self.session.exec(
             select(CrmBulkOperationBatch)
             .where(CrmBulkOperationBatch.parent_batch_id == batch.id)
@@ -347,7 +382,66 @@ class CrmBulkOperationService:
                 "artifacts": [self._artifact_payload(item) for item in artifacts],
             }
         )
+        if batch.operation_type == "reply_import":
+            payload["lifecycle_summary"] = self._reply_import_lifecycle(batch.id)
         return payload
+
+    def _reply_import_lifecycle(self, batch_id: uuid.UUID) -> dict[str, int]:
+        imported_statuses = ("imported", "updated", "unchanged")
+        case_ids = select(CrmBulkOperationItem.complaint_case_id).where(
+            CrmBulkOperationItem.batch_id == batch_id,
+            CrmBulkOperationItem.status.in_(imported_statuses),
+            CrmBulkOperationItem.complaint_case_id.is_not(None),
+        )
+        rows = list(
+            self.session.exec(
+                select(ComplaintCase, ComplaintReply)
+                .join(
+                    ComplaintReply,
+                    ComplaintReply.complaint_case_id == ComplaintCase.id,
+                    isouter=True,
+                )
+                .where(ComplaintCase.id.in_(case_ids))
+            ).all()
+        )
+        actionable = issued = 0
+        for case, reply in rows:
+            local_pending = bool(
+                reply
+                and reply.reply_text.strip()
+                and reply.source_kind in {"bulk_import", "manual_editor"}
+                and reply.sync_status in {"not_synced", "pending", "failed", "conflict"}
+            )
+            status = (
+                reply.workspace_status
+                if local_pending and reply is not None
+                else case.frappe_reply_approval_status or "Not Prepared"
+            )
+            if local_pending or status not in {"Approved", "Issued"}:
+                actionable += 1
+            if status == "Issued":
+                issued += 1
+        delivered = int(
+            self.session.scalar(
+                select(func.count(distinct(CrmDispatchItem.complaint_case_id)))
+                .select_from(CrmDispatchItem)
+                .join(
+                    CrmDispatchTarget,
+                    CrmDispatchTarget.dispatch_item_id == CrmDispatchItem.id,
+                )
+                .where(
+                    CrmDispatchItem.complaint_case_id.in_(case_ids),
+                    CrmDispatchTarget.business_status == "delivered",
+                )
+            )
+            or 0
+        )
+        return {
+            "imported": len(rows),
+            "actionable": actionable,
+            "issued": issued,
+            "delivered": delivered,
+        }
 
     def list_items(
         self,
@@ -363,14 +457,25 @@ class CrmBulkOperationService:
         if status:
             filters.append(CrmBulkOperationItem.status == status)
         if search.strip():
-            filters.append(CrmBulkOperationItem.complaint_number_snapshot.ilike(f"%{search.strip()}%"))
-        total = self.session.scalar(
-            select(func.count()).select_from(CrmBulkOperationItem).where(*filters)
-        ) or 0
+            filters.append(
+                CrmBulkOperationItem.complaint_number_snapshot.ilike(f"%{search.strip()}%")
+            )
+        total = (
+            self.session.scalar(
+                select(func.count()).select_from(CrmBulkOperationItem).where(*filters)
+            )
+            or 0
+        )
         rows = self.session.exec(
             select(CrmBulkOperationItem, ComplaintCase, ComplaintReply)
-            .join(ComplaintCase, ComplaintCase.id == CrmBulkOperationItem.complaint_case_id, isouter=True)
-            .join(ComplaintReply, ComplaintReply.complaint_case_id == ComplaintCase.id, isouter=True)
+            .join(
+                ComplaintCase,
+                ComplaintCase.id == CrmBulkOperationItem.complaint_case_id,
+                isouter=True,
+            )
+            .join(
+                ComplaintReply, ComplaintReply.complaint_case_id == ComplaintCase.id, isouter=True
+            )
             .where(*filters)
             .order_by(CrmBulkOperationItem.source_row, CrmBulkOperationItem.created_at)
             .offset((page - 1) * page_size)
@@ -417,7 +522,9 @@ class CrmBulkOperationService:
         try:
             path.relative_to(self.root)
         except ValueError as exc:
-            raise BulkOperationError("Artifact path is outside the CRM bulk-operation store") from exc
+            raise BulkOperationError(
+                "Artifact path is outside the CRM bulk-operation store"
+            ) from exc
         if not path.is_file():
             raise BulkOperationNotFound("Batch artifact file is unavailable")
         if artifact.sha256 and _sha256_bytes(path.read_bytes()) != artifact.sha256:
@@ -435,8 +542,10 @@ class CrmBulkOperationService:
             raise BulkOperationValidationError("Export scope must be awaiting, all or selected")
         statement = (
             select(ComplaintCase, ComplaintReply)
-            .join(ComplaintReply, ComplaintReply.complaint_case_id == ComplaintCase.id, isouter=True)
-            .where(ComplaintCase.state == "published")
+            .join(
+                ComplaintReply, ComplaintReply.complaint_case_id == ComplaintCase.id, isouter=True
+            )
+            .where(reply_case_eligibility_clause())
             .order_by(ComplaintCase.complaint_number)
         )
         if scope == "awaiting":
@@ -444,7 +553,9 @@ class CrmBulkOperationService:
         elif scope == "selected":
             unique_ids = list(dict.fromkeys(case_ids or []))
             if not unique_ids:
-                raise BulkOperationValidationError("Select at least one complaint for the export batch")
+                raise BulkOperationValidationError(
+                    "Select at least one complaint for the export batch"
+                )
             statement = statement.where(ComplaintCase.id.in_(unique_ids))
         rows = list(self.session.exec(statement).all())
         if not rows:
@@ -466,7 +577,9 @@ class CrmBulkOperationService:
             number = case.complaint_number or str(case.id)
             complaint_rows.append([number, case.remarks or ""])
             template_rows.append([number, ""])
-            manifest_rows.append([number, str(case.id), case.canonical_paperless_document_id or "", bool(reply)])
+            manifest_rows.append(
+                [number, str(case.id), case.canonical_paperless_document_id or "", bool(reply)]
+            )
             self.session.add(
                 CrmBulkOperationItem(
                     batch_id=batch.id,
@@ -538,8 +651,13 @@ class CrmBulkOperationService:
         expected: dict[str, CrmBulkOperationItem] = {}
         if parent_batch_id:
             parent = self._require_batch(parent_batch_id)
-            if parent.operation_type not in {"reply_export", "reply_context_export"} or parent.status != "completed":
-                raise BulkOperationValidationError("The related reply export batch must be completed")
+            if (
+                parent.operation_type not in {"reply_export", "reply_context_export"}
+                or parent.status != "completed"
+            ):
+                raise BulkOperationValidationError(
+                    "The related reply export batch must be completed"
+                )
             expected = {
                 item.complaint_number_snapshot: item
                 for item in self.session.exec(
@@ -599,7 +717,12 @@ class CrmBulkOperationService:
             assert reader is not None and number_header and reply_header
             for row_number, row in enumerate(reader, start=2):
                 raw_number = str(row.get(number_header) or "").strip()
-                reply_text = str(row.get(reply_header) or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+                reply_text = (
+                    str(row.get(reply_header) or "")
+                    .replace("\r\n", "\n")
+                    .replace("\r", "\n")
+                    .strip()
+                )
                 if not raw_number and not reply_text:
                     continue
                 number = normalize_complaint_number(raw_number)
@@ -609,12 +732,24 @@ class CrmBulkOperationService:
                 existing: ComplaintReply | None = None
                 action = "import"
                 if not number:
-                    status, error_code, error_message = "invalid", "invalid_complaint_number", "Invalid complaint number"
+                    status, error_code, error_message = (
+                        "invalid",
+                        "invalid_complaint_number",
+                        "Invalid complaint number",
+                    )
                 elif number in seen:
-                    status, error_code, error_message = "invalid", "duplicate_complaint_number", f"Duplicate complaint number {number}"
+                    status, error_code, error_message = (
+                        "invalid",
+                        "duplicate_complaint_number",
+                        f"Duplicate complaint number {number}",
+                    )
                     batch.duplicate_items += 1
                 elif not reply_text:
-                    status, error_code, error_message = "invalid", "empty_reply", f"Reply is empty for {number}"
+                    status, error_code, error_message = (
+                        "invalid",
+                        "empty_reply",
+                        f"Reply is empty for {number}",
+                    )
                 else:
                     seen.add(number)
                     received.add(number)
@@ -622,15 +757,32 @@ class CrmBulkOperationService:
                         select(ComplaintCase).where(ComplaintCase.complaint_number == number)
                     ).first()
                     if case is None:
-                        status, error_code, error_message = "invalid", "complaint_not_found", f"Complaint {number} was not found"
-                    elif case.state != "published":
-                        status, error_code, error_message = "invalid", "complaint_not_published", f"Complaint {number} is not published"
-                    elif parent and number not in expected:
-                        status, error_code, error_message = "invalid", "not_in_export_batch", f"Complaint {number} was not in {parent.batch_number}"
+                        status, error_code, error_message = (
+                            "invalid",
+                            "complaint_not_found",
+                            f"Complaint {number} was not found",
+                        )
                     else:
                         existing = self.session.exec(
-                            select(ComplaintReply).where(ComplaintReply.complaint_case_id == case.id)
+                            select(ComplaintReply).where(
+                                ComplaintReply.complaint_case_id == case.id
+                            )
                         ).first()
+                    if case is not None and not is_reply_case_eligible(
+                        case, has_local_reply=existing is not None
+                    ):
+                        status, error_code, error_message = (
+                            "invalid",
+                            "complaint_not_reply_eligible",
+                            f"Complaint {number} is not active in the reply workspace",
+                        )
+                    elif case is not None and parent and number not in expected:
+                        status, error_code, error_message = (
+                            "invalid",
+                            "not_in_export_batch",
+                            f"Complaint {number} was not in {parent.batch_number}",
+                        )
+                    elif case is not None:
                         if existing and existing.reply_text.strip() == reply_text:
                             action = "unchanged"
                         elif existing:
@@ -642,9 +794,7 @@ class CrmBulkOperationService:
                         ):
                             status = "invalid"
                             error_code = "approved_reply_conflict"
-                            error_message = (
-                                f"Complaint {number} has an approved or issued reply; revise it in the Reply Editor"
-                            )
+                            error_message = f"Complaint {number} has an approved or issued reply; revise it in the Reply Editor"
                 item = CrmBulkOperationItem(
                     batch_id=batch.id,
                     complaint_case_id=case.id if case else None,
@@ -655,12 +805,18 @@ class CrmBulkOperationService:
                     error_message=error_message,
                     reply_version_before=existing.version if existing else None,
                     reply_content_hash=_reply_hash(reply_text) if reply_text else None,
-                    details_json={"reply_text": reply_text, "action": action, "raw_number": raw_number},
+                    details_json={
+                        "reply_text": reply_text,
+                        "action": action,
+                        "raw_number": raw_number,
+                    },
                 )
                 self.session.add(item)
                 counts[status] += 1
                 if error_message:
-                    invalid_rows.append([row_number, number or raw_number, error_code, error_message])
+                    invalid_rows.append(
+                        [row_number, number or raw_number, error_code, error_message]
+                    )
 
             if parent:
                 for number, export_item in expected.items():
@@ -689,7 +845,9 @@ class CrmBulkOperationService:
             elif batch.valid_items:
                 batch.status = "ready"
                 if batch.failed_items:
-                    batch.error_summary = f"{batch.failed_items} row(s) require correction before a strict import."
+                    batch.error_summary = (
+                        f"{batch.failed_items} row(s) require correction before a strict import."
+                    )
             else:
                 batch.status = "failed"
                 batch.error_summary = "No valid reply rows were found."
@@ -853,7 +1011,14 @@ class CrmBulkOperationService:
                 name=f"{batch.batch_number}-import-manifest.csv",
                 content_type="text/csv; charset=utf-8",
                 content=_csv_bytes(
-                    ["Source Row", "Complaint Number", "Result", "Version Before", "Version After", "Reply SHA-256"],
+                    [
+                        "Source Row",
+                        "Complaint Number",
+                        "Result",
+                        "Version Before",
+                        "Version After",
+                        "Reply SHA-256",
+                    ],
                     manifest_rows,
                 ),
             )
@@ -899,7 +1064,9 @@ class CrmBulkOperationService:
         if parent_batch_id:
             parent = self._require_batch(parent_batch_id)
             if parent.operation_type not in {"reply_import", "formal_letters"}:
-                raise BulkOperationValidationError("Letters must originate from an import or retry batch")
+                raise BulkOperationValidationError(
+                    "Letters must originate from an import or retry batch"
+                )
             if parent.status not in {"completed", "completed_with_errors"}:
                 raise BulkOperationValidationError("The source batch must be completed")
             selected_ids = [
@@ -908,7 +1075,9 @@ class CrmBulkOperationService:
                     select(CrmBulkOperationItem).where(
                         CrmBulkOperationItem.batch_id == parent.id,
                         CrmBulkOperationItem.complaint_case_id.is_not(None),
-                        CrmBulkOperationItem.status.in_(("imported", "updated", "unchanged", "failed")),
+                        CrmBulkOperationItem.status.in_(
+                            ("imported", "updated", "unchanged", "failed")
+                        ),
                     )
                 ).all()
                 if item.complaint_case_id is not None
@@ -917,7 +1086,9 @@ class CrmBulkOperationService:
         elif scope == "selected":
             selected_ids = list(dict.fromkeys(case_ids or []))
             if not selected_ids:
-                raise BulkOperationValidationError("Select at least one complaint for the letter batch")
+                raise BulkOperationValidationError(
+                    "Select at least one complaint for the letter batch"
+                )
 
         statement = (
             select(ComplaintCase, ComplaintReplyRevision)
@@ -926,7 +1097,7 @@ class CrmBulkOperationService:
                 ComplaintReplyRevision.complaint_case_id == ComplaintCase.id,
             )
             .where(
-                ComplaintCase.state == "published",
+                formal_letter_case_eligibility_clause(),
                 ComplaintReplyRevision.is_current == True,  # noqa: E712
                 ComplaintReplyRevision.approval_status.in_(("Approved", "Issued")),
             )
@@ -975,11 +1146,21 @@ class CrmBulkOperationService:
         output = io.BytesIO()
         manifest = io.StringIO(newline="")
         writer = csv.writer(manifest)
-        writer.writerow([
-            "Complaint Number", "Case ID", "Reply Revision ID", "Approval Status",
-            "Official Letter ID", "Letter Number", "Letter Date", "ODT File", "ODT SHA-256",
-            "PDF File", "PDF SHA-256",
-        ])
+        writer.writerow(
+            [
+                "Complaint Number",
+                "Case ID",
+                "Reply Revision ID",
+                "Approval Status",
+                "Official Letter ID",
+                "Letter Number",
+                "Letter Date",
+                "ODT File",
+                "ODT SHA-256",
+                "PDF File",
+                "PDF SHA-256",
+            ]
+        )
         success = failed = 0
         shared_letter_number = str(defaults["current_letter_number"]).strip()
         shared_letter_date = date.fromisoformat(str(defaults["current_letter_date"]))
@@ -1042,11 +1223,21 @@ class CrmBulkOperationService:
                         current_reply.generated_at = now
                         current_reply.updated_at = now
                         self.session.add(current_reply)
-                    writer.writerow([
-                        number, str(case.id), str(revision.id), revision.approval_status,
-                        result["id"], result["letter_number"], result["letter_date"],
-                        odt_relative, odt_record.sha256, pdf_relative, pdf_record.sha256,
-                    ])
+                    writer.writerow(
+                        [
+                            number,
+                            str(case.id),
+                            str(revision.id),
+                            revision.approval_status,
+                            result["id"],
+                            result["letter_number"],
+                            result["letter_date"],
+                            odt_relative,
+                            odt_record.sha256,
+                            pdf_relative,
+                            pdf_record.sha256,
+                        ]
+                    )
                     success += 1
                 except (OfficialLetterError, KeyError, ValueError) as exc:
                     item.status = "failed"
@@ -1058,17 +1249,20 @@ class CrmBulkOperationService:
             archive.writestr("manifest.csv", "\ufeff" + manifest.getvalue())
             archive.writestr(
                 "batch-summary.json",
-                json.dumps({
-                    "batch_number": batch.batch_number,
-                    "batch_id": str(batch.id),
-                    "source_batch_id": str(parent_batch_id) if parent_batch_id else None,
-                    "generated": success,
-                    "failed": failed,
-                    "approved_revisions_only": True,
-                    "shared_letter_number": shared_letter_number,
-                    "shared_letter_date": shared_letter_date.isoformat(),
-                    "created_at": now.isoformat(),
-                }, indent=2),
+                json.dumps(
+                    {
+                        "batch_number": batch.batch_number,
+                        "batch_id": str(batch.id),
+                        "source_batch_id": str(parent_batch_id) if parent_batch_id else None,
+                        "generated": success,
+                        "failed": failed,
+                        "approved_revisions_only": True,
+                        "shared_letter_number": shared_letter_number,
+                        "shared_letter_date": shared_letter_date.isoformat(),
+                        "created_at": now.isoformat(),
+                    },
+                    indent=2,
+                ),
             )
             archive.writestr(
                 "README.txt",
@@ -1086,7 +1280,9 @@ class CrmBulkOperationService:
         batch.valid_items = len(rows)
         batch.successful_items = success
         batch.failed_items = failed
-        batch.status = "completed_with_errors" if failed and success else "failed" if failed else "completed"
+        batch.status = (
+            "completed_with_errors" if failed and success else "failed" if failed else "completed"
+        )
         batch.error_summary = f"{failed} official letter(s) failed to generate." if failed else None
         batch.completed_at = now
         batch.updated_at = now
@@ -1121,7 +1317,9 @@ class CrmBulkOperationService:
     def cancel_batch(self, batch_id: uuid.UUID, *, actor: str = "web-operator") -> dict[str, Any]:
         batch = self._require_batch(batch_id)
         if batch.status not in {"draft", "validating", "ready"}:
-            raise BulkOperationValidationError("Only a draft, validating or ready batch can be cancelled")
+            raise BulkOperationValidationError(
+                "Only a draft, validating or ready batch can be cancelled"
+            )
         batch.status = "cancelled"
         batch.completed_at = utcnow()
         batch.updated_at = batch.completed_at

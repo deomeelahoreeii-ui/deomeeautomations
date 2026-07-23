@@ -124,6 +124,13 @@ export const server = {
         body: JSON.stringify({ apply, module_key: moduleKey || null, limit }),
       }),
     }),
+    evictAntidengueCache: defineAction({
+      input: z.object({ apply: z.boolean().default(false), olderThanHours: z.number().int().min(0).max(8760).optional(), limit: z.number().int().min(1).max(20000).default(5000) }),
+      handler: ({ apply, olderThanHours, limit }) => api("/api/v1/antidengue/storage/retention", {
+        method: "POST",
+        body: JSON.stringify({ apply, older_than_hours: olderThanHours ?? null, limit }),
+      }),
+    }),
   },
   antidengue: {
     simpleActivityRules: defineAction({ handler: () => api("/api/v1/antidengue/simple-activity-rules") }),

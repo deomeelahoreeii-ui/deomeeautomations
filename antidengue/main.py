@@ -53,9 +53,19 @@ def _configure_cli_logging() -> None:
     )
 
 
-OUTPUT_DIR = BASE_DIR / "output-files"
-ARCHIVE_DIR = BASE_DIR / "archived-files"
-UNMAPPED_REPORT_DIR = BASE_DIR / "unmapped-officer-reports"
+WORK_ROOT = _resolve_project_path(os.getenv("ANTIDENGUE_WORK_ROOT", str(BASE_DIR)))
+OUTPUT_DIR = _resolve_project_path(
+    os.getenv("ANTIDENGUE_OUTPUT_DIR", str(WORK_ROOT / "output-files"))
+)
+ARCHIVE_DIR = _resolve_project_path(
+    os.getenv("ANTIDENGUE_ARCHIVE_DIR", str(WORK_ROOT / "archived-files"))
+)
+UNMAPPED_REPORT_DIR = _resolve_project_path(
+    os.getenv(
+        "ANTIDENGUE_UNMAPPED_REPORT_DIR",
+        str(WORK_ROOT / "unmapped-officer-reports"),
+    )
+)
 MANUAL_UNFILTERED_DIR = BASE_DIR / "drop-manually-unfilterd-files"
 MANUAL_UNFILTERED_DIR_ALIASES = [
     MANUAL_UNFILTERED_DIR,

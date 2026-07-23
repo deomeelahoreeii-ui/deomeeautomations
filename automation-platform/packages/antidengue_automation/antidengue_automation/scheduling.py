@@ -1167,6 +1167,14 @@ def recover_orphaned_executions(session: Session) -> dict[str, int]:
                 if outbox is not None:
                     session.commit()
                     stats["requeued"] += 1
+            elif job and job.status not in {
+                JobStatus.queued.value,
+                JobStatus.running.value,
+            }:
+                # Project a terminal stage job into the execution immediately;
+                # otherwise a restart can leave the UI active forever even
+                # though the durable job was already recovered as failed.
+                advance_execution(session, execution)
     return stats
 
 def combined_execution_logs(session: Session, execution: AntiDengueScheduleExecution, limit: int = 1000) -> list[dict]:

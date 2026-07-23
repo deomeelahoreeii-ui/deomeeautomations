@@ -40,10 +40,15 @@ class FakeClient:
             "custom_ai_eligible": 0,
         }
         self.fail_update = False
+        self.fail_get = False
+        self.get_calls = 0
 
     def get_resource(self, doctype: str, name: str) -> dict[str, Any]:
         assert doctype == "HD Ticket"
         assert name == "0900"
+        self.get_calls += 1
+        if self.fail_get:
+            raise FrappeHelpdeskError("Helpdesk read unavailable", status_code=503)
         return deepcopy(self.ticket)
 
     def update_resource(self, doctype: str, name: str, values: dict[str, Any]) -> dict[str, Any]:
@@ -195,6 +200,28 @@ def test_different_remote_text_is_reported_as_conflict_without_overwriting_local
         assert editor["reply"]["remote_final_reply"] == "Different Helpdesk draft."
         persisted = session.exec(select(ComplaintReply)).one()
         assert persisted.reply_text == "Imported reply ready for human review."
+
+
+def test_editor_local_critical_path_never_waits_for_helpdesk(tmp_path: Path) -> None:
+    db = engine()
+    client = FakeClient()
+    client.fail_get = True
+    with Session(db) as session:
+        case = seed(session)
+        import_reply(session, settings(tmp_path), case)
+        local = ComplaintReplyWorkspaceService(session, settings(tmp_path), client).editor(
+            case.id, refresh_remote=False
+        )
+        assert client.get_calls == 0
+        assert local["reply"]["final_reply"] == "Imported reply ready for human review."
+        assert local["live_helpdesk"] is False
+
+        refreshed = ComplaintReplyWorkspaceService(session, settings(tmp_path), client).editor(
+            case.id, refresh_remote=True
+        )
+        assert client.get_calls == 1
+        assert refreshed["reply"]["final_reply"] == local["reply"]["final_reply"]
+        assert "Helpdesk read unavailable" in refreshed["live_helpdesk_error"]
 
 
 def test_ui_and_migration_expose_import_to_editor_contract() -> None:

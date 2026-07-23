@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from automation_core.config import Settings
@@ -31,7 +32,9 @@ from crm_domain.models import (
     CrmOfficialLetter,
     CrmOfficialLetterArtifact,
     CrmPaperlessStatusSync,
+    CrmUpwardSubmissionClaim,
 )
+from crm_domain.case_scopes import downward_dispatch_case_eligibility_clause
 from crm_domain.official_letters import OfficialLetterService
 from whatsapp_gateway.configuration.defaults import ensure_defaults
 from whatsapp_gateway.models import (
@@ -87,6 +90,28 @@ class CrmDispatchValidationError(CrmDispatchError):
     pass
 
 
+class CrmDispatchConflict(CrmDispatchValidationError):
+    def __init__(self, message: str, *, batch: CrmDispatchBatch):
+        super().__init__(message)
+        self.detail = {
+            "message": message,
+            "existing_batch_id": str(batch.id),
+            "existing_batch_number": batch.batch_number,
+            "existing_batch_url": f"/crm/dispatch/batches/{batch.id}/",
+        }
+
+
+ATTEMPTED_UPWARD_TARGET_STATUSES = frozenset(
+    {"queued", "sent_pending_confirmation", "delivered", "failed", "timed_out"}
+)
+
+
+def _actively_claimed_official_letter_ids():
+    return select(CrmUpwardSubmissionClaim.official_letter_id).where(
+        CrmUpwardSubmissionClaim.released_at.is_(None)
+    )
+
+
 def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.casefold()).strip("_")[:90] or "crm_route"
 
@@ -133,7 +158,12 @@ def _target_identity(
     if target is None:
         return "contact", "Deleted contact", "", False
     jid = target.phone_jid or target.primary_lid_jid or ""
-    return "contact", target.display_name or jid or "Unnamed contact", jid, bool(target.active and jid)
+    return (
+        "contact",
+        target.display_name or jid or "Unnamed contact",
+        jid,
+        bool(target.active and jid),
+    )
 
 
 class CrmDispatchService:
@@ -146,10 +176,10 @@ class CrmDispatchService:
     ):
         self.session = session
         self.settings = settings or Settings()
-        self.paperless_client_factory = (
-            paperless_client_factory or self._default_paperless_client
+        self.paperless_client_factory = paperless_client_factory or self._default_paperless_client
+        self.packet_root = (
+            self.settings.artifact_root.expanduser().resolve() / "crm-dispatch-packets"
         )
-        self.packet_root = self.settings.artifact_root.expanduser().resolve() / "crm-dispatch-packets"
         self.packet_root.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
@@ -256,7 +286,12 @@ class CrmDispatchService:
             filters.append(WhatsAppDispatchProfile.enabled.is_(True))
         if search.strip():
             pattern = f"%{search.strip()}%"
-            filters.append(or_(WhatsAppDispatchProfile.name.ilike(pattern), WhatsAppDispatchProfile.key.ilike(pattern)))
+            filters.append(
+                or_(
+                    WhatsAppDispatchProfile.name.ilike(pattern),
+                    WhatsAppDispatchProfile.key.ilike(pattern),
+                )
+            )
         records = self.session.scalars(
             select(WhatsAppDispatchProfile)
             .where(*filters)
@@ -266,25 +301,31 @@ class CrmDispatchService:
 
     def _profile_dict(self, profile: WhatsAppDispatchProfile) -> dict[str, Any]:
         audience = self.session.get(WhatsAppAudience, profile.audience_id)
-        template = self.session.get(WhatsAppTemplate, profile.template_id) if profile.template_id else None
+        template = (
+            self.session.get(WhatsAppTemplate, profile.template_id) if profile.template_id else None
+        )
         account = self.session.get(WhatsAppAccount, profile.account_id)
-        members = list(self.session.scalars(
-            select(WhatsAppAudienceMember)
-            .where(WhatsAppAudienceMember.audience_id == profile.audience_id)
-            .order_by(WhatsAppAudienceMember.created_at)
-        ).all())
+        members = list(
+            self.session.scalars(
+                select(WhatsAppAudienceMember)
+                .where(WhatsAppAudienceMember.audience_id == profile.audience_id)
+                .order_by(WhatsAppAudienceMember.created_at)
+            ).all()
+        )
         targets = []
         for member in members:
             target_type, name, jid, available = _target_identity(self.session, member)
-            targets.append({
-                "member_id": str(member.id),
-                "target_type": target_type,
-                "target_id": str(member.directory_group_id or member.directory_contact_id),
-                "name": name,
-                "jid": jid,
-                "available": available,
-                "enabled": member.enabled,
-            })
+            targets.append(
+                {
+                    "member_id": str(member.id),
+                    "target_type": target_type,
+                    "target_id": str(member.directory_group_id or member.directory_contact_id),
+                    "name": name,
+                    "jid": jid,
+                    "available": available,
+                    "enabled": member.enabled,
+                }
+            )
         policy = dict(profile.presentation_policy or {})
         return {
             "id": str(profile.id),
@@ -336,14 +377,31 @@ class CrmDispatchService:
         if target_type not in {"contact", "group"}:
             raise CrmDispatchValidationError("Destination type must be contact or group")
         if not target_ids:
-            raise CrmDispatchValidationError("Select at least one synchronized WhatsApp destination")
+            raise CrmDispatchValidationError(
+                "Select at least one synchronized WhatsApp destination"
+            )
         if packet_policy != "complete_pdf":
-            raise CrmDispatchValidationError("CRM complaint dispatch requires the complete complaint PDF")
+            raise CrmDispatchValidationError(
+                "CRM complaint dispatch requires the complete complaint PDF"
+            )
         if privacy_policy not in {"full", "restricted"}:
             raise CrmDispatchValidationError("Unsupported privacy policy")
         if office_level not in {"lower_office", "higher_office", "both"}:
-            raise CrmDispatchValidationError("Office level must be lower office, higher office or both")
-        directions = sorted(set(allowed_directions or (["downward"] if office_level == "lower_office" else ["upward"] if office_level == "higher_office" else ["downward", "upward"])))
+            raise CrmDispatchValidationError(
+                "Office level must be lower office, higher office or both"
+            )
+        directions = sorted(
+            set(
+                allowed_directions
+                or (
+                    ["downward"]
+                    if office_level == "lower_office"
+                    else ["upward"]
+                    if office_level == "higher_office"
+                    else ["downward", "upward"]
+                )
+            )
+        )
         if not directions or any(value not in {"downward", "upward"} for value in directions):
             raise CrmDispatchValidationError("Choose at least one supported dispatch direction")
         profile = self.session.get(WhatsAppDispatchProfile, profile_id) if profile_id else None
@@ -354,10 +412,12 @@ class CrmDispatchService:
             base = _slug(name)
             key = base
             suffix = 2
-            while self.session.scalar(select(WhatsAppDispatchProfile.id).where(
-                WhatsAppDispatchProfile.application_id == defaults["application"].id,
-                WhatsAppDispatchProfile.key == key,
-            )):
+            while self.session.scalar(
+                select(WhatsAppDispatchProfile.id).where(
+                    WhatsAppDispatchProfile.application_id == defaults["application"].id,
+                    WhatsAppDispatchProfile.key == key,
+                )
+            ):
                 key = f"{base[:84]}_{suffix}"
                 suffix += 1
             audience = WhatsAppAudience(
@@ -371,7 +431,9 @@ class CrmDispatchService:
             template = WhatsAppTemplate(
                 application_id=defaults["application"].id,
                 report_type_id=defaults["report_type"].id,
-                recipient_scope_id=defaults["scopes"]["individual" if target_type == "contact" else "group"].id,
+                recipient_scope_id=defaults["scopes"][
+                    "individual" if target_type == "contact" else "group"
+                ].id,
                 recipient_channel="individual" if target_type == "contact" else "group",
                 key=f"{key}_message",
                 name=f"{name} message",
@@ -388,7 +450,9 @@ class CrmDispatchService:
                 audience_id=audience.id,
                 account_id=defaults["account"].id,
                 template_id=template.id,
-                recipient_scope_id=defaults["scopes"]["individual" if target_type == "contact" else "group"].id,
+                recipient_scope_id=defaults["scopes"][
+                    "individual" if target_type == "contact" else "group"
+                ].id,
                 recipient_channel="individual" if target_type == "contact" else "group",
                 delivery_mode="individuals" if target_type == "contact" else "groups",
                 delivery_granularity="recipient",
@@ -398,9 +462,15 @@ class CrmDispatchService:
             )
         else:
             audience = self.session.get(WhatsAppAudience, profile.audience_id)
-            template = self.session.get(WhatsAppTemplate, profile.template_id) if profile.template_id else None
+            template = (
+                self.session.get(WhatsAppTemplate, profile.template_id)
+                if profile.template_id
+                else None
+            )
             if audience is None or template is None:
-                raise CrmDispatchValidationError("Destination profile is missing its owned audience or template")
+                raise CrmDispatchValidationError(
+                    "Destination profile is missing its owned audience or template"
+                )
             profile.version += 1
             profile.recipient_channel = "individual" if target_type == "contact" else "group"
             profile.delivery_mode = "individuals" if target_type == "contact" else "groups"
@@ -410,9 +480,13 @@ class CrmDispatchService:
             template.body = template_body.strip() or DEFAULT_MESSAGE
             template.updated_at = utcnow()
             self.session.add(template)
-            existing = list(self.session.scalars(
-                select(WhatsAppAudienceMember).where(WhatsAppAudienceMember.audience_id == audience.id)
-            ).all())
+            existing = list(
+                self.session.scalars(
+                    select(WhatsAppAudienceMember).where(
+                        WhatsAppAudienceMember.audience_id == audience.id
+                    )
+                ).all()
+            )
             for member in existing:
                 self.session.delete(member)
         profile.name = name.strip()
@@ -438,7 +512,9 @@ class CrmDispatchService:
             if target_type == "group":
                 target = self.session.get(WhatsAppDirectoryGroup, target_id)
                 if target is None or target.account_id != account_id or not target.available:
-                    raise CrmDispatchValidationError("Select only available groups from the synchronized directory")
+                    raise CrmDispatchValidationError(
+                        "Select only available groups from the synchronized directory"
+                    )
                 member = WhatsAppAudienceMember(
                     audience_id=profile.audience_id,
                     target_type="group",
@@ -451,9 +527,13 @@ class CrmDispatchService:
             else:
                 target = self.session.get(WhatsAppDirectoryContact, target_id)
                 if target is None or target.account_id != account_id or not target.active:
-                    raise CrmDispatchValidationError("Select only active contacts from the synchronized directory")
+                    raise CrmDispatchValidationError(
+                        "Select only active contacts from the synchronized directory"
+                    )
                 if not (target.phone_jid or target.primary_lid_jid):
-                    raise CrmDispatchValidationError(f"{target.display_name or 'Contact'} has no usable WhatsApp identity")
+                    raise CrmDispatchValidationError(
+                        f"{target.display_name or 'Contact'} has no usable WhatsApp identity"
+                    )
                 member = WhatsAppAudienceMember(
                     audience_id=profile.audience_id,
                     target_type="contact",
@@ -493,9 +573,15 @@ class CrmDispatchService:
         for value in rule.dispatch_profile_ids_json or []:
             try:
                 profile = self.session.get(WhatsAppDispatchProfile, uuid.UUID(value))
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 profile = None
-            profiles.append({"id": value, "name": profile.name if profile else "Missing profile", "enabled": bool(profile and profile.enabled)})
+            profiles.append(
+                {
+                    "id": value,
+                    "name": profile.name if profile else "Missing profile",
+                    "enabled": bool(profile and profile.enabled),
+                }
+            )
         return {
             "id": str(rule.id),
             "name": rule.name,
@@ -532,12 +618,18 @@ class CrmDispatchService:
         valid_profiles = {item["id"] for item in self.profiles(include_inactive=False)}
         missing = [str(value) for value in profile_ids if str(value) not in valid_profiles]
         if missing:
-            raise CrmDispatchValidationError("Routing rule contains missing or inactive destination profiles")
+            raise CrmDispatchValidationError(
+                "Routing rule contains missing or inactive destination profiles"
+            )
         rule = self.session.get(CrmDispatchRule, rule_id) if rule_id else None
         if rule_id and rule is None:
             raise CrmDispatchNotFound("Routing rule not found")
         if rule is None:
-            duplicate = self.session.scalar(select(CrmDispatchRule.id).where(func.lower(CrmDispatchRule.name) == name.strip().casefold()))
+            duplicate = self.session.scalar(
+                select(CrmDispatchRule.id).where(
+                    func.lower(CrmDispatchRule.name) == name.strip().casefold()
+                )
+            )
             if duplicate:
                 raise CrmDispatchValidationError("A routing rule with this name already exists")
             rule = CrmDispatchRule(name=name.strip(), created_by=actor)
@@ -559,9 +651,18 @@ class CrmDispatchService:
 
     def _normalize_conditions(self, value: dict[str, Any]) -> dict[str, Any]:
         allowed = {
-            "categories", "subcategories", "tags_any", "tags_all", "exclude_tags",
-            "tehsils", "districts", "sources", "institution_types", "confidentiality",
-            "directions", "purposes",
+            "categories",
+            "subcategories",
+            "tags_any",
+            "tags_all",
+            "exclude_tags",
+            "tehsils",
+            "districts",
+            "sources",
+            "institution_types",
+            "confidentiality",
+            "directions",
+            "purposes",
         }
         result: dict[str, Any] = {}
         for key in allowed:
@@ -571,7 +672,9 @@ class CrmDispatchService:
             if key == "confidentiality":
                 result[key] = bool(raw)
             else:
-                result[key] = sorted({str(item).strip().casefold() for item in list(raw) if str(item).strip()})
+                result[key] = sorted(
+                    {str(item).strip().casefold() for item in list(raw) if str(item).strip()}
+                )
         return result
 
     def delete_rule(self, rule_id: uuid.UUID) -> None:
@@ -584,12 +687,19 @@ class CrmDispatchService:
         self.session.add(rule)
         self.session.commit()
 
-    def _case_context(self, case: ComplaintCase, *, direction: str = "downward", purpose: str = "") -> dict[str, Any]:
-        tags = list(self.session.execute(
-            select(CrmComplaintTag.name, CrmComplaintTag.group_name)
-            .join(CrmComplaintTagLink, CrmComplaintTagLink.tag_id == CrmComplaintTag.id)
-            .where(CrmComplaintTagLink.complaint_case_id == case.id, CrmComplaintTag.active.is_(True))
-        ).all())
+    def _case_context(
+        self, case: ComplaintCase, *, direction: str = "downward", purpose: str = ""
+    ) -> dict[str, Any]:
+        tags = list(
+            self.session.execute(
+                select(CrmComplaintTag.name, CrmComplaintTag.group_name)
+                .join(CrmComplaintTagLink, CrmComplaintTagLink.tag_id == CrmComplaintTag.id)
+                .where(
+                    CrmComplaintTagLink.complaint_case_id == case.id,
+                    CrmComplaintTag.active.is_(True),
+                )
+            ).all()
+        )
         tag_names = {str(name).casefold() for name, _group in tags}
         groups: dict[str, set[str]] = {}
         for name, group in tags:
@@ -627,7 +737,9 @@ class CrmDispatchService:
             return False
         if c.get("exclude_tags") and tags.intersection(c["exclude_tags"]):
             return False
-        if c.get("institution_types") and not set(c["institution_types"]).intersection(context["tag_groups"].get("institution", set())):
+        if c.get("institution_types") and not set(c["institution_types"]).intersection(
+            context["tag_groups"].get("institution", set())
+        ):
             return False
         if c.get("confidentiality") is True and not context["confidentiality"]:
             return False
@@ -637,28 +749,46 @@ class CrmDispatchService:
             return False
         return True
 
-    def test_routing(self, case_id: uuid.UUID, *, direction: str = "downward", purpose: str = "compliance_request") -> dict[str, Any]:
+    def test_routing(
+        self,
+        case_id: uuid.UUID,
+        *,
+        direction: str = "downward",
+        purpose: str = "compliance_request",
+    ) -> dict[str, Any]:
         case = self.session.get(ComplaintCase, case_id)
         if case is None:
             raise CrmDispatchNotFound("Complaint not found")
         if direction not in {"downward", "upward"}:
             raise CrmDispatchValidationError("Dispatch direction must be downward or upward")
         context = self._case_context(case, direction=direction, purpose=purpose)
-        matches = [rule for rule in self.session.scalars(
-            select(CrmDispatchRule).where(CrmDispatchRule.enabled.is_(True)).order_by(CrmDispatchRule.priority.desc())
-        ).all() if self._rule_matches(rule, context)]
+        matches = [
+            rule
+            for rule in self.session.scalars(
+                select(CrmDispatchRule)
+                .where(CrmDispatchRule.enabled.is_(True))
+                .order_by(CrmDispatchRule.priority.desc())
+            ).all()
+            if self._rule_matches(rule, context)
+        ]
         resolution = self._resolve_rule_set(matches)
         selected_profiles = []
         for value in resolution.get("profile_ids", []):
             try:
                 profile = self.session.get(WhatsAppDispatchProfile, uuid.UUID(value))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 profile = None
             if profile is not None:
-                selected_profiles.append({"id": str(profile.id), "name": profile.name, "enabled": profile.enabled})
+                selected_profiles.append(
+                    {"id": str(profile.id), "name": profile.name, "enabled": profile.enabled}
+                )
         return {
             "complaint_number": case.complaint_number,
-            "context": {**context, "tags": sorted(context["tags"]), "tag_groups": {k: sorted(v) for k, v in context["tag_groups"].items()}},
+            "context": {
+                **context,
+                "tags": sorted(context["tags"]),
+                "tag_groups": {k: sorted(v) for k, v in context["tag_groups"].items()},
+            },
             "matches": [self._rule_dict(item) for item in matches],
             "resolution": resolution,
             "selected_profiles": selected_profiles,
@@ -671,7 +801,12 @@ class CrmDispatchService:
         fallback = [item for item in matches if item.selection_mode == "fallback"]
         selected = suggested or fallback
         if not selected:
-            return {"status": "needs_review", "profile_ids": [], "rule_ids": [], "reason": "No enabled routing rule matched"}
+            return {
+                "status": "needs_review",
+                "profile_ids": [],
+                "rule_ids": [],
+                "reason": "No enabled routing rule matched",
+            }
         top_priority = max(item.priority for item in selected)
         top = [item for item in selected if item.priority == top_priority]
         profile_sets = {tuple(sorted(item.dispatch_profile_ids_json or [])) for item in top}
@@ -687,7 +822,9 @@ class CrmDispatchService:
             "status": "ready",
             "profile_ids": profiles,
             "rule_ids": [str(item.id) for item in top],
-            "selection_source": "fallback" if all(item.selection_mode == "fallback" for item in top) else "rule",
+            "selection_source": "fallback"
+            if all(item.selection_mode == "fallback" for item in top)
+            else "rule",
             "reason": f"Matched {len(top)} routing rule(s) at priority {top_priority}",
         }
 
@@ -701,29 +838,55 @@ class CrmDispatchService:
             raise CrmDispatchValidationError("Dispatch direction must be downward or upward")
         pattern = f"%{search.strip()}%"
         if direction == "upward":
-            filters: list[Any] = [CrmOfficialLetter.status == "finalized"]
+            filters: list[Any] = [
+                CrmOfficialLetter.status == "finalized",
+                CrmOfficialLetter.id.not_in(_actively_claimed_official_letter_ids()),
+            ]
             if search.strip():
-                filters.append(or_(CrmOfficialLetter.letter_number.ilike(pattern), CrmOfficialLetter.complaint_number_snapshot.ilike(pattern)))
-            total = int(self.session.scalar(select(func.count()).select_from(CrmOfficialLetter).where(*filters)) or 0)
-            rows = list(self.session.scalars(
-                select(CrmOfficialLetter).where(*filters).order_by(CrmOfficialLetter.created_at.desc())
-                .offset((page - 1) * page_size).limit(page_size)
-            ).all())
+                filters.append(
+                    or_(
+                        CrmOfficialLetter.letter_number.ilike(pattern),
+                        CrmOfficialLetter.complaint_number_snapshot.ilike(pattern),
+                    )
+                )
+            total = int(
+                self.session.scalar(
+                    select(func.count()).select_from(CrmOfficialLetter).where(*filters)
+                )
+                or 0
+            )
+            rows = list(
+                self.session.scalars(
+                    select(CrmOfficialLetter)
+                    .where(*filters)
+                    .order_by(CrmOfficialLetter.created_at.desc())
+                    .offset((page - 1) * page_size)
+                    .limit(page_size)
+                ).all()
+            )
             items = []
             for letter in rows:
-                artifact = self.session.scalar(select(CrmOfficialLetterArtifact).where(
-                    CrmOfficialLetterArtifact.official_letter_id == letter.id,
-                    CrmOfficialLetterArtifact.kind == "complete_pdf",
-                ))
-                items.append({
-                    "id": str(letter.id), "source_kind": "official_letter",
-                    "case_id": str(letter.complaint_case_id),
-                    "complaint_number": letter.complaint_number_snapshot,
-                    "letter_number": letter.letter_number, "letter_date": letter.letter_date,
-                    "ready": bool(artifact and Path(artifact.path).is_file()),
-                    "packet_size_bytes": artifact.size_bytes if artifact else 0,
-                    "packet_label": "Complete compliance PDF" if artifact else "Complete PDF missing",
-                })
+                artifact = self.session.scalar(
+                    select(CrmOfficialLetterArtifact).where(
+                        CrmOfficialLetterArtifact.official_letter_id == letter.id,
+                        CrmOfficialLetterArtifact.kind == "complete_pdf",
+                    )
+                )
+                items.append(
+                    {
+                        "id": str(letter.id),
+                        "source_kind": "official_letter",
+                        "case_id": str(letter.complaint_case_id),
+                        "complaint_number": letter.complaint_number_snapshot,
+                        "letter_number": letter.letter_number,
+                        "letter_date": letter.letter_date,
+                        "ready": bool(artifact and Path(artifact.path).is_file()),
+                        "packet_size_bytes": artifact.size_bytes if artifact else 0,
+                        "packet_label": "Complete compliance PDF"
+                        if artifact
+                        else "Complete PDF missing",
+                    }
+                )
             return {"items": items, "total": total, "page": page, "page_size": page_size}
 
         current_approved = select(ComplaintReplyRevision.complaint_case_id).where(
@@ -731,35 +894,66 @@ class CrmDispatchService:
             ComplaintReplyRevision.approval_status.in_(["Approved", "Issued"]),
         )
         filters = [
-            ComplaintCase.state.in_(["fresh", "published", "review_required"]),
+            downward_dispatch_case_eligibility_clause(),
             ComplaintCase.id.not_in(current_approved),
         ]
         if search.strip():
-            filters.append(or_(ComplaintCase.complaint_number.ilike(pattern), ComplaintCase.remarks.ilike(pattern)))
-        total = int(self.session.scalar(select(func.count()).select_from(ComplaintCase).where(*filters)) or 0)
-        rows = list(self.session.scalars(
-            select(ComplaintCase).where(*filters).order_by(ComplaintCase.created_at.desc())
-            .offset((page - 1) * page_size).limit(page_size)
-        ).all())
+            filters.append(
+                or_(
+                    ComplaintCase.complaint_number.ilike(pattern),
+                    ComplaintCase.remarks.ilike(pattern),
+                )
+            )
+        total = int(
+            self.session.scalar(select(func.count()).select_from(ComplaintCase).where(*filters))
+            or 0
+        )
+        rows = list(
+            self.session.scalars(
+                select(ComplaintCase)
+                .where(*filters)
+                .order_by(ComplaintCase.created_at.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            ).all()
+        )
         items = []
         for case in rows:
-            document_count = int(self.session.scalar(
-                select(func.count()).select_from(ComplaintDocumentCaseLink)
-                .where(ComplaintDocumentCaseLink.complaint_case_id == case.id)
-            ) or 0)
-            items.append({
-                "id": str(case.id), "source_kind": "complaint_case", "case_id": str(case.id),
-                "complaint_number": case.complaint_number or str(case.id),
-                "category": case.category or "", "subcategory": case.sub_category or "",
-                "state": case.state, "tehsil": case.tehsil, "district": case.district,
-                "ready": True, "document_count": document_count,
-                "packet_label": f"Complaint record · {document_count} linked file(s)",
-            })
+            document_count = int(
+                self.session.scalar(
+                    select(func.count())
+                    .select_from(ComplaintDocumentCaseLink)
+                    .where(ComplaintDocumentCaseLink.complaint_case_id == case.id)
+                )
+                or 0
+            )
+            items.append(
+                {
+                    "id": str(case.id),
+                    "source_kind": "complaint_case",
+                    "case_id": str(case.id),
+                    "complaint_number": case.complaint_number or str(case.id),
+                    "category": case.category or "",
+                    "subcategory": case.sub_category or "",
+                    "state": case.state,
+                    "tehsil": case.tehsil,
+                    "district": case.district,
+                    "ready": True,
+                    "document_count": document_count,
+                    "packet_label": f"Complaint record · {document_count} linked file(s)",
+                }
+            )
         return {"items": items, "total": total, "page": page, "page_size": page_size}
 
     def _store_dispatch_artifact(
-        self, *, batch: CrmDispatchBatch, item: CrmDispatchItem, kind: str,
-        name: str, content: bytes | None = None, source_path: Path | None = None,
+        self,
+        *,
+        batch: CrmDispatchBatch,
+        item: CrmDispatchItem,
+        kind: str,
+        name: str,
+        content: bytes | None = None,
+        source_path: Path | None = None,
         source_snapshot: dict[str, Any] | None = None,
     ) -> CrmDispatchArtifact:
         if content is None and source_path is None:
@@ -774,9 +968,16 @@ class CrmDispatchService:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(content)
         artifact = CrmDispatchArtifact(
-            batch_id=batch.id, dispatch_item_id=item.id, complaint_case_id=item.complaint_case_id,
-            kind=kind, name=name, path=str(destination), content_type="application/pdf",
-            size_bytes=len(content), sha256=digest, page_count=_page_count(destination),
+            batch_id=batch.id,
+            dispatch_item_id=item.id,
+            complaint_case_id=item.complaint_case_id,
+            kind=kind,
+            name=name,
+            path=str(destination),
+            content_type="application/pdf",
+            size_bytes=len(content),
+            sha256=digest,
+            page_count=_page_count(destination),
             source_snapshot_json=source_snapshot or {},
         )
         self.session.add(artifact)
@@ -800,25 +1001,52 @@ class CrmDispatchService:
     ) -> dict[str, Any]:
         if direction not in {"downward", "upward"}:
             raise CrmDispatchValidationError("Dispatch direction must be downward or upward")
-        downward_purposes = {"compliance_request", "report_request", "evidence_request", "clarification_request", "information_only"}
-        upward_purposes = {"compliance_submission", "reply_submission", "follow_up_submission", "information_only"}
+        downward_purposes = {
+            "compliance_request",
+            "report_request",
+            "evidence_request",
+            "clarification_request",
+            "information_only",
+        }
+        upward_purposes = {
+            "compliance_submission",
+            "reply_submission",
+            "follow_up_submission",
+            "information_only",
+        }
         allowed = downward_purposes if direction == "downward" else upward_purposes
-        purpose = purpose or ("compliance_request" if direction == "downward" else "compliance_submission")
+        purpose = purpose or (
+            "compliance_request" if direction == "downward" else "compliance_submission"
+        )
         if purpose not in allowed:
-            raise CrmDispatchValidationError("The selected dispatch purpose is not valid for this direction")
-        selected = list(dict.fromkeys(case_ids or [])) if direction == "downward" else list(dict.fromkeys(official_letter_ids or []))
+            raise CrmDispatchValidationError(
+                "The selected dispatch purpose is not valid for this direction"
+            )
+        selected = (
+            list(dict.fromkeys(case_ids or []))
+            if direction == "downward"
+            else list(dict.fromkeys(official_letter_ids or []))
+        )
         if not selected:
             raise CrmDispatchValidationError(
-                "Select at least one pending complaint" if direction == "downward"
+                "Select at least one pending complaint"
+                if direction == "downward"
                 else "Select at least one finalized official letter"
             )
+        if direction == "upward":
+            self._assert_upward_sources_available(selected)
         now = utcnow()
         prefix = now.strftime("CRM-DSP-%Y%m%d-%H%M%S")
         suffix = uuid.uuid4().hex[:6].upper()
         batch = CrmDispatchBatch(
-            batch_number=f"{prefix}-{suffix}", status="resolving_routes",
-            direction=direction, source_mode="complaint_cases" if direction == "downward" else "official_letters",
-            total_items=len(selected), purpose=purpose, response_due_at=response_due_at, created_by=actor,
+            batch_number=f"{prefix}-{suffix}",
+            status="resolving_routes",
+            direction=direction,
+            source_mode="complaint_cases" if direction == "downward" else "official_letters",
+            total_items=len(selected),
+            purpose=purpose,
+            response_due_at=response_due_at,
+            created_by=actor,
         )
         self.session.add(batch)
         self.session.flush()
@@ -826,39 +1054,55 @@ class CrmDispatchService:
         if direction == "downward":
             for case_id in selected:
                 case = self.session.get(ComplaintCase, case_id)
-                if case is None or case.state not in {"fresh", "published", "review_required"}:
-                    raise CrmDispatchValidationError("Only active fresh or published complaints can be assigned for compliance")
-                approved = self.session.scalar(select(ComplaintReplyRevision.id).where(
-                    ComplaintReplyRevision.complaint_case_id == case.id,
-                    ComplaintReplyRevision.is_current.is_(True),
-                    ComplaintReplyRevision.approval_status.in_(["Approved", "Issued"]),
-                ))
+                if case is None or not bool(
+                    case.registry_status == "active"
+                    and case.state in {"fresh", "existing", "published", "review_required"}
+                ):
+                    raise CrmDispatchValidationError(
+                        "Only active fresh or published complaints can be assigned for compliance"
+                    )
+                approved = self.session.scalar(
+                    select(ComplaintReplyRevision.id).where(
+                        ComplaintReplyRevision.complaint_case_id == case.id,
+                        ComplaintReplyRevision.is_current.is_(True),
+                        ComplaintReplyRevision.approval_status.in_(["Approved", "Issued"]),
+                    )
+                )
                 if approved:
                     raise CrmDispatchValidationError(
                         f"Complaint {case.complaint_number or case.id} already has an approved reply; submit it upward instead"
                     )
                 item = CrmDispatchItem(
-                    batch_id=batch.id, complaint_case_id=case.id,
+                    batch_id=batch.id,
+                    complaint_case_id=case.id,
                     complaint_number_snapshot=case.complaint_number or str(case.id),
-                    packet_sha256="pending", compliance_status="not_requested",
+                    packet_sha256="pending",
+                    compliance_status="not_requested",
                 )
                 self.session.add(item)
                 self.session.flush()
                 content, snapshot = packet_service.compose_case_packet(case.id)
                 self._store_dispatch_artifact(
-                    batch=batch, item=item, kind="assignment_packet",
+                    batch=batch,
+                    item=item,
+                    kind="assignment_packet",
                     name=f"{item.complaint_number_snapshot} - Complaint Assignment Packet.pdf",
-                    content=content, source_snapshot=snapshot,
+                    content=content,
+                    source_snapshot=snapshot,
                 )
         else:
             for letter_id in selected:
                 letter = self.session.get(CrmOfficialLetter, letter_id)
                 if letter is None or letter.status != "finalized":
-                    raise CrmDispatchValidationError("Only finalized official letters can be submitted upward")
-                artifact = self.session.scalar(select(CrmOfficialLetterArtifact).where(
-                    CrmOfficialLetterArtifact.official_letter_id == letter.id,
-                    CrmOfficialLetterArtifact.kind == "complete_pdf",
-                ))
+                    raise CrmDispatchValidationError(
+                        "Only finalized official letters can be submitted upward"
+                    )
+                artifact = self.session.scalar(
+                    select(CrmOfficialLetterArtifact).where(
+                        CrmOfficialLetterArtifact.official_letter_id == letter.id,
+                        CrmOfficialLetterArtifact.kind == "complete_pdf",
+                    )
+                )
                 if artifact is None or not Path(artifact.path).is_file():
                     raise CrmDispatchValidationError(
                         f"Build the complete PDF for complaint {letter.complaint_number_snapshot} before submission"
@@ -869,41 +1113,132 @@ class CrmDispatchService:
                         f"Complete PDF checksum changed for complaint {letter.complaint_number_snapshot}; rebuild it"
                     )
                 item = CrmDispatchItem(
-                    batch_id=batch.id, complaint_case_id=letter.complaint_case_id,
-                    official_letter_id=letter.id, complete_pdf_artifact_id=artifact.id,
+                    batch_id=batch.id,
+                    complaint_case_id=letter.complaint_case_id,
+                    official_letter_id=letter.id,
+                    complete_pdf_artifact_id=artifact.id,
                     complaint_number_snapshot=letter.complaint_number_snapshot,
-                    letter_number_snapshot=letter.letter_number, letter_date_snapshot=letter.letter_date,
-                    packet_sha256=artifact.sha256, packet_size_bytes=artifact.size_bytes,
-                    packet_page_count=_page_count(path), compliance_status="incorporated",
+                    letter_number_snapshot=letter.letter_number,
+                    letter_date_snapshot=letter.letter_date,
+                    packet_sha256=artifact.sha256,
+                    packet_size_bytes=artifact.size_bytes,
+                    packet_page_count=_page_count(path),
+                    compliance_status="incorporated",
                 )
                 self.session.add(item)
                 self.session.flush()
+                claim = CrmUpwardSubmissionClaim(
+                    official_letter_id=letter.id,
+                    dispatch_item_id=item.id,
+                    status="reserved",
+                    claimed_by=actor,
+                )
+                self.session.add(claim)
+                try:
+                    self.session.flush()
+                except IntegrityError as exc:
+                    self.session.rollback()
+                    conflict = self._active_upward_claim([letter.id])
+                    if conflict:
+                        _claim, conflict_item, conflict_batch = conflict
+                        raise CrmDispatchConflict(
+                            f"Complaint {conflict_item.complaint_number_snapshot} is already in dispatch batch {conflict_batch.batch_number}.",
+                            batch=conflict_batch,
+                        ) from exc
+                    raise CrmDispatchValidationError(
+                        f"Official letter {letter.letter_number} is already reserved by another compliance submission"
+                    ) from exc
+                self.session.add(
+                    ComplaintAuditEvent(
+                        complaint_case_id=letter.complaint_case_id,
+                        entity_type="crm_dispatch_item",
+                        entity_id=str(item.id),
+                        event_type="upward_submission_reserved",
+                        actor=actor,
+                        after_json={"claim_status": "reserved"},
+                        details_json={
+                            "official_letter_id": str(letter.id),
+                            "dispatch_batch_id": str(batch.id),
+                            "dispatch_batch_number": batch.batch_number,
+                        },
+                    )
+                )
                 self._store_dispatch_artifact(
-                    batch=batch, item=item, kind="submission_packet",
+                    batch=batch,
+                    item=item,
+                    kind="submission_packet",
                     name=f"{item.complaint_number_snapshot} - Complete Compliance Packet.pdf",
-                    source_path=path, source_snapshot={
-                        "official_letter_id": str(letter.id), "official_letter_artifact_id": str(artifact.id),
-                        "letter_number": letter.letter_number, "letter_date": letter.letter_date.isoformat(),
+                    source_path=path,
+                    source_snapshot={
+                        "official_letter_id": str(letter.id),
+                        "official_letter_artifact_id": str(artifact.id),
+                        "letter_number": letter.letter_number,
+                        "letter_date": letter.letter_date.isoformat(),
                     },
                 )
         self.session.commit()
         self.resolve_batch(batch.id)
         return self.detail(batch.id)
 
+    def _assert_upward_sources_available(self, official_letter_ids: list[uuid.UUID]) -> None:
+        # Lock immutable source rows in deterministic order. The claim table's
+        # partial unique index remains the final concurrency backstop.
+        self.session.exec(
+            select(CrmOfficialLetter)
+            .where(CrmOfficialLetter.id.in_(official_letter_ids))
+            .order_by(CrmOfficialLetter.id)
+            .with_for_update()
+        ).all()
+        existing = self._active_upward_claim(official_letter_ids)
+        if existing:
+            _claim, item, batch = existing
+            raise CrmDispatchConflict(
+                f"Complaint {item.complaint_number_snapshot} is already in dispatch batch "
+                f"{batch.batch_number}. Open the existing batch instead of creating a duplicate.",
+                batch=batch,
+            )
+
+    def _active_upward_claim(
+        self, official_letter_ids: list[uuid.UUID]
+    ) -> tuple[CrmUpwardSubmissionClaim, CrmDispatchItem, CrmDispatchBatch] | None:
+        return self.session.exec(
+            select(CrmUpwardSubmissionClaim, CrmDispatchItem, CrmDispatchBatch)
+            .join(
+                CrmDispatchItem,
+                CrmDispatchItem.id == CrmUpwardSubmissionClaim.dispatch_item_id,
+            )
+            .join(CrmDispatchBatch, CrmDispatchBatch.id == CrmDispatchItem.batch_id)
+            .where(
+                CrmUpwardSubmissionClaim.official_letter_id.in_(official_letter_ids),
+                CrmUpwardSubmissionClaim.released_at.is_(None),
+            )
+            .order_by(CrmDispatchBatch.created_at.desc())
+        ).first()
+
     def resolve_batch(self, batch_id: uuid.UUID) -> dict[str, Any]:
         batch = self.session.get(CrmDispatchBatch, batch_id)
         if batch is None:
             raise CrmDispatchNotFound("Dispatch batch not found")
-        items = list(self.session.scalars(select(CrmDispatchItem).where(CrmDispatchItem.batch_id == batch.id)).all())
-        enabled_rules = list(self.session.scalars(
-            select(CrmDispatchRule).where(CrmDispatchRule.enabled.is_(True)).order_by(CrmDispatchRule.priority.desc())
-        ).all())
+        items = list(
+            self.session.scalars(
+                select(CrmDispatchItem).where(CrmDispatchItem.batch_id == batch.id)
+            ).all()
+        )
+        enabled_rules = list(
+            self.session.scalars(
+                select(CrmDispatchRule)
+                .where(CrmDispatchRule.enabled.is_(True))
+                .order_by(CrmDispatchRule.priority.desc())
+            ).all()
+        )
         for item in items:
             if item.excluded:
                 item.route_status = "excluded"
                 self.session.add(item)
                 continue
-            for existing in self.session.scalars(select(CrmDispatchTarget).where(CrmDispatchTarget.dispatch_item_id == item.id)).all():
+            for existing in self.session.scalars(
+                select(CrmDispatchTarget).where(CrmDispatchTarget.dispatch_item_id == item.id)
+            ).all():
                 if existing.selection_source != "manual":
                     self.session.delete(existing)
             case = self.session.get(ComplaintCase, item.complaint_case_id)
@@ -912,7 +1247,13 @@ class CrmDispatchService:
                 item.route_summary_json = {"reason": "Complaint record is missing"}
                 self.session.add(item)
                 continue
-            matches = [rule for rule in enabled_rules if self._rule_matches(rule, self._case_context(case, direction=batch.direction, purpose=batch.purpose))]
+            matches = [
+                rule
+                for rule in enabled_rules
+                if self._rule_matches(
+                    rule, self._case_context(case, direction=batch.direction, purpose=batch.purpose)
+                )
+            ]
             resolution = self._resolve_rule_set(matches)
             if resolution["status"] == "ready":
                 permitted_profile_ids: list[str] = []
@@ -920,7 +1261,9 @@ class CrmDispatchService:
                 for profile_value in resolution["profile_ids"]:
                     profile = self.session.get(WhatsAppDispatchProfile, uuid.UUID(profile_value))
                     policy = dict(profile.presentation_policy or {}) if profile else {}
-                    allowed_directions = set(policy.get("allowed_directions") or ["downward", "upward"])
+                    allowed_directions = set(
+                        policy.get("allowed_directions") or ["downward", "upward"]
+                    )
                     if profile and profile.enabled and batch.direction in allowed_directions:
                         permitted_profile_ids.append(profile_value)
                     else:
@@ -941,22 +1284,30 @@ class CrmDispatchService:
                 rule_id = uuid.UUID(resolution["rule_ids"][0]) if resolution["rule_ids"] else None
                 for profile_value in resolution["profile_ids"]:
                     profile_id = uuid.UUID(profile_value)
-                    existing = self.session.scalar(select(CrmDispatchTarget).where(
-                        CrmDispatchTarget.dispatch_item_id == item.id,
-                        CrmDispatchTarget.dispatch_profile_id == profile_id,
-                    ))
+                    existing = self.session.scalar(
+                        select(CrmDispatchTarget).where(
+                            CrmDispatchTarget.dispatch_item_id == item.id,
+                            CrmDispatchTarget.dispatch_profile_id == profile_id,
+                        )
+                    )
                     if existing is None:
-                        self.session.add(CrmDispatchTarget(
-                            dispatch_item_id=item.id,
-                            routing_rule_id=rule_id,
-                            dispatch_profile_id=profile_id,
-                            selection_source=resolution.get("selection_source", "rule"),
-                            response_due_at=batch.response_due_at,
-                        ))
+                        self.session.add(
+                            CrmDispatchTarget(
+                                dispatch_item_id=item.id,
+                                routing_rule_id=rule_id,
+                                dispatch_profile_id=profile_id,
+                                selection_source=resolution.get("selection_source", "rule"),
+                                response_due_at=batch.response_due_at,
+                            )
+                        )
             self.session.add(item)
         self.session.flush()
         self._update_batch_counts(batch)
-        batch.status = "ready" if batch.blocked_items == 0 and batch.ready_items == batch.total_items else "review_required"
+        batch.status = (
+            "ready"
+            if batch.blocked_items == 0 and batch.ready_items == batch.total_items
+            else "review_required"
+        )
         batch.updated_at = utcnow()
         self.session.add(batch)
         self.session.commit()
@@ -980,49 +1331,226 @@ class CrmDispatchService:
         if not profile_ids or any(str(value) not in available for value in profile_ids):
             raise CrmDispatchValidationError("Select one or more enabled CRM destination profiles")
         invalid_direction = [
-            available[str(value)]["name"] for value in profile_ids
+            available[str(value)]["name"]
+            for value in profile_ids
             if batch.direction not in set(available[str(value)].get("allowed_directions") or [])
         ]
         if invalid_direction:
             raise CrmDispatchValidationError(
-                "These profiles are not enabled for this dispatch direction: " + ", ".join(invalid_direction)
+                "These profiles are not enabled for this dispatch direction: "
+                + ", ".join(invalid_direction)
             )
         if not reason.strip():
             raise CrmDispatchValidationError("Record a reason for the manual routing override")
-        for target in self.session.scalars(select(CrmDispatchTarget).where(CrmDispatchTarget.dispatch_item_id == item.id)).all():
+        for target in self.session.scalars(
+            select(CrmDispatchTarget).where(CrmDispatchTarget.dispatch_item_id == item.id)
+        ).all():
             self.session.delete(target)
         for profile_id in profile_ids:
-            self.session.add(CrmDispatchTarget(
-                dispatch_item_id=item.id,
-                dispatch_profile_id=profile_id,
-                selection_source="manual",
-                manual_override_reason=reason.strip() or f"Manual routing selected by {actor}",
-            ))
+            self.session.add(
+                CrmDispatchTarget(
+                    dispatch_item_id=item.id,
+                    dispatch_profile_id=profile_id,
+                    selection_source="manual",
+                    manual_override_reason=reason.strip() or f"Manual routing selected by {actor}",
+                )
+            )
         item.route_status = "ready"
-        item.route_summary_json = {"status": "ready", "profile_ids": [str(value) for value in profile_ids], "reason": reason or "Manual route"}
+        item.route_summary_json = {
+            "status": "ready",
+            "profile_ids": [str(value) for value in profile_ids],
+            "reason": reason or "Manual route",
+        }
         item.updated_at = utcnow()
         self.session.add(item)
         self._update_batch_counts(batch)
-        batch.status = "ready" if batch.blocked_items == 0 and batch.ready_items == batch.total_items else "review_required"
+        batch.status = (
+            "ready"
+            if batch.blocked_items == 0 and batch.ready_items == batch.total_items
+            else "review_required"
+        )
         batch.updated_at = utcnow()
         self.session.add(batch)
         self.session.commit()
         return self.detail(batch.id)
 
-    def set_item_excluded(self, item_id: uuid.UUID, *, excluded: bool, reason: str) -> dict[str, Any]:
+    def set_item_excluded(
+        self,
+        item_id: uuid.UUID,
+        *,
+        excluded: bool,
+        reason: str,
+        actor: str = "web-operator",
+    ) -> dict[str, Any]:
         item = self.session.get(CrmDispatchItem, item_id)
         if item is None:
             raise CrmDispatchNotFound("Dispatch item not found")
+        batch = self.session.get(CrmDispatchBatch, item.batch_id)
+        assert batch is not None
+        if batch.direction == "upward" and item.official_letter_id:
+            if excluded:
+                self._release_upward_claim(item, reason=reason, actor=actor)
+            else:
+                self._reserve_released_upward_claim(item, actor=actor)
         item.excluded = excluded
         item.exclusion_reason = reason or None
         item.route_status = "excluded" if excluded else "needs_review"
         item.updated_at = utcnow()
         self.session.add(item)
-        batch = self.session.get(CrmDispatchBatch, item.batch_id)
-        assert batch is not None
         self._update_batch_counts(batch)
-        batch.status = "ready" if batch.blocked_items == 0 and batch.ready_items + batch.excluded_items == batch.total_items else "review_required"
+        if batch.direction == "upward" and batch.excluded_items == batch.total_items:
+            batch.status = "cancelled"
+            batch.completed_at = utcnow()
+        else:
+            batch.status = (
+                "ready"
+                if batch.blocked_items == 0
+                and batch.ready_items + batch.excluded_items == batch.total_items
+                else "review_required"
+            )
+            batch.completed_at = None
         batch.updated_at = utcnow()
+        self.session.add(batch)
+        self.session.commit()
+        return self.detail(batch.id)
+
+    def _release_upward_claim(self, item: CrmDispatchItem, *, reason: str, actor: str) -> None:
+        if not reason.strip():
+            raise CrmDispatchValidationError(
+                "Explain why this unsent compliance submission is being released"
+            )
+        claim, targets = self._upward_release_context(item)
+        if claim is None:
+            return
+        now = utcnow()
+        claim.status = "released"
+        claim.released_at = now
+        claim.release_reason = reason.strip()
+        claim.updated_at = now
+        self.session.add(claim)
+        for target in targets:
+            if target.business_status in {"planned", "blocked", "excluded"}:
+                target.business_status = "cancelled"
+                target.updated_at = now
+                self.session.add(target)
+        self.session.add(
+            ComplaintAuditEvent(
+                complaint_case_id=item.complaint_case_id,
+                entity_type="crm_dispatch_item",
+                entity_id=str(item.id),
+                event_type="upward_submission_released",
+                actor=actor,
+                before_json={"claim_status": "reserved"},
+                after_json={"claim_status": "released"},
+                details_json={
+                    "official_letter_id": str(item.official_letter_id),
+                    "dispatch_batch_id": str(item.batch_id),
+                    "reason": reason.strip(),
+                },
+            )
+        )
+
+    def _upward_release_context(
+        self, item: CrmDispatchItem
+    ) -> tuple[CrmUpwardSubmissionClaim | None, list[CrmDispatchTarget]]:
+        claim = self.session.scalar(
+            select(CrmUpwardSubmissionClaim).where(
+                CrmUpwardSubmissionClaim.dispatch_item_id == item.id,
+                CrmUpwardSubmissionClaim.released_at.is_(None),
+            )
+        )
+        if claim is None:
+            return None, []
+        targets = list(
+            self.session.scalars(
+                select(CrmDispatchTarget).where(CrmDispatchTarget.dispatch_item_id == item.id)
+            ).all()
+        )
+        approved_preview_ids = [target.preview_id for target in targets if target.preview_id]
+        has_approval = bool(
+            approved_preview_ids
+            and self.session.scalar(
+                select(WhatsAppDispatchApproval.id).where(
+                    WhatsAppDispatchApproval.preview_id.in_(approved_preview_ids)
+                )
+            )
+        )
+        has_transport = has_approval or any(
+            target.business_status in ATTEMPTED_UPWARD_TARGET_STATUSES.union({"approved"})
+            or target.sent_at is not None
+            or bool(target.whatsapp_delivery_ids_json)
+            for target in targets
+        )
+        if has_transport:
+            raise CrmDispatchValidationError(
+                "This submission was approved or queued and cannot be returned to the new-send queue. Retry it from the existing batch."
+            )
+        return claim, targets
+
+    def _reserve_released_upward_claim(self, item: CrmDispatchItem, *, actor: str) -> None:
+        assert item.official_letter_id is not None
+        self._assert_upward_sources_available([item.official_letter_id])
+        claim = self.session.scalar(
+            select(CrmUpwardSubmissionClaim).where(
+                CrmUpwardSubmissionClaim.dispatch_item_id == item.id
+            )
+        )
+        if claim is None:
+            claim = CrmUpwardSubmissionClaim(
+                official_letter_id=item.official_letter_id,
+                dispatch_item_id=item.id,
+                claimed_by=actor,
+            )
+        claim.status = "reserved"
+        claim.released_at = None
+        claim.release_reason = None
+        claim.claimed_by = actor
+        claim.updated_at = utcnow()
+        self.session.add(claim)
+        try:
+            self.session.flush()
+        except IntegrityError as exc:
+            self.session.rollback()
+            raise CrmDispatchValidationError(
+                "This official letter is already reserved by another dispatch batch"
+            ) from exc
+
+    def discard_upward_batch(self, batch_id: uuid.UUID, *, actor: str) -> dict[str, Any]:
+        batch = self.session.get(CrmDispatchBatch, batch_id)
+        if batch is None:
+            raise CrmDispatchNotFound("Dispatch batch not found")
+        if batch.direction != "upward":
+            raise CrmDispatchValidationError(
+                "Only an unsent upward compliance submission can be discarded here"
+            )
+        items = list(
+            self.session.scalars(
+                select(CrmDispatchItem).where(
+                    CrmDispatchItem.batch_id == batch.id,
+                    CrmDispatchItem.excluded.is_(False),
+                )
+            ).all()
+        )
+        if not items:
+            raise CrmDispatchValidationError("This batch has no active packets to release")
+        reason = f"Unsent batch {batch.batch_number} discarded by {actor}"
+        # Validate every item before mutating any of them.
+        for item in items:
+            self._upward_release_context(item)
+        for item in items:
+            self._release_upward_claim(item, reason=reason, actor=actor)
+        now = utcnow()
+        for item in items:
+            item.excluded = True
+            item.route_status = "excluded"
+            item.exclusion_reason = reason
+            item.updated_at = now
+            self.session.add(item)
+        self._update_batch_counts(batch)
+        batch.status = "cancelled"
+        batch.completed_at = now
+        batch.updated_at = now
+        batch.error_summary = reason
         self.session.add(batch)
         self.session.commit()
         return self.detail(batch.id)
@@ -1032,33 +1560,50 @@ class CrmDispatchService:
         batch = self.session.get(CrmDispatchBatch, batch_id)
         if batch is None:
             raise CrmDispatchNotFound("Dispatch batch not found")
-        items = list(self.session.scalars(select(CrmDispatchItem).where(
-            CrmDispatchItem.batch_id == batch.id,
-            CrmDispatchItem.excluded.is_(False),
-        )).all())
+        items = list(
+            self.session.scalars(
+                select(CrmDispatchItem).where(
+                    CrmDispatchItem.batch_id == batch.id,
+                    CrmDispatchItem.excluded.is_(False),
+                )
+            ).all()
+        )
         if not items or any(item.route_status != "ready" for item in items):
-            raise CrmDispatchValidationError("Resolve every non-excluded complaint route before compiling previews")
-        targets = list(self.session.scalars(
-            select(CrmDispatchTarget)
-            .join(CrmDispatchItem, CrmDispatchItem.id == CrmDispatchTarget.dispatch_item_id)
-            .where(CrmDispatchItem.batch_id == batch.id, CrmDispatchTarget.business_status.in_(["planned", "blocked"]))
-        ).all())
+            raise CrmDispatchValidationError(
+                "Resolve every non-excluded complaint route before compiling previews"
+            )
+        targets = list(
+            self.session.scalars(
+                select(CrmDispatchTarget)
+                .join(CrmDispatchItem, CrmDispatchItem.id == CrmDispatchTarget.dispatch_item_id)
+                .where(
+                    CrmDispatchItem.batch_id == batch.id,
+                    CrmDispatchTarget.business_status.in_(["planned", "blocked"]),
+                )
+            ).all()
+        )
         if not targets:
             raise CrmDispatchValidationError("This batch has no resolved destination targets")
         # Remove unapproved previews from a previous compilation. Approved history is immutable.
         old_preview_ids = {target.preview_id for target in targets if target.preview_id}
+        old_previews: list[WhatsAppDispatchPreview] = []
         for preview_id in old_preview_ids:
-            approval = self.session.scalar(select(WhatsAppDispatchApproval).where(WhatsAppDispatchApproval.preview_id == preview_id))
+            approval = self.session.scalar(
+                select(WhatsAppDispatchApproval).where(
+                    WhatsAppDispatchApproval.preview_id == preview_id
+                )
+            )
             if approval:
-                raise CrmDispatchValidationError("An approved preview already exists. Create a new dispatch batch for changed routing")
+                raise CrmDispatchValidationError(
+                    "An approved preview already exists. Create a new dispatch batch for changed routing"
+                )
             preview = self.session.get(WhatsAppDispatchPreview, preview_id)
             if preview:
-                for row in self.session.scalars(select(WhatsAppDispatchPreviewDelivery).where(WhatsAppDispatchPreviewDelivery.preview_id == preview.id)).all():
-                    self.session.delete(row)
-                for row in self.session.scalars(select(WhatsAppDispatchPreviewArtifact).where(WhatsAppDispatchPreviewArtifact.preview_id == preview.id)).all():
-                    self.session.delete(row)
-                self.session.delete(preview)
-        self.session.flush()
+                old_previews.append(preview)
+
+        # Drop the CRM ownership references before deleting their frozen plans.
+        # PostgreSQL correctly rejects the opposite order, and a failed flush used
+        # to surface as a generic 500 during recompile or gateway housekeeping.
         for target in targets:
             target.preview_id = None
             target.preview_delivery_ids_json = []
@@ -1068,6 +1613,23 @@ class CrmDispatchService:
             target.business_status = "planned"
             target.error = None
             self.session.add(target)
+        self.session.flush()
+        for preview in old_previews:
+            for row in self.session.scalars(
+                select(WhatsAppDispatchPreviewDelivery).where(
+                    WhatsAppDispatchPreviewDelivery.preview_id == preview.id
+                )
+            ).all():
+                self.session.delete(row)
+            for row in self.session.scalars(
+                select(WhatsAppDispatchPreviewArtifact).where(
+                    WhatsAppDispatchPreviewArtifact.preview_id == preview.id
+                )
+            ).all():
+                self.session.delete(row)
+        self.session.flush()
+        for preview in old_previews:
+            self.session.delete(preview)
         self.session.flush()
 
         by_profile: dict[uuid.UUID, list[CrmDispatchTarget]] = {}
@@ -1084,21 +1646,45 @@ class CrmDispatchService:
                 continue
             audience = self.session.get(WhatsAppAudience, profile.audience_id)
             account = self.session.get(WhatsAppAccount, profile.account_id)
-            template = self.session.get(WhatsAppTemplate, profile.template_id) if profile.template_id else defaults["template"]
-            members = list(self.session.scalars(select(WhatsAppAudienceMember).where(
-                WhatsAppAudienceMember.audience_id == profile.audience_id,
-                WhatsAppAudienceMember.enabled.is_(True),
-            )).all())
+            template = (
+                self.session.get(WhatsAppTemplate, profile.template_id)
+                if profile.template_id
+                else defaults["template"]
+            )
+            members = list(
+                self.session.scalars(
+                    select(WhatsAppAudienceMember).where(
+                        WhatsAppAudienceMember.audience_id == profile.audience_id,
+                        WhatsAppAudienceMember.enabled.is_(True),
+                    )
+                ).all()
+            )
             profile_snapshot = {
-                "profile": {"id": str(profile.id), "key": profile.key, "name": profile.name, "version": profile.version},
+                "profile": {
+                    "id": str(profile.id),
+                    "key": profile.key,
+                    "name": profile.name,
+                    "version": profile.version,
+                },
                 "audience": {
                     "id": str(audience.id) if audience else None,
                     "name": audience.name if audience else "Missing audience",
                     "target_keys": sorted(member.target_key for member in members),
-                    "target_routes": sorted(f"{member.target_key}:{member.route_scope_key}:{member.route_scope_value}" for member in members),
+                    "target_routes": sorted(
+                        f"{member.target_key}:{member.route_scope_key}:{member.route_scope_value}"
+                        for member in members
+                    ),
                 },
-                "account": {"id": str(account.id) if account else None, "name": account.name if account else "Missing account", "worker_key": account.worker_key if account else None},
-                "template": {"id": str(template.id) if template else None, "name": template.name if template else "", "body": template.body if template else ""},
+                "account": {
+                    "id": str(account.id) if account else None,
+                    "name": account.name if account else "Missing account",
+                    "worker_key": account.worker_key if account else None,
+                },
+                "template": {
+                    "id": str(template.id) if template else None,
+                    "name": template.name if template else "",
+                    "body": template.body if template else "",
+                },
             }
             preview = WhatsAppDispatchPreview(
                 preview_key=f"{batch.batch_number}-{profile.key}-{uuid.uuid4().hex[:6]}",
@@ -1126,8 +1712,16 @@ class CrmDispatchService:
             for target in profile_targets:
                 item = self.session.get(CrmDispatchItem, target.dispatch_item_id)
                 assert item is not None
-                artifact = self.session.get(CrmDispatchArtifact, item.packet_artifact_id) if item.packet_artifact_id else None
-                letter = self.session.get(CrmOfficialLetter, item.official_letter_id) if item.official_letter_id else None
+                artifact = (
+                    self.session.get(CrmDispatchArtifact, item.packet_artifact_id)
+                    if item.packet_artifact_id
+                    else None
+                )
+                letter = (
+                    self.session.get(CrmOfficialLetter, item.official_letter_id)
+                    if item.official_letter_id
+                    else None
+                )
                 case = self.session.get(ComplaintCase, item.complaint_case_id)
                 if artifact is None or case is None:
                     target.business_status = "blocked"
@@ -1151,7 +1745,9 @@ class CrmDispatchService:
                     continue
                 if case_context["confidentiality"] and privacy_policy != "restricted":
                     target.business_status = "blocked"
-                    target.error = "Confidential complaints require a restricted destination profile"
+                    target.error = (
+                        "Confidential complaints require a restricted destination profile"
+                    )
                     self.session.add(target)
                     continue
                 source_path = Path(artifact.path)
@@ -1160,10 +1756,14 @@ class CrmDispatchService:
                     target.error = "Complete PDF is missing or changed; rebuild the packet"
                     self.session.add(target)
                     continue
-                max_bytes = int((profile.presentation_policy or {}).get("max_packet_bytes") or 15 * 1024 * 1024)
+                max_bytes = int(
+                    (profile.presentation_policy or {}).get("max_packet_bytes") or 15 * 1024 * 1024
+                )
                 if source_path.stat().st_size > max_bytes:
                     target.business_status = "blocked"
-                    target.error = f"Complete PDF exceeds the profile limit of {max_bytes // (1024*1024)} MB"
+                    target.error = (
+                        f"Complete PDF exceeds the profile limit of {max_bytes // (1024 * 1024)} MB"
+                    )
                     self.session.add(target)
                     continue
                 frozen_path = freeze_artifact(source_path, item.packet_sha256)
@@ -1190,9 +1790,13 @@ class CrmDispatchService:
                     "category": case.category or "",
                     "subcategory": case.sub_category or "",
                     "letter_number": item.letter_number_snapshot or "",
-                    "letter_date": item.letter_date_snapshot.strftime("%d/%m/%Y") if item.letter_date_snapshot else "",
+                    "letter_date": item.letter_date_snapshot.strftime("%d/%m/%Y")
+                    if item.letter_date_snapshot
+                    else "",
                     "packet_page_count": item.packet_page_count,
-                    "response_due_date": batch.response_due_at.strftime("%d/%m/%Y") if batch.response_due_at else "",
+                    "response_due_date": batch.response_due_at.strftime("%d/%m/%Y")
+                    if batch.response_due_at
+                    else "",
                     "dispatch_purpose": batch.purpose,
                     "dispatch_purpose_label": batch.purpose.replace("_", " "),
                     "dispatch_direction": batch.direction,
@@ -1212,27 +1816,49 @@ class CrmDispatchService:
                     status = "ready"
                     if not available or not jid:
                         status = "blocked"
-                        issues.append({"code": "destination_unavailable", "severity": "blocked", "message": f"{name} is unavailable in the synchronized WhatsApp directory."})
-                    idempotency_key = _json_hash({
-                        "case": str(item.complaint_case_id),
-                        "letter": str(item.official_letter_id) if item.official_letter_id else None,
-                        "direction": batch.direction,
-                        "purpose": batch.purpose,
-                        "packet": item.packet_sha256,
-                        "target": jid,
-                        "message": _hash_text(message),
-                    })
+                        issues.append(
+                            {
+                                "code": "destination_unavailable",
+                                "severity": "blocked",
+                                "message": f"{name} is unavailable in the synchronized WhatsApp directory.",
+                            }
+                        )
+                    idempotency_key = _json_hash(
+                        {
+                            "case": str(item.complaint_case_id),
+                            "letter": str(item.official_letter_id)
+                            if item.official_letter_id
+                            else None,
+                            "direction": batch.direction,
+                            "purpose": batch.purpose,
+                            "packet": item.packet_sha256,
+                            "target": jid,
+                            "message": _hash_text(message),
+                        }
+                    )
                     previous = self.session.scalar(
                         select(WhatsAppDelivery)
-                        .join(WhatsAppDispatchPreviewDelivery, WhatsAppDispatchPreviewDelivery.id == WhatsAppDelivery.preview_delivery_id)
+                        .join(
+                            WhatsAppDispatchPreviewDelivery,
+                            WhatsAppDispatchPreviewDelivery.id
+                            == WhatsAppDelivery.preview_delivery_id,
+                        )
                         .where(
                             WhatsAppDispatchPreviewDelivery.idempotency_key == idempotency_key,
-                            WhatsAppDelivery.status.in_(["queued", "sent_pending_confirmation", "delivered"]),
+                            WhatsAppDelivery.status.in_(
+                                ["queued", "sent_pending_confirmation", "delivered"]
+                            ),
                         )
                     )
                     if previous:
                         status = "skipped"
-                        issues.append({"code": "duplicate_dispatch", "severity": "warning", "message": f"This exact packet and message was already queued or delivered to {name}."})
+                        issues.append(
+                            {
+                                "code": "duplicate_dispatch",
+                                "severity": "warning",
+                                "message": f"This exact packet and message was already queued or delivered to {name}.",
+                            }
+                        )
                     delivery = WhatsAppDispatchPreviewDelivery(
                         preview_id=preview.id,
                         sequence=sequence,
@@ -1251,7 +1877,9 @@ class CrmDispatchService:
                             "crm_dispatch_item_id": str(item.id),
                             "crm_dispatch_target_id": str(target.id),
                             "complaint_number": item.complaint_number_snapshot,
-                            "official_letter_id": str(item.official_letter_id) if item.official_letter_id else None,
+                            "official_letter_id": str(item.official_letter_id)
+                            if item.official_letter_id
+                            else None,
                             "direction": batch.direction,
                             "purpose": batch.purpose,
                             "packet_sha256": item.packet_sha256,
@@ -1264,7 +1892,9 @@ class CrmDispatchService:
                     self.session.add(delivery)
                     self.session.flush()
                     preview_delivery_ids.append(str(delivery.id))
-                    recipient_snapshot.append({"name": name, "jid": jid, "target_type": target_type, "status": status})
+                    recipient_snapshot.append(
+                        {"name": name, "jid": jid, "target_type": target_type, "status": status}
+                    )
                 target.preview_id = preview.id
                 target.preview_delivery_ids_json = preview_delivery_ids
                 target.recipient_snapshot_json = recipient_snapshot
@@ -1273,51 +1903,96 @@ class CrmDispatchService:
                 if not members:
                     target.business_status = "blocked"
                     target.error = "Destination profile has no enabled recipients"
-                    all_issues.append({"code": "empty_audience", "severity": "blocked", "message": f"{profile.name} has no enabled recipients."})
+                    all_issues.append(
+                        {
+                            "code": "empty_audience",
+                            "severity": "blocked",
+                            "message": f"{profile.name} has no enabled recipients.",
+                        }
+                    )
                 elif any(item["status"] == "ready" for item in recipient_snapshot):
                     target.business_status = "planned"
                 else:
                     target.business_status = "blocked"
                     target.error = "No eligible recipient remains"
                 self.session.add(target)
-            deliveries = list(self.session.scalars(select(WhatsAppDispatchPreviewDelivery).where(WhatsAppDispatchPreviewDelivery.preview_id == preview.id)).all())
-            artifacts = list(self.session.scalars(select(WhatsAppDispatchPreviewArtifact).where(WhatsAppDispatchPreviewArtifact.preview_id == preview.id)).all())
+            deliveries = list(
+                self.session.scalars(
+                    select(WhatsAppDispatchPreviewDelivery).where(
+                        WhatsAppDispatchPreviewDelivery.preview_id == preview.id
+                    )
+                ).all()
+            )
+            artifacts = list(
+                self.session.scalars(
+                    select(WhatsAppDispatchPreviewArtifact).where(
+                        WhatsAppDispatchPreviewArtifact.preview_id == preview.id
+                    )
+                ).all()
+            )
             preview.artifact_count = len(artifacts)
             preview.issues = all_issues
             apply_preview_state(
                 preview,
                 summarize_preview_state(deliveries, preview.issues, artifacts),
             )
-            preview.content_sha256 = _json_hash({
-                "snapshot": preview.configuration_snapshot,
-                "deliveries": [
-                    {"target": item.target_jid, "message": item.message, "attachments": item.attachment_ids, "status": item.status}
-                    for item in deliveries
-                ],
-            })
+            preview.content_sha256 = _json_hash(
+                {
+                    "snapshot": preview.configuration_snapshot,
+                    "deliveries": [
+                        {
+                            "target": item.target_jid,
+                            "message": item.message,
+                            "attachments": item.attachment_ids,
+                            "status": item.status,
+                        }
+                        for item in deliveries
+                    ],
+                }
+            )
             self.session.add(preview)
             compiled.append(str(preview.id))
         batch.updated_at = utcnow()
-        batch.status = "ready" if compiled and all(target.business_status == "planned" for target in targets) else "review_required"
+        batch.status = (
+            "ready"
+            if compiled and all(target.business_status == "planned" for target in targets)
+            else "review_required"
+        )
         self._update_batch_counts(batch)
         self.session.add(batch)
         self.session.commit()
         return self.detail(batch.id)
 
     def _update_batch_counts(self, batch: CrmDispatchBatch) -> None:
-        items = list(self.session.scalars(select(CrmDispatchItem).where(CrmDispatchItem.batch_id == batch.id)).all())
+        items = list(
+            self.session.scalars(
+                select(CrmDispatchItem).where(CrmDispatchItem.batch_id == batch.id)
+            ).all()
+        )
         batch.total_items = len(items)
-        batch.ready_items = sum(item.route_status == "ready" and not item.excluded for item in items)
+        batch.ready_items = sum(
+            item.route_status == "ready" and not item.excluded for item in items
+        )
         batch.excluded_items = sum(item.excluded for item in items)
-        batch.blocked_items = sum(item.route_status in {"blocked", "conflict", "needs_review"} and not item.excluded for item in items)
-        targets = list(self.session.scalars(
-            select(CrmDispatchTarget)
-            .join(CrmDispatchItem, CrmDispatchItem.id == CrmDispatchTarget.dispatch_item_id)
-            .where(CrmDispatchItem.batch_id == batch.id)
-        ).all())
-        batch.queued_items = sum(item.business_status in {"approved", "queued", "sent_pending_confirmation"} for item in targets)
+        batch.blocked_items = sum(
+            item.route_status in {"blocked", "conflict", "needs_review"} and not item.excluded
+            for item in items
+        )
+        targets = list(
+            self.session.scalars(
+                select(CrmDispatchTarget)
+                .join(CrmDispatchItem, CrmDispatchItem.id == CrmDispatchTarget.dispatch_item_id)
+                .where(CrmDispatchItem.batch_id == batch.id)
+            ).all()
+        )
+        batch.queued_items = sum(
+            item.business_status in {"approved", "queued", "sent_pending_confirmation"}
+            for item in targets
+        )
         batch.successful_items = sum(item.business_status == "delivered" for item in targets)
-        batch.failed_items = sum(item.business_status in {"failed", "timed_out"} for item in targets)
+        batch.failed_items = sum(
+            item.business_status in {"failed", "timed_out"} for item in targets
+        )
 
     @staticmethod
     def _paperless_sync_required(batch: CrmDispatchBatch) -> bool:
@@ -1523,10 +2198,7 @@ class CrmDispatchService:
             self.settings.paperless_url
             and (
                 self.settings.paperless_token
-                or (
-                    self.settings.paperless_username
-                    and self.settings.paperless_password
-                )
+                or (self.settings.paperless_username and self.settings.paperless_password)
             )
         )
         if not configured:
@@ -1606,11 +2278,13 @@ class CrmDispatchService:
         batch = self.session.get(CrmDispatchBatch, batch_id)
         if batch is None:
             raise CrmDispatchNotFound("Dispatch batch not found")
-        targets = list(self.session.scalars(
-            select(CrmDispatchTarget)
-            .join(CrmDispatchItem, CrmDispatchItem.id == CrmDispatchTarget.dispatch_item_id)
-            .where(CrmDispatchItem.batch_id == batch.id)
-        ).all())
+        targets = list(
+            self.session.scalars(
+                select(CrmDispatchTarget)
+                .join(CrmDispatchItem, CrmDispatchItem.id == CrmDispatchTarget.dispatch_item_id)
+                .where(CrmDispatchItem.batch_id == batch.id)
+            ).all()
+        )
         for target in targets:
             if not target.preview_id:
                 continue
@@ -1621,30 +2295,54 @@ class CrmDispatchService:
             )
             if approval is None:
                 continue
-            deliveries = list(self.session.scalars(
-                select(WhatsAppDelivery).where(
-                    WhatsAppDelivery.approval_id == approval.id
+            expected_preview_delivery_ids: list[uuid.UUID] = []
+            for value in target.preview_delivery_ids_json:
+                try:
+                    expected_preview_delivery_ids.append(uuid.UUID(str(value)))
+                except (TypeError, ValueError):
+                    continue
+            deliveries = (
+                list(
+                    self.session.scalars(
+                        select(WhatsAppDelivery).where(
+                            WhatsAppDelivery.approval_id == approval.id,
+                            WhatsAppDelivery.preview_delivery_id.in_(
+                                expected_preview_delivery_ids
+                            ),
+                        )
+                    ).all()
                 )
-            ).all())
+                if expected_preview_delivery_ids
+                else []
+            )
             target.whatsapp_delivery_ids_json = [str(item.id) for item in deliveries]
             statuses = {item.status for item in deliveries}
             if deliveries:
                 target.sent_at = min(item.queued_at for item in deliveries)
-            if not deliveries and approval.delivery_count == 0:
+            if not deliveries:
                 target.business_status = "blocked"
                 target.error = approval.error or (
-                    "No new WhatsApp delivery was queued; the frozen recipient was "
-                    "blocked, excluded, or already sent."
+                    "No new WhatsApp delivery was queued for this target's exact "
+                    "frozen preview rows; they were blocked, excluded, or already sent."
                 )
+                target.completed_at = approval.completed_at
+            elif "queued" in statuses:
+                target.business_status = "queued"
+                target.error = None
+                target.completed_at = None
             elif "failed" in statuses:
                 target.business_status = "failed"
-                target.error = next(
-                    (item.error for item in deliveries if item.error), None
+                target.error = next((item.error for item in deliveries if item.error), None)
+                target.completed_at = max(
+                    (item.completed_at for item in deliveries if item.completed_at),
+                    default=utcnow(),
                 )
             elif "timed_out" in statuses:
                 target.business_status = "timed_out"
-                target.error = next(
-                    (item.error for item in deliveries if item.error), None
+                target.error = next((item.error for item in deliveries if item.error), None)
+                target.completed_at = max(
+                    (item.completed_at for item in deliveries if item.completed_at),
+                    default=utcnow(),
                 )
             elif statuses and statuses <= {"delivered"}:
                 target.business_status = "delivered"
@@ -1656,24 +2354,26 @@ class CrmDispatchService:
             elif "sent_pending_confirmation" in statuses:
                 target.business_status = "sent_pending_confirmation"
                 target.error = None
-            elif "queued" in statuses:
-                target.business_status = "queued"
-                target.error = None
+                target.completed_at = max(
+                    (item.completed_at for item in deliveries if item.completed_at),
+                    default=utcnow(),
+                )
             elif deliveries:
                 target.business_status = "approved"
                 target.error = None
             target.updated_at = utcnow()
             self.session.add(target)
 
-        items = list(self.session.scalars(
-            select(CrmDispatchItem).where(CrmDispatchItem.batch_id == batch.id)
-        ).all())
+        items = list(
+            self.session.scalars(
+                select(CrmDispatchItem).where(CrmDispatchItem.batch_id == batch.id)
+            ).all()
+        )
         for item in items:
             item_targets = [
                 target
                 for target in targets
-                if target.dispatch_item_id == item.id
-                and target.business_status != "excluded"
+                if target.dispatch_item_id == item.id and target.business_status != "excluded"
             ]
             if batch.direction == "downward":
                 received_document = self.session.scalar(
@@ -1698,17 +2398,30 @@ class CrmDispatchService:
             item.updated_at = utcnow()
             self.session.add(item)
 
+        if batch.direction == "upward":
+            self._refresh_upward_claims(items, targets)
         self._update_batch_counts(batch)
         target_statuses = {item.business_status for item in targets}
         terminal_failures = target_statuses.intersection({"failed", "timed_out"})
-        active = target_statuses.intersection(
-            {"approved", "queued", "sent_pending_confirmation"}
-        )
-        if target_statuses and target_statuses <= {"delivered", "excluded"}:
-            batch.status = "completed"
+        active = target_statuses.intersection({"approved", "queued"})
+        pending_confirmation = "sent_pending_confirmation" in target_statuses
+        if target_statuses and target_statuses <= {
+            "delivered",
+            "sent_pending_confirmation",
+            "excluded",
+        }:
+            batch.status = (
+                "completed_with_errors" if pending_confirmation else "completed"
+            )
             batch.completed_at = utcnow()
-            batch.error_summary = None
-        elif terminal_failures and target_statuses.intersection({"delivered"}):
+            batch.error_summary = (
+                "Some messages were sent but still await final WhatsApp confirmation."
+                if pending_confirmation
+                else None
+            )
+        elif terminal_failures and target_statuses.intersection(
+            {"delivered", "sent_pending_confirmation"}
+        ):
             batch.status = "completed_with_errors"
             batch.completed_at = utcnow()
             batch.error_summary = "Some WhatsApp deliveries failed or timed out."
@@ -1741,21 +2454,90 @@ class CrmDispatchService:
         result["reconciliation"] = reconciliation
         return result
 
+    def _refresh_upward_claims(
+        self,
+        items: list[CrmDispatchItem],
+        targets: list[CrmDispatchTarget],
+    ) -> None:
+        now = utcnow()
+        by_item: dict[uuid.UUID, list[CrmDispatchTarget]] = {}
+        for target in targets:
+            by_item.setdefault(target.dispatch_item_id, []).append(target)
+        for item in items:
+            claim = self.session.scalar(
+                select(CrmUpwardSubmissionClaim).where(
+                    CrmUpwardSubmissionClaim.dispatch_item_id == item.id,
+                    CrmUpwardSubmissionClaim.released_at.is_(None),
+                )
+            )
+            if claim is None or claim.status == "sent":
+                continue
+            item_targets = by_item.get(item.id, [])
+            attempted = any(
+                target.business_status in ATTEMPTED_UPWARD_TARGET_STATUSES
+                or target.sent_at is not None
+                or bool(target.whatsapp_delivery_ids_json)
+                for target in item_targets
+            )
+            if not attempted:
+                continue
+            sent_values = [target.sent_at for target in item_targets if target.sent_at]
+            claim.status = "sent"
+            claim.sent_at = min(sent_values) if sent_values else now
+            claim.updated_at = now
+            self.session.add(claim)
+            self.session.add(
+                ComplaintAuditEvent(
+                    complaint_case_id=item.complaint_case_id,
+                    entity_type="crm_dispatch_item",
+                    entity_id=str(item.id),
+                    event_type="upward_submission_sent",
+                    actor="dispatch-reconciler",
+                    before_json={"claim_status": "reserved"},
+                    after_json={"claim_status": "sent"},
+                    details_json={
+                        "official_letter_id": str(item.official_letter_id),
+                        "dispatch_batch_id": str(item.batch_id),
+                    },
+                )
+            )
+
     def statistics(self) -> dict[str, int]:
-        count = lambda *filters: int(self.session.scalar(select(func.count()).select_from(CrmDispatchBatch).where(*filters)) or 0)
-        ready_upward = int(self.session.scalar(
-            select(func.count()).select_from(CrmOfficialLetter).where(CrmOfficialLetter.status == "finalized")
-        ) or 0)
+        count = lambda *filters: int(
+            self.session.scalar(select(func.count()).select_from(CrmDispatchBatch).where(*filters))
+            or 0
+        )
+        ready_upward = int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(CrmOfficialLetter)
+                .join(
+                    CrmOfficialLetterArtifact,
+                    CrmOfficialLetterArtifact.official_letter_id == CrmOfficialLetter.id,
+                )
+                .where(
+                    CrmOfficialLetter.status == "finalized",
+                    CrmOfficialLetterArtifact.kind == "complete_pdf",
+                    CrmOfficialLetter.id.not_in(_actively_claimed_official_letter_ids()),
+                )
+            )
+            or 0
+        )
         approved_cases = select(ComplaintReplyRevision.complaint_case_id).where(
             ComplaintReplyRevision.is_current.is_(True),
             ComplaintReplyRevision.approval_status.in_(["Approved", "Issued"]),
         )
-        ready_downward = int(self.session.scalar(
-            select(func.count()).select_from(ComplaintCase).where(
-                ComplaintCase.state.in_(["fresh", "published", "review_required"]),
-                ComplaintCase.id.not_in(approved_cases),
+        ready_downward = int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(ComplaintCase)
+                .where(
+                    downward_dispatch_case_eligibility_clause(),
+                    ComplaintCase.id.not_in(approved_cases),
+                )
             )
-        ) or 0)
+            or 0
+        )
         return {
             "ready_to_dispatch": ready_upward + ready_downward,
             "ready_downward": ready_downward,
@@ -1764,9 +2546,36 @@ class CrmDispatchService:
             "awaiting_approval": count(CrmDispatchBatch.status == "ready"),
             "sending": count(CrmDispatchBatch.status.in_(["approved", "queued", "sending"])),
             "completed_with_errors": count(CrmDispatchBatch.status == "completed_with_errors"),
+            "sent_upward": int(
+                self.session.scalar(
+                    select(func.count())
+                    .select_from(CrmUpwardSubmissionClaim)
+                    .where(CrmUpwardSubmissionClaim.status == "sent")
+                )
+                or 0
+            ),
+            "reserved_upward": int(
+                self.session.scalar(
+                    select(func.count())
+                    .select_from(CrmUpwardSubmissionClaim)
+                    .where(
+                        CrmUpwardSubmissionClaim.status == "reserved",
+                        CrmUpwardSubmissionClaim.released_at.is_(None),
+                    )
+                )
+                or 0
+            ),
         }
 
-    def list_batches(self, *, search: str = "", status: str = "", direction: str = "", page: int = 1, page_size: int = 25) -> dict[str, Any]:
+    def list_batches(
+        self,
+        *,
+        search: str = "",
+        status: str = "",
+        direction: str = "",
+        page: int = 1,
+        page_size: int = 25,
+    ) -> dict[str, Any]:
         filters: list[Any] = []
         if status:
             filters.append(CrmDispatchBatch.status == status)
@@ -1774,18 +2583,188 @@ class CrmDispatchService:
             filters.append(CrmDispatchBatch.direction == direction)
         if search.strip():
             pattern = f"%{search.strip()}%"
-            filters.append(or_(CrmDispatchBatch.batch_number.ilike(pattern), CrmDispatchBatch.purpose.ilike(pattern)))
-        total = int(self.session.scalar(select(func.count()).select_from(CrmDispatchBatch).where(*filters)) or 0)
+            filters.append(
+                or_(
+                    CrmDispatchBatch.batch_number.ilike(pattern),
+                    CrmDispatchBatch.purpose.ilike(pattern),
+                )
+            )
+        total = int(
+            self.session.scalar(select(func.count()).select_from(CrmDispatchBatch).where(*filters))
+            or 0
+        )
         rows = self.session.scalars(
-            select(CrmDispatchBatch).where(*filters)
+            select(CrmDispatchBatch)
+            .where(*filters)
             .order_by(CrmDispatchBatch.created_at.desc())
-            .offset((page - 1) * page_size).limit(page_size)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
         ).all()
-        return {"items": [self._batch_dict(item) for item in rows], "total": total, "page": page, "page_size": page_size}
+        return {
+            "items": [self._batch_dict(item) for item in rows],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    def list_upward_submissions(
+        self,
+        *,
+        search: str = "",
+        phase: str = "sent",
+        page: int = 1,
+        page_size: int = 25,
+    ) -> dict[str, Any]:
+        if phase not in {"sent", "in_progress", "attention", "all"}:
+            raise CrmDispatchValidationError(
+                "Submission phase must be sent, in_progress, attention or all"
+            )
+        attempted_batch_ids = (
+            select(CrmDispatchItem.batch_id)
+            .join(
+                CrmDispatchTarget,
+                CrmDispatchTarget.dispatch_item_id == CrmDispatchItem.id,
+            )
+            .where(CrmDispatchTarget.business_status.in_(tuple(ATTEMPTED_UPWARD_TARGET_STATUSES)))
+        )
+        reserved_batch_ids = (
+            select(CrmDispatchItem.batch_id)
+            .join(
+                CrmUpwardSubmissionClaim,
+                CrmUpwardSubmissionClaim.dispatch_item_id == CrmDispatchItem.id,
+            )
+            .where(
+                CrmUpwardSubmissionClaim.status == "reserved",
+                CrmUpwardSubmissionClaim.released_at.is_(None),
+            )
+        )
+        attention_batch_ids = (
+            select(CrmDispatchItem.batch_id)
+            .join(
+                CrmDispatchTarget,
+                CrmDispatchTarget.dispatch_item_id == CrmDispatchItem.id,
+                isouter=True,
+            )
+            .where(
+                or_(
+                    CrmDispatchTarget.business_status.in_(("failed", "timed_out")),
+                    CrmDispatchItem.route_status.in_(("needs_review", "conflict", "blocked")),
+                )
+            )
+        )
+        filters: list[Any] = [CrmDispatchBatch.direction == "upward"]
+        if phase == "sent":
+            filters.append(CrmDispatchBatch.id.in_(attempted_batch_ids))
+        elif phase == "in_progress":
+            filters.append(CrmDispatchBatch.id.in_(reserved_batch_ids))
+        elif phase == "attention":
+            filters.append(
+                or_(
+                    CrmDispatchBatch.id.in_(attention_batch_ids),
+                    CrmDispatchBatch.status.in_(
+                        ("review_required", "failed", "completed_with_errors")
+                    ),
+                )
+            )
+        else:
+            filters.append(
+                or_(
+                    CrmDispatchBatch.id.in_(attempted_batch_ids),
+                    CrmDispatchBatch.id.in_(reserved_batch_ids),
+                )
+            )
+        if search.strip():
+            pattern = f"%{search.strip()}%"
+            matching_batch_ids = select(CrmDispatchItem.batch_id).where(
+                or_(
+                    CrmDispatchItem.complaint_number_snapshot.ilike(pattern),
+                    CrmDispatchItem.letter_number_snapshot.ilike(pattern),
+                )
+            )
+            filters.append(
+                or_(
+                    CrmDispatchBatch.batch_number.ilike(pattern),
+                    CrmDispatchBatch.id.in_(matching_batch_ids),
+                )
+            )
+        total = int(
+            self.session.scalar(select(func.count()).select_from(CrmDispatchBatch).where(*filters))
+            or 0
+        )
+        batches = list(
+            self.session.scalars(
+                select(CrmDispatchBatch)
+                .where(*filters)
+                .order_by(CrmDispatchBatch.created_at.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            ).all()
+        )
+        payload: list[dict[str, Any]] = []
+        for batch in batches:
+            detail = self.detail(batch.id)
+            items = detail["items"]
+            target_statuses = [
+                target["business_status"] for item in items for target in item["targets"]
+            ]
+            sent_at = self.session.scalar(
+                select(func.min(CrmDispatchTarget.sent_at))
+                .join(
+                    CrmDispatchItem,
+                    CrmDispatchItem.id == CrmDispatchTarget.dispatch_item_id,
+                )
+                .where(CrmDispatchItem.batch_id == batch.id)
+            )
+            row = self._batch_dict(batch)
+            row.update(
+                {
+                    "packet_count": len([item for item in items if not item["excluded"]]),
+                    "sent_at": sent_at,
+                    "target_counts": {
+                        value: target_statuses.count(value)
+                        for value in sorted(set(target_statuses))
+                    },
+                    "packets": [
+                        {
+                            "id": item["id"],
+                            "complaint_number": item["complaint_number"],
+                            "letter_number": item["letter_number"],
+                            "letter_date": item["letter_date"],
+                            "compliance_status": item["compliance_status"],
+                            "excluded": item["excluded"],
+                            "packet_download_url": item["packet_download_url"],
+                            "destinations": [
+                                {
+                                    "profile_name": (target.get("profile") or {}).get(
+                                        "name", "Deleted profile"
+                                    ),
+                                    "status": target["business_status"],
+                                    "error": target["error"],
+                                }
+                                for target in item["targets"]
+                            ],
+                        }
+                        for item in items
+                    ],
+                }
+            )
+            payload.append(row)
+        return {
+            "items": payload,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "phase": phase,
+        }
 
     def list_delivery_history(
-        self, *, search: str = "", status: str = "", direction: str = "",
-        page: int = 1, page_size: int = 25,
+        self,
+        *,
+        search: str = "",
+        status: str = "",
+        direction: str = "",
+        page: int = 1,
+        page_size: int = 25,
     ) -> dict[str, Any]:
         filters: list[Any] = [CrmDispatchTarget.preview_id.is_not(None)]
         if status:
@@ -1794,68 +2773,107 @@ class CrmDispatchService:
             filters.append(CrmDispatchBatch.direction == direction)
         if search.strip():
             pattern = f"%{search.strip()}%"
-            filters.append(or_(
-                CrmDispatchBatch.batch_number.ilike(pattern),
-                CrmDispatchItem.complaint_number_snapshot.ilike(pattern),
-            ))
+            filters.append(
+                or_(
+                    CrmDispatchBatch.batch_number.ilike(pattern),
+                    CrmDispatchItem.complaint_number_snapshot.ilike(pattern),
+                )
+            )
         base = (
             select(CrmDispatchTarget)
             .join(CrmDispatchItem, CrmDispatchItem.id == CrmDispatchTarget.dispatch_item_id)
             .join(CrmDispatchBatch, CrmDispatchBatch.id == CrmDispatchItem.batch_id)
             .where(*filters)
         )
-        total = int(self.session.scalar(
-            select(func.count()).select_from(CrmDispatchTarget)
-            .join(CrmDispatchItem, CrmDispatchItem.id == CrmDispatchTarget.dispatch_item_id)
-            .join(CrmDispatchBatch, CrmDispatchBatch.id == CrmDispatchItem.batch_id)
-            .where(*filters)
-        ) or 0)
-        targets = list(self.session.scalars(
-            base.order_by(CrmDispatchTarget.updated_at.desc()).offset((page - 1) * page_size).limit(page_size)
-        ).all())
+        total = int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(CrmDispatchTarget)
+                .join(CrmDispatchItem, CrmDispatchItem.id == CrmDispatchTarget.dispatch_item_id)
+                .join(CrmDispatchBatch, CrmDispatchBatch.id == CrmDispatchItem.batch_id)
+                .where(*filters)
+            )
+            or 0
+        )
+        targets = list(
+            self.session.scalars(
+                base.order_by(CrmDispatchTarget.updated_at.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            ).all()
+        )
         rows: list[dict[str, Any]] = []
         for target in targets:
             item = self.session.get(CrmDispatchItem, target.dispatch_item_id)
             batch = self.session.get(CrmDispatchBatch, item.batch_id) if item else None
             case = self.session.get(ComplaintCase, item.complaint_case_id) if item else None
-            paperless_sync = self.session.scalar(
-                select(CrmPaperlessStatusSync).where(
-                    CrmPaperlessStatusSync.dispatch_item_id == item.id
+            paperless_sync = (
+                self.session.scalar(
+                    select(CrmPaperlessStatusSync).where(
+                        CrmPaperlessStatusSync.dispatch_item_id == item.id
+                    )
                 )
-            ) if item else None
+                if item
+                else None
+            )
             profile = self.session.get(WhatsAppDispatchProfile, target.dispatch_profile_id)
-            approval = self.session.scalar(
-                select(WhatsAppDispatchApproval).where(WhatsAppDispatchApproval.preview_id == target.preview_id)
-            ) if target.preview_id else None
-            deliveries = list(self.session.scalars(
-                select(WhatsAppDelivery).where(WhatsAppDelivery.approval_id == approval.id)
-                .order_by(WhatsAppDelivery.queued_at.desc())
-            ).all()) if approval else []
+            approval = (
+                self.session.scalar(
+                    select(WhatsAppDispatchApproval).where(
+                        WhatsAppDispatchApproval.preview_id == target.preview_id
+                    )
+                )
+                if target.preview_id
+                else None
+            )
+            deliveries = (
+                list(
+                    self.session.scalars(
+                        select(WhatsAppDelivery)
+                        .where(WhatsAppDelivery.approval_id == approval.id)
+                        .order_by(WhatsAppDelivery.queued_at.desc())
+                    ).all()
+                )
+                if approval
+                else []
+            )
             latest = deliveries[0] if deliveries else None
-            rows.append({
-                "id": str(target.id),
-                "batch_id": str(batch.id) if batch else None,
-                "batch_number": batch.batch_number if batch else "—",
-                "direction": batch.direction if batch else "",
-                "purpose": batch.purpose if batch else "",
-                "complaint_number": item.complaint_number_snapshot if item else "—",
-                "profile_name": profile.name if profile else "Deleted profile",
-                "recipient_name": latest.recipient_name if latest else (target.recipient_snapshot_json[0].get("name") if target.recipient_snapshot_json else "—"),
-                "target": latest.target if latest else (target.recipient_snapshot_json[0].get("jid") if target.recipient_snapshot_json else "—"),
-                "status": latest.status if latest else target.business_status,
-                "crm_status": target.business_status,
-                "compliance_status": item.compliance_status if item else None,
-                "paperless_sync": self._paperless_sync_dict(
-                    paperless_sync,
-                    document_id=(
-                        case.canonical_paperless_document_id if case else None
+            rows.append(
+                {
+                    "id": str(target.id),
+                    "batch_id": str(batch.id) if batch else None,
+                    "batch_number": batch.batch_number if batch else "—",
+                    "direction": batch.direction if batch else "",
+                    "purpose": batch.purpose if batch else "",
+                    "complaint_number": item.complaint_number_snapshot if item else "—",
+                    "profile_name": profile.name if profile else "Deleted profile",
+                    "recipient_name": latest.recipient_name
+                    if latest
+                    else (
+                        target.recipient_snapshot_json[0].get("name")
+                        if target.recipient_snapshot_json
+                        else "—"
                     ),
-                ),
-                "error": latest.error if latest else target.error,
-                "queued_at": latest.queued_at if latest else None,
-                "completed_at": latest.completed_at if latest else target.completed_at,
-                "detail_url": f"/crm/dispatch/batches/{batch.id}/" if batch else None,
-            })
+                    "target": latest.target
+                    if latest
+                    else (
+                        target.recipient_snapshot_json[0].get("jid")
+                        if target.recipient_snapshot_json
+                        else "—"
+                    ),
+                    "status": latest.status if latest else target.business_status,
+                    "crm_status": target.business_status,
+                    "compliance_status": item.compliance_status if item else None,
+                    "paperless_sync": self._paperless_sync_dict(
+                        paperless_sync,
+                        document_id=(case.canonical_paperless_document_id if case else None),
+                    ),
+                    "error": latest.error if latest else target.error,
+                    "queued_at": latest.queued_at if latest else None,
+                    "completed_at": latest.completed_at if latest else target.completed_at,
+                    "detail_url": f"/crm/dispatch/batches/{batch.id}/" if batch else None,
+                }
+            )
         return {"items": rows, "total": total, "page": page, "page_size": page_size}
 
     def _batch_dict(self, batch: CrmDispatchBatch) -> dict[str, Any]:
@@ -1887,93 +2905,158 @@ class CrmDispatchService:
         batch = self.session.get(CrmDispatchBatch, batch_id)
         if batch is None:
             raise CrmDispatchNotFound("Dispatch batch not found")
-        items = list(self.session.scalars(
-            select(CrmDispatchItem).where(CrmDispatchItem.batch_id == batch.id).order_by(CrmDispatchItem.complaint_number_snapshot)
-        ).all())
+        items = list(
+            self.session.scalars(
+                select(CrmDispatchItem)
+                .where(CrmDispatchItem.batch_id == batch.id)
+                .order_by(CrmDispatchItem.complaint_number_snapshot)
+            ).all()
+        )
         item_payload = []
         preview_ids: set[uuid.UUID] = set()
         for item in items:
-            targets = list(self.session.scalars(select(CrmDispatchTarget).where(CrmDispatchTarget.dispatch_item_id == item.id)).all())
+            targets = list(
+                self.session.scalars(
+                    select(CrmDispatchTarget).where(CrmDispatchTarget.dispatch_item_id == item.id)
+                ).all()
+            )
             case = self.session.get(ComplaintCase, item.complaint_case_id)
             paperless_sync = self.session.scalar(
                 select(CrmPaperlessStatusSync).where(
                     CrmPaperlessStatusSync.dispatch_item_id == item.id
                 )
             )
+            submission_claim = self.session.scalar(
+                select(CrmUpwardSubmissionClaim).where(
+                    CrmUpwardSubmissionClaim.dispatch_item_id == item.id
+                )
+            )
             for target in targets:
                 if target.preview_id:
                     preview_ids.add(target.preview_id)
-            item_payload.append({
-                "id": str(item.id),
-                "complaint_case_id": str(item.complaint_case_id),
-                "official_letter_id": str(item.official_letter_id) if item.official_letter_id else None,
-                "complete_pdf_artifact_id": str(item.complete_pdf_artifact_id) if item.complete_pdf_artifact_id else None,
-                "packet_artifact_id": str(item.packet_artifact_id) if item.packet_artifact_id else None,
-                "complaint_number": item.complaint_number_snapshot,
-                "letter_number": item.letter_number_snapshot,
-                "letter_date": item.letter_date_snapshot,
-                "compliance_status": item.compliance_status,
-                "paperless_sync": self._paperless_sync_dict(
-                    paperless_sync,
-                    document_id=(
-                        case.canonical_paperless_document_id if case else None
-                    ),
-                ),
-                "packet_sha256": item.packet_sha256,
-                "packet_size_bytes": item.packet_size_bytes,
-                "packet_page_count": item.packet_page_count,
-                "route_status": item.route_status,
-                "route_summary": item.route_summary_json,
-                "excluded": item.excluded,
-                "exclusion_reason": item.exclusion_reason,
-                "packet_download_url": f"/api/v1/crm/dispatch/artifacts/{item.packet_artifact_id}/download" if item.packet_artifact_id else None,
-                "targets": [
-                    {
-                        "id": str(target.id),
-                        "routing_rule_id": str(target.routing_rule_id) if target.routing_rule_id else None,
-                        "dispatch_profile_id": str(target.dispatch_profile_id),
-                        "profile": self._profile_dict(self.session.get(WhatsAppDispatchProfile, target.dispatch_profile_id)) if self.session.get(WhatsAppDispatchProfile, target.dispatch_profile_id) else None,
-                        "selection_source": target.selection_source,
-                        "manual_override_reason": target.manual_override_reason,
-                        "recipients": target.recipient_snapshot_json,
-                        "message": target.message_snapshot,
-                        "preview_id": str(target.preview_id) if target.preview_id else None,
-                        "preview_delivery_ids": target.preview_delivery_ids_json,
-                        "whatsapp_delivery_ids": target.whatsapp_delivery_ids_json,
-                        "business_status": target.business_status,
-                        "error": target.error,
+            item_payload.append(
+                {
+                    "id": str(item.id),
+                    "complaint_case_id": str(item.complaint_case_id),
+                    "official_letter_id": str(item.official_letter_id)
+                    if item.official_letter_id
+                    else None,
+                    "complete_pdf_artifact_id": str(item.complete_pdf_artifact_id)
+                    if item.complete_pdf_artifact_id
+                    else None,
+                    "packet_artifact_id": str(item.packet_artifact_id)
+                    if item.packet_artifact_id
+                    else None,
+                    "complaint_number": item.complaint_number_snapshot,
+                    "letter_number": item.letter_number_snapshot,
+                    "letter_date": item.letter_date_snapshot,
+                    "compliance_status": item.compliance_status,
+                    "submission_claim": {
+                        "status": submission_claim.status,
+                        "claimed_at": submission_claim.claimed_at,
+                        "sent_at": submission_claim.sent_at,
+                        "released_at": submission_claim.released_at,
+                        "release_reason": submission_claim.release_reason,
                     }
-                    for target in targets
-                ],
-            })
+                    if submission_claim
+                    else None,
+                    "paperless_sync": self._paperless_sync_dict(
+                        paperless_sync,
+                        document_id=(case.canonical_paperless_document_id if case else None),
+                    ),
+                    "packet_sha256": item.packet_sha256,
+                    "packet_size_bytes": item.packet_size_bytes,
+                    "packet_page_count": item.packet_page_count,
+                    "route_status": item.route_status,
+                    "route_summary": item.route_summary_json,
+                    "excluded": item.excluded,
+                    "exclusion_reason": item.exclusion_reason,
+                    "packet_download_url": f"/api/v1/crm/dispatch/artifacts/{item.packet_artifact_id}/download"
+                    if item.packet_artifact_id
+                    else None,
+                    "targets": [
+                        {
+                            "id": str(target.id),
+                            "routing_rule_id": str(target.routing_rule_id)
+                            if target.routing_rule_id
+                            else None,
+                            "dispatch_profile_id": str(target.dispatch_profile_id),
+                            "profile": self._profile_dict(
+                                self.session.get(
+                                    WhatsAppDispatchProfile, target.dispatch_profile_id
+                                )
+                            )
+                            if self.session.get(WhatsAppDispatchProfile, target.dispatch_profile_id)
+                            else None,
+                            "selection_source": target.selection_source,
+                            "manual_override_reason": target.manual_override_reason,
+                            "recipients": target.recipient_snapshot_json,
+                            "message": target.message_snapshot,
+                            "preview_id": str(target.preview_id) if target.preview_id else None,
+                            "preview_delivery_ids": target.preview_delivery_ids_json,
+                            "whatsapp_delivery_ids": target.whatsapp_delivery_ids_json,
+                            "business_status": target.business_status,
+                            "error": target.error,
+                            "sent_at": target.sent_at,
+                            "completed_at": target.completed_at,
+                        }
+                        for target in targets
+                    ],
+                }
+            )
         previews = []
         for preview_id in sorted(preview_ids, key=str):
             preview = self.session.get(WhatsAppDispatchPreview, preview_id)
             if preview is None:
                 continue
-            approval = self.session.scalar(select(WhatsAppDispatchApproval).where(WhatsAppDispatchApproval.preview_id == preview.id))
-            deliveries = list(self.session.scalars(select(WhatsAppDispatchPreviewDelivery).where(WhatsAppDispatchPreviewDelivery.preview_id == preview.id).order_by(WhatsAppDispatchPreviewDelivery.sequence)).all())
-            previews.append({
-                "id": str(preview.id),
-                "preview_key": preview.preview_key,
-                "profile_name": preview.profile_name,
-                "status": preview.status,
-                "ready_count": preview.ready_count,
-                "blocked_count": preview.blocked_count,
-                "skipped_count": preview.skipped_count,
-                "content_sha256": preview.content_sha256,
-                "approval": {
-                    "id": str(approval.id), "status": approval.status, "approved_by": approval.approved_by,
-                } if approval else None,
-                "deliveries": [
-                    {
-                        "id": str(row.id), "target_name": row.target_name, "target_jid": row.target_jid,
-                        "message": row.message, "status": row.status, "issues": row.issues,
+            approval = self.session.scalar(
+                select(WhatsAppDispatchApproval).where(
+                    WhatsAppDispatchApproval.preview_id == preview.id
+                )
+            )
+            deliveries = list(
+                self.session.scalars(
+                    select(WhatsAppDispatchPreviewDelivery)
+                    .where(WhatsAppDispatchPreviewDelivery.preview_id == preview.id)
+                    .order_by(WhatsAppDispatchPreviewDelivery.sequence)
+                ).all()
+            )
+            previews.append(
+                {
+                    "id": str(preview.id),
+                    "preview_key": preview.preview_key,
+                    "profile_name": preview.profile_name,
+                    "status": preview.status,
+                    "ready_count": preview.ready_count,
+                    "blocked_count": preview.blocked_count,
+                    "skipped_count": preview.skipped_count,
+                    "content_sha256": preview.content_sha256,
+                    "approval": {
+                        "id": str(approval.id),
+                        "status": approval.status,
+                        "approved_by": approval.approved_by,
                     }
-                    for row in deliveries
-                ],
-            })
-        return {"batch": self._batch_dict(batch), "items": item_payload, "previews": previews, "profiles": self.profiles(include_inactive=False)}
+                    if approval
+                    else None,
+                    "deliveries": [
+                        {
+                            "id": str(row.id),
+                            "target_name": row.target_name,
+                            "target_jid": row.target_jid,
+                            "message": row.message,
+                            "status": row.status,
+                            "issues": row.issues,
+                        }
+                        for row in deliveries
+                    ],
+                }
+            )
+        return {
+            "batch": self._batch_dict(batch),
+            "items": item_payload,
+            "previews": previews,
+            "profiles": self.profiles(include_inactive=False),
+        }
 
 
 __all__ = [
@@ -1981,4 +3064,5 @@ __all__ = [
     "CrmDispatchError",
     "CrmDispatchNotFound",
     "CrmDispatchValidationError",
+    "CrmDispatchConflict",
 ]

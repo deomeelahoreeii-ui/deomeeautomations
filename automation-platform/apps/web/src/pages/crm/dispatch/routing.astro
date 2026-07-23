@@ -5,7 +5,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
 <CrmLayout title="CRM Dispatch Routing" description="Manage controlled WhatsApp destinations, message templates and deterministic complaint routing rules." page="dispatch">
   <a class="btn btn-sm" href="/crm/dispatch/" slot="actions">← Dispatch Queue</a>
   <main id="crm-routing" class="crm32-page crm-routing-page" data-api-base={apiBase}>
-    <nav class="dispatch-tabs" aria-label="CRM dispatch pages"><a href="/crm/dispatch/">Dispatch Queue</a><a href="/crm/dispatch/batches/">Batches</a><a class="active" href="/crm/dispatch/routing/">Routing</a><a href="/crm/dispatch/deliveries/">Delivery History</a></nav>
+    <nav class="dispatch-tabs" aria-label="CRM dispatch pages"><a href="/crm/dispatch/">Dispatch Queue</a><a href="/crm/dispatch/batches/">Batches</a><a href="/crm/dispatch/sent/">Sent Compliances</a><a class="active" href="/crm/dispatch/routing/">Routing</a><a href="/crm/dispatch/deliveries/">Delivery History</a></nav>
     <section class="master-card routing-intro"><header class="crm-card-heading"><div><p class="eyebrow">Controlled dispatch</p><h2>Separate destinations from routing rules</h2><p>A destination profile defines who receives the packet and how it is sent. Routing rules decide when a complaint should use that destination. WhatsApp contacts and groups always come from the synchronized directory.</p></div></header></section>
     <nav class="routing-workspace-tabs"><button class="active" type="button" data-view="profiles">Destination Profiles</button><button type="button" data-view="rules">Routing Rules</button><button type="button" data-view="test">Test Routing</button></nav>
 

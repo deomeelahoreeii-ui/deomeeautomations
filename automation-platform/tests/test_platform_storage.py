@@ -14,6 +14,8 @@ import whatsapp_gateway.models  # noqa: F401
 from automation_core.config import Settings
 from automation_core.models import Artifact, Job, JobStatus, JobType, StoredObject
 from automation_core.object_storage import S3ObjectStorage
+from automation_core.job_service import record_artifact
+from automation_core.object_storage import ObjectStorageError
 from automation_core.storage_catalog import archive_artifact, hydrate_stored_object, sha256_file
 
 
@@ -134,3 +136,113 @@ def test_antidengue_artifact_is_content_addressed_deduplicated_and_hydratable(tm
         hydrate_stored_object(stored, destination, settings=settings, storage=storage)
         assert destination.read_bytes() == source.read_bytes()
         assert sha256_file(destination) == stored.sha256
+
+
+def test_registered_artifact_rejects_mutated_bytes_and_preserves_local_file(tmp_path):
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+    settings = Settings(object_storage_enabled=True)
+    source = tmp_path / "report.xlsx"
+    source.write_bytes(b"registered bytes")
+
+    class StorageMustNotRun:
+        def put_file_if_absent(self, **_kwargs):
+            raise AssertionError("mutation must be rejected before upload")
+
+    with Session(engine) as session:
+        job = Job(
+            type=JobType.antidengue_report.value,
+            title="Mutation guard",
+            status=JobStatus.succeeded.value,
+        )
+        session.add(job)
+        session.commit()
+        artifact = record_artifact(
+            session,
+            job.id,
+            source,
+            module_key="antidengue",
+            kind="report",
+        )
+        original_sha256 = artifact.sha256
+        source.write_bytes(b"different bytes")
+
+        assert not archive_artifact(
+            session,
+            artifact,
+            settings=settings,
+            storage=StorageMustNotRun(),
+        )
+        session.commit()
+        assert artifact.storage_status == "error"
+        assert "changed after registration" in (artifact.storage_error or "")
+        assert artifact.sha256 == original_sha256
+        assert source.is_file()
+
+
+def test_rustfs_outage_leaves_artifact_retryable_and_local(tmp_path):
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+    settings = Settings(object_storage_enabled=True)
+    source = tmp_path / "report.xlsx"
+    source.write_bytes(b"keep me until RustFS recovers")
+
+    class OfflineStorage:
+        def put_file_if_absent(self, **_kwargs):
+            raise ObjectStorageError("RustFS unavailable")
+
+    with Session(engine) as session:
+        job = Job(
+            type=JobType.antidengue_report.value,
+            title="Outage guard",
+            status=JobStatus.succeeded.value,
+        )
+        session.add(job)
+        session.commit()
+        artifact = record_artifact(
+            session,
+            job.id,
+            source,
+            module_key="antidengue",
+            kind="report",
+        )
+        assert not archive_artifact(
+            session,
+            artifact,
+            settings=settings,
+            storage=OfflineStorage(),
+        )
+        session.commit()
+        assert artifact.storage_status == "error"
+        assert "RustFS unavailable" in (artifact.storage_error or "")
+        assert source.read_bytes() == b"keep me until RustFS recovers"
+
+
+def test_artifact_registration_is_idempotent_for_interruption_recovery(tmp_path):
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+    source = tmp_path / "report.xlsx"
+    source.write_bytes(b"one immutable result")
+    with Session(engine) as session:
+        job = Job(type=JobType.antidengue_report.value, title="Retry discovery")
+        session.add(job)
+        session.commit()
+        first = record_artifact(
+            session, job.id, source, module_key="antidengue", kind="report"
+        )
+        second = record_artifact(
+            session, job.id, source, module_key="antidengue", kind="report"
+        )
+        assert second.id == first.id

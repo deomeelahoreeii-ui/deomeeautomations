@@ -233,7 +233,9 @@ def test_markaz_digest_fans_out_one_delivery_and_workbook_per_live_scope(
             markaz_id=markazes[0].id,
         )
         application = WhatsAppApplication(key="antidengue", name="AntiDengue")
-        account = WhatsAppAccount(name="Primary", worker_key="digest-scope-test")
+        account = WhatsAppAccount(
+            name="Primary", worker_key="digest-scope-test", connected=True,
+        )
         session.add_all([officer, application, account]); session.flush()
         for markaz in markazes:
             session.add(OfficerJurisdiction(
@@ -290,6 +292,20 @@ def test_markaz_digest_fans_out_one_delivery_and_workbook_per_live_scope(
 
         assert len(deliveries) == len(markazes) == 2
         assert {item.target_jid for item in deliveries} == {"923001234567@s.whatsapp.net"}
+        assert preview.warning_count == 0
+        assert {item.status for item in deliveries} == {"ready"}
+        assert all(
+            {
+                "code": "master_data_phone_target",
+                "severity": "info",
+                "message": (
+                    "This dynamic AEO route uses the current active officer mobile "
+                    "from Master Data; a synchronized directory identity is not required."
+                ),
+            }
+            in item.issues
+            for item in deliveries
+        )
         assert {
             tuple(item.routing_snapshot["dynamic_audience"]["markaz_ids"])
             for item in deliveries

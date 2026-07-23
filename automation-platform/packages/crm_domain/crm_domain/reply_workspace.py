@@ -14,6 +14,7 @@ from sqlmodel import Session, select
 from automation_core.config import Settings
 from automation_core.time import utcnow
 from crm_domain.json_safe import json_safe
+from crm_domain.case_scopes import reply_case_eligibility_clause
 from crm_domain.models import (
     ComplaintAuditEvent,
     ComplaintCase,
@@ -150,7 +151,9 @@ class ComplaintReplyWorkspaceService:
             raise ReplyNotFoundError("Complaint case was not found")
         return case
 
-    def _require_category(self, category_id: uuid.UUID, *, active: bool = True) -> ComplaintCategory:
+    def _require_category(
+        self, category_id: uuid.UUID, *, active: bool = True
+    ) -> ComplaintCategory:
         category = self.session.get(ComplaintCategory, category_id)
         if category is None:
             raise ReplyNotFoundError("Complaint category was not found")
@@ -593,7 +596,9 @@ class ComplaintReplyWorkspaceService:
         if status in {"Pending Approval", "Approved", "Issued"} and not final_text:
             raise ReplyValidationError("Enter the final reply before using this status")
         if ai_eligible and status not in APPROVED_REPLY_STATUSES:
-            raise ReplyValidationError("AI eligibility is allowed only for Approved or Issued replies")
+            raise ReplyValidationError(
+                "AI eligibility is allowed only for Approved or Issued replies"
+            )
         if not case.frappe_ticket_id and status in {"Pending Approval", "Approved", "Issued"}:
             raise ReplyValidationError(
                 "This complaint is not linked to Frappe Helpdesk; save it as a local Draft first"
@@ -671,7 +676,10 @@ class ComplaintReplyWorkspaceService:
             ).pull_case(case.id)
             if pull_result.get("status") != "pulled":
                 raise ReplyWorkspaceError(
-                    str(pull_result.get("error") or "Helpdesk write succeeded but CRM pull-back failed")
+                    str(
+                        pull_result.get("error")
+                        or "Helpdesk write succeeded but CRM pull-back failed"
+                    )
                 )
             refreshed = self._require_case(case.id)
             local = self._workspace_reply(case.id)
@@ -751,7 +759,10 @@ class ComplaintReplyWorkspaceService:
                     state="failed",
                     before=before,
                     after=self._workspace_reply_snapshot(failed_local),
-                    details={"write_verified": False, "local_draft_preserved": failed_local is not None},
+                    details={
+                        "write_verified": False,
+                        "local_draft_preserved": failed_local is not None,
+                    },
                     error=error,
                 )
                 self.session.commit()
@@ -781,7 +792,9 @@ class ComplaintReplyWorkspaceService:
         case = self._require_case(case_id)
         allowed_roles = {"reply", "report", "policy", "attachment"}
         if role not in allowed_roles:
-            raise ReplyValidationError("Choose reply, report, policy or attachment as the file role")
+            raise ReplyValidationError(
+                "Choose reply, report, policy or attachment as the file role"
+            )
         if not content:
             raise ReplyValidationError("The uploaded case file is empty")
         if len(content) > 50 * 1024 * 1024:
@@ -790,7 +803,10 @@ class ComplaintReplyWorkspaceService:
         digest = hashlib.sha256(content).hexdigest()
         existing = self.session.exec(
             select(ComplaintDocument, ComplaintDocumentCaseLink)
-            .join(ComplaintDocumentCaseLink, ComplaintDocumentCaseLink.complaint_document_id == ComplaintDocument.id)
+            .join(
+                ComplaintDocumentCaseLink,
+                ComplaintDocumentCaseLink.complaint_document_id == ComplaintDocument.id,
+            )
             .where(
                 ComplaintDocumentCaseLink.complaint_case_id == case.id,
                 ComplaintDocument.source_sha256 == digest,
@@ -799,14 +815,18 @@ class ComplaintReplyWorkspaceService:
         if existing:
             document, link = existing
             return {
-                "id": str(document.id), "filename": document.original_filename,
-                "role": link.role, "review_state": link.review_state,
+                "id": str(document.id),
+                "filename": document.original_filename,
+                "role": link.role,
+                "review_state": link.review_state,
                 "paperless_document_id": document.paperless_document_id,
                 "source_kind": document.source_kind,
                 "download_url": f"/api/v1/crm/reply-workspace/documents/{document.id}/download",
                 "duplicate": True,
             }
-        root = self.settings.artifact_root.expanduser().resolve() / "crm-case-documents" / str(case.id)
+        root = (
+            self.settings.artifact_root.expanduser().resolve() / "crm-case-documents" / str(case.id)
+        )
         root.mkdir(parents=True, exist_ok=True)
         suffix = Path(safe_name).suffix
         destination = root / f"{uuid.uuid4().hex}{suffix}"
@@ -848,12 +868,14 @@ class ComplaintReplyWorkspaceService:
             CrmOfficialLetter.complaint_case_id == case.id,
             CrmOfficialLetter.status == "finalized",
         )
-        existing_packets = list(self.session.exec(
-            select(CrmOfficialLetterArtifact).where(
-                CrmOfficialLetterArtifact.official_letter_id.in_(finalized_letter_ids),
-                CrmOfficialLetterArtifact.kind == "complete_pdf",
-            )
-        ).all())
+        existing_packets = list(
+            self.session.exec(
+                select(CrmOfficialLetterArtifact).where(
+                    CrmOfficialLetterArtifact.official_letter_id.in_(finalized_letter_ids),
+                    CrmOfficialLetterArtifact.kind == "complete_pdf",
+                )
+            ).all()
+        )
         for artifact in existing_packets:
             try:
                 Path(artifact.path).expanduser().resolve().unlink(missing_ok=True)
@@ -868,12 +890,22 @@ class ComplaintReplyWorkspaceService:
             event_type="case_file_uploaded",
             state="succeeded",
             actor=actor,
-            after={"filename": safe_name, "role": role, "sha256": digest, "source_dispatch_batch_id": str(dispatch_batch_id) if dispatch_batch_id else None, "source_dispatch_item_id": str(dispatch_item_id) if dispatch_item_id else None, "invalidated_complete_pdf_count": invalidated_packets},
+            after={
+                "filename": safe_name,
+                "role": role,
+                "sha256": digest,
+                "source_dispatch_batch_id": str(dispatch_batch_id) if dispatch_batch_id else None,
+                "source_dispatch_item_id": str(dispatch_item_id) if dispatch_item_id else None,
+                "invalidated_complete_pdf_count": invalidated_packets,
+            },
         )
         self.session.commit()
         return {
-            "id": str(document.id), "filename": safe_name, "role": role,
-            "review_state": "accepted", "paperless_document_id": None,
+            "id": str(document.id),
+            "filename": safe_name,
+            "role": role,
+            "review_state": "accepted",
+            "paperless_document_id": None,
             "source_kind": "manual_upload",
             "download_url": f"/api/v1/crm/reply-workspace/documents/{document.id}/download",
             "duplicate": False,
@@ -888,9 +920,13 @@ class ComplaintReplyWorkspaceService:
             raise ReplyNotFoundError("The manually uploaded case file is unavailable")
         return document, path
 
-    def editor(self, case_id: uuid.UUID) -> dict[str, Any]:
+    def editor(
+        self, case_id: uuid.UUID, *, refresh_remote: bool = True
+    ) -> dict[str, Any]:
         case = self._require_case(case_id)
-        category = self.session.get(ComplaintCategory, case.category_id) if case.category_id else None
+        category = (
+            self.session.get(ComplaintCategory, case.category_id) if case.category_id else None
+        )
         subcategory = (
             self.session.get(ComplaintSubcategory, case.sub_category_id)
             if case.sub_category_id
@@ -898,7 +934,7 @@ class ComplaintReplyWorkspaceService:
         )
         live_error = ""
         live_ticket: dict[str, Any] = {}
-        if case.frappe_ticket_id:
+        if refresh_remote and case.frappe_ticket_id:
             try:
                 live_ticket = self.client.get_resource("HD Ticket", case.frappe_ticket_id)
             except Exception as exc:
@@ -959,9 +995,7 @@ class ComplaintReplyWorkspaceService:
                 else case.frappe_disposal_outcome
             ),
             "ai_eligible": _truthy(
-                live_ticket.get("custom_ai_eligible")
-                if live_ticket
-                else case.frappe_ai_eligible
+                live_ticket.get("custom_ai_eligible") if live_ticket else case.frappe_ai_eligible
             ),
             "workflow_status": clean_name(
                 str(live_ticket.get("status") if live_ticket else case.frappe_workflow_status or "")
@@ -982,18 +1016,23 @@ class ComplaintReplyWorkspaceService:
                 "Draft" if reply.workspace_status == "Imported Draft" else reply.workspace_status
             )
             current_reply = {
-                "inquiry_findings": _text(reply.inquiry_findings) or remote_reply["inquiry_findings"],
+                "inquiry_findings": _text(reply.inquiry_findings)
+                or remote_reply["inquiry_findings"],
                 "school_version": _text(reply.school_version) or remote_reply["school_version"],
-                "applicable_policy": _text(reply.applicable_policy) or remote_reply["applicable_policy"],
+                "applicable_policy": _text(reply.applicable_policy)
+                or remote_reply["applicable_policy"],
                 "final_reply": local_text,
                 "reply_status": operational_status or "Draft",
                 "display_status": reply.workspace_status or operational_status or "Draft",
-                "disposal_outcome": _text(reply.disposal_outcome) or remote_reply["disposal_outcome"],
+                "disposal_outcome": _text(reply.disposal_outcome)
+                or remote_reply["disposal_outcome"],
                 "ai_eligible": bool(reply.ai_eligible),
                 "workflow_status": remote_reply["workflow_status"],
                 "source": "local_workspace",
                 "source_label": (
-                    "Imported CSV draft" if reply.source_batch_id or reply.source_filename.lower().endswith((".csv", ".xlsx"))
+                    "Imported CSV draft"
+                    if reply.source_batch_id
+                    or reply.source_filename.lower().endswith((".csv", ".xlsx"))
                     else "Local workspace draft"
                 ),
                 "sync_status": "conflict" if conflict else reply.sync_status,
@@ -1044,7 +1083,9 @@ class ComplaintReplyWorkspaceService:
             if source_batch
             else None
         )
-        latest_revision = next((row for row in revisions if row.is_current), revisions[0] if revisions else None)
+        latest_revision = next(
+            (row for row in revisions if row.is_current), revisions[0] if revisions else None
+        )
         revision_payloads = [
             {**row.model_dump(mode="json"), "version": len(revisions) - index}
             for index, row in enumerate(revisions)
@@ -1095,7 +1136,8 @@ class ComplaintReplyWorkspaceService:
                     "created_at": document.created_at,
                     "download_url": (
                         f"/api/v1/crm/reply-workspace/documents/{document.id}/download"
-                        if document.source_kind == "manual_upload" else None
+                        if document.source_kind == "manual_upload"
+                        else None
                     ),
                 }
                 for document, link in documents
@@ -1107,13 +1149,10 @@ class ComplaintReplyWorkspaceService:
 
     def statistics(self) -> dict[str, Any]:
         cases = list(
-            self.session.exec(
-                select(ComplaintCase).where(ComplaintCase.state == "published")
-            ).all()
+            self.session.exec(select(ComplaintCase).where(reply_case_eligibility_clause())).all()
         )
         replies = {
-            row.complaint_case_id: row
-            for row in self.session.exec(select(ComplaintReply)).all()
+            row.complaint_case_id: row for row in self.session.exec(select(ComplaintReply)).all()
         }
         effective_statuses: list[str] = []
         awaiting_reply = 0
@@ -1135,7 +1174,8 @@ class ComplaintReplyWorkspaceService:
                 awaiting_reply += 1
         statuses = Counter(effective_statuses)
         return {
-            "published_cases": len(cases),
+            "published_cases": sum(case.state == "published" for case in cases),
+            "reply_eligible_cases": len(cases),
             "awaiting_classification": sum(case.category_id is None for case in cases),
             "awaiting_reply": awaiting_reply,
             "imported_drafts": statuses.get("Imported Draft", 0),
@@ -1166,15 +1206,38 @@ class ComplaintReplyWorkspaceService:
         ai_eligible: bool | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        scope: str = "all",
+        source_batch_id: uuid.UUID | None = None,
         page: int = 1,
         page_size: int = 25,
     ) -> dict[str, Any]:
-        filters: list[Any] = [ComplaintCase.state == "published"]
+        if scope not in {"actionable", "all"}:
+            raise ReplyValidationError("Reply queue scope must be actionable or all")
+        filters: list[Any] = [reply_case_eligibility_clause()]
         pending_local_ids = select(ComplaintReply.complaint_case_id).where(
             ComplaintReply.sync_status.in_(("not_synced", "pending", "failed", "conflict")),
             ComplaintReply.source_kind.in_(("bulk_import", "manual_editor")),
             ComplaintReply.reply_text != "",
         )
+        if scope == "actionable":
+            filters.append(
+                or_(
+                    ComplaintCase.id.in_(pending_local_ids),
+                    ComplaintCase.frappe_reply_approval_status.is_(None),
+                    ComplaintCase.frappe_reply_approval_status.not_in(
+                        tuple(APPROVED_REPLY_STATUSES)
+                    ),
+                )
+            )
+        if source_batch_id:
+            filters.append(
+                ComplaintCase.id.in_(
+                    select(CrmBulkOperationItem.complaint_case_id).where(
+                        CrmBulkOperationItem.batch_id == source_batch_id,
+                        CrmBulkOperationItem.complaint_case_id.is_not(None),
+                    )
+                )
+            )
         if category_id:
             filters.append(ComplaintCase.category_id == category_id)
         if subcategory_id:
@@ -1196,7 +1259,9 @@ class ComplaintReplyWorkspaceService:
                     ComplaintCase.id.in_(
                         select(ComplaintReply.complaint_case_id).where(
                             ComplaintReply.workspace_status == "Imported Draft",
-                            ComplaintReply.sync_status.in_(("not_synced", "pending", "failed", "conflict")),
+                            ComplaintReply.sync_status.in_(
+                                ("not_synced", "pending", "failed", "conflict")
+                            ),
                         )
                     )
                 )
@@ -1207,7 +1272,9 @@ class ComplaintReplyWorkspaceService:
                         ComplaintCase.id.in_(
                             select(ComplaintReply.complaint_case_id).where(
                                 ComplaintReply.workspace_status == normalized,
-                                ComplaintReply.sync_status.in_(("not_synced", "pending", "failed", "conflict")),
+                                ComplaintReply.sync_status.in_(
+                                    ("not_synced", "pending", "failed", "conflict")
+                                ),
                             )
                         ),
                     )
@@ -1217,9 +1284,13 @@ class ComplaintReplyWorkspaceService:
         if ai_eligible is not None:
             filters.append(ComplaintCase.frappe_ai_eligible == ai_eligible)
         if date_from:
-            filters.append(ComplaintCase.created_at >= datetime.combine(date_from, datetime.min.time()))
+            filters.append(
+                ComplaintCase.created_at >= datetime.combine(date_from, datetime.min.time())
+            )
         if date_to:
-            filters.append(ComplaintCase.created_at <= datetime.combine(date_to, datetime.max.time()))
+            filters.append(
+                ComplaintCase.created_at <= datetime.combine(date_to, datetime.max.time())
+            )
         if search.strip():
             term = f"%{search.strip()}%"
             filters.append(
@@ -1237,9 +1308,7 @@ class ComplaintReplyWorkspaceService:
                 )
             )
         total = int(
-            self.session.exec(
-                select(func.count()).select_from(ComplaintCase).where(*filters)
-            ).one()
+            self.session.exec(select(func.count()).select_from(ComplaintCase).where(*filters)).one()
         )
         rows = list(
             self.session.exec(
@@ -1250,14 +1319,18 @@ class ComplaintReplyWorkspaceService:
                 .limit(page_size)
             ).all()
         )
-        reply_map = {
-            row.complaint_case_id: row
-            for row in self.session.exec(
-                select(ComplaintReply).where(
-                    ComplaintReply.complaint_case_id.in_([case.id for case in rows])
-                )
-            ).all()
-        } if rows else {}
+        reply_map = (
+            {
+                row.complaint_case_id: row
+                for row in self.session.exec(
+                    select(ComplaintReply).where(
+                        ComplaintReply.complaint_case_id.in_([case.id for case in rows])
+                    )
+                ).all()
+            }
+            if rows
+            else {}
+        )
         items: list[dict[str, Any]] = []
         for case in rows:
             local = reply_map.get(case.id)
@@ -1289,9 +1362,7 @@ class ComplaintReplyWorkspaceService:
                     "complaint_preview": _text(case.remarks)[:500],
                     "reply_preview": reply_text[:500],
                     "reply_status": status,
-                    "reply_source": (
-                        "local_workspace" if local_pending else "helpdesk_snapshot"
-                    ),
+                    "reply_source": ("local_workspace" if local_pending else "helpdesk_snapshot"),
                     "reply_sync_status": local.sync_status if local else "synchronized",
                     "ai_eligible": bool(case.frappe_ai_eligible),
                     "archive_ready": bool(case.frappe_reply_hash),
@@ -1301,7 +1372,11 @@ class ComplaintReplyWorkspaceService:
                     "helpdesk_ticket_url": case.frappe_ticket_url,
                     "paperless_document_id": case.canonical_paperless_document_id,
                     "updated_at": max(
-                        [value for value in (case.updated_at, local.updated_at if local else None) if value]
+                        [
+                            value
+                            for value in (case.updated_at, local.updated_at if local else None)
+                            if value
+                        ]
                     ),
                 }
             )
@@ -1310,6 +1385,8 @@ class ComplaintReplyWorkspaceService:
             "total": total,
             "page": page,
             "page_size": page_size,
+            "scope": scope,
+            "source_batch_id": str(source_batch_id) if source_batch_id else None,
             "pages": max(1, (total + page_size - 1) // page_size),
         }
 
@@ -1319,9 +1396,7 @@ class ComplaintReplyWorkspaceService:
             query = query.where(ComplaintAuditEvent.complaint_case_id == case_id)
         rows = list(
             self.session.exec(
-                query.order_by(ComplaintAuditEvent.created_at.desc()).limit(
-                    max(1, min(limit, 500))
-                )
+                query.order_by(ComplaintAuditEvent.created_at.desc()).limit(max(1, min(limit, 500)))
             ).all()
         )
         return {"items": [row.model_dump(mode="json") for row in rows], "count": len(rows)}

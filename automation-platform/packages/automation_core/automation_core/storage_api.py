@@ -38,6 +38,9 @@ def _artifact_dict(item: Artifact, stored: StoredObject | None = None) -> dict[s
         "storage_status": item.storage_status,
         "storage_error": item.storage_error,
         "archived_at": item.archived_at,
+        "local_present": Path(item.path).is_file(),
+        "local_evicted_at": item.local_evicted_at,
+        "last_hydrated_at": item.last_hydrated_at,
         "created_at": item.created_at,
         "stored_object": (
             {
@@ -77,6 +80,8 @@ def storage_overview(
     status_rows = session.execute(
         select(Artifact.storage_status, func.count(Artifact.id)).group_by(Artifact.storage_status)
     ).all()
+    from antidengue_automation.storage_lifecycle import antidengue_storage_counts
+
     return {
         **health,
         "platform_buckets": settings.platform_storage_buckets,
@@ -91,6 +96,7 @@ def storage_overview(
             {"module_key": module, "artifacts": count, "bytes": size, "ready": ready, "errors": errors}
             for module, count, size, ready, errors in module_rows
         ],
+        "antidengue_cache": antidengue_storage_counts(session),
         "local_cache_root": str(settings.artifact_root.expanduser().resolve()),
     }
 
@@ -157,7 +163,7 @@ def storage_backfill(
     data: BackfillInput,
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    artifact_filters = [Artifact.storage_status != "ready"]
+    artifact_filters = [Artifact.storage_status.in_(["local", "error", "uploading"])]
     source_filters = [SourceFile.storage_status != "ready"]
     if data.module_key:
         artifact_filters.append(Artifact.module_key == data.module_key)

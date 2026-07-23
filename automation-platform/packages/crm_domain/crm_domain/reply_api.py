@@ -16,6 +16,7 @@ from crm_domain.bulk_operations import (
     BulkOperationValidationError,
     CrmBulkOperationService,
 )
+from crm_domain.case_scopes import reply_case_eligibility_clause
 from crm_domain.models import ComplaintCase, ComplaintReply
 
 
@@ -23,7 +24,7 @@ router = APIRouter(prefix="/api/v1/crm/replies", tags=["crm-replies"])
 MAX_REPLY_FILE_BYTES = 5 * 1024 * 1024
 
 
-def _published_statement():
+def _reply_eligible_statement():
     return (
         select(ComplaintCase, ComplaintReply)
         .join(
@@ -31,20 +32,22 @@ def _published_statement():
             ComplaintReply.complaint_case_id == ComplaintCase.id,
             isouter=True,
         )
-        .where(ComplaintCase.state == "published")
+        .where(reply_case_eligibility_clause())
     )
 
 
-def _published_rows(session: Session) -> list[tuple[ComplaintCase, ComplaintReply | None]]:
-    return list(session.exec(_published_statement().order_by(ComplaintCase.complaint_number)).all())
+def _reply_eligible_rows(session: Session) -> list[tuple[ComplaintCase, ComplaintReply | None]]:
+    return list(
+        session.exec(_reply_eligible_statement().order_by(ComplaintCase.complaint_number)).all()
+    )
 
 
 @router.get("/statistics")
 def reply_statistics(session: Session = Depends(get_session)) -> dict[str, int]:
-    rows = _published_rows(session)
+    rows = _reply_eligible_rows(session)
     replied = [reply for _case, reply in rows if reply is not None]
     return {
-        "published_cases": len(rows),
+        "published_cases": sum(case.state == "published" for case, _reply in rows),
         "awaiting_reply": len(rows) - len(replied),
         "replies_imported": len(replied),
         "letters_generated": sum(reply.generated_at is not None for reply in replied),
@@ -59,12 +62,12 @@ def list_replies(
     page_size: int = Query(default=100, ge=1, le=500),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
-    statement = _published_statement()
+    statement = _reply_eligible_statement()
     count_statement = (
         select(func.count())
         .select_from(ComplaintCase)
         .join(ComplaintReply, ComplaintReply.complaint_case_id == ComplaintCase.id, isouter=True)
-        .where(ComplaintCase.state == "published")
+        .where(reply_case_eligibility_clause())
     )
     filters = []
     if view == "awaiting":
@@ -122,7 +125,7 @@ def export_complaints_csv(
     writer = csv.writer(output)
     writer.writerow(["Complaint Number", "Complaint Remarks"])
     count = 0
-    for case, reply in _published_rows(session):
+    for case, reply in _reply_eligible_rows(session):
         if scope == "awaiting" and reply is not None:
             continue
         writer.writerow([case.complaint_number or "", case.remarks or ""])
@@ -154,11 +157,7 @@ async def import_replies(
         validation = service.validate_import_batch(content=content, filename=filename)
         if validation["status"] != "ready" or validation["failed_items"]:
             items = service.list_items(uuid.UUID(validation["id"]), page=1, page_size=500)["items"]
-            errors = [
-                item["error_message"]
-                for item in items
-                if item.get("error_message")
-            ]
+            errors = [item["error_message"] for item in items if item.get("error_message")]
             if not errors and validation.get("error_summary"):
                 errors = [validation["error_summary"]]
             raise HTTPException(

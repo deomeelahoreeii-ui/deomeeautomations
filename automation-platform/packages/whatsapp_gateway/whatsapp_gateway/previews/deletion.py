@@ -26,6 +26,7 @@ from whatsapp_gateway.preview_service import (
     cleanup_unreferenced_preview_files, delete_preview_records, entity_link_details,
     is_managed_preview_artifact, preview_dict, preview_is_stale, sha256_file,
 )
+from whatsapp_gateway.previews.maintenance import preview_deletion_block_reason
 from whatsapp_gateway.tasks import compile_dispatch_preview_job, send_approved_preview_job
 from whatsapp_gateway.previews.schemas import (
     PreviewInput, BulkPreviewInput, PreviewIdsInput, BulkPreviewApprovalInput,
@@ -58,6 +59,16 @@ def hard_delete_previews_bulk(
             status_code=409,
             detail="Approved previews are retained as delivery audit records; remove them from the selection",
         )
+    protected = [
+        reason
+        for preview in previews
+        if (reason := preview_deletion_block_reason(session, preview))
+    ]
+    if protected:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{protected[0]} Remove protected previews from the selection.",
+        )
     paths: list[Path] = []
     for preview in previews:
         paths.extend(delete_preview_records(session, preview))
@@ -72,15 +83,8 @@ def hard_delete_preview(
     preview = session.get(WhatsAppDispatchPreview, preview_id)
     if preview is None:
         raise HTTPException(status_code=404, detail="Dispatch preview not found")
-    if session.scalar(
-        select(WhatsAppDispatchApproval.id).where(
-            WhatsAppDispatchApproval.preview_id == preview.id
-        )
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail="Approved previews are retained as delivery audit records",
-        )
+    if reason := preview_deletion_block_reason(session, preview):
+        raise HTTPException(status_code=409, detail=reason)
     preview_key = preview.preview_key
     paths = delete_preview_records(session, preview)
     session.commit()

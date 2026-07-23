@@ -267,15 +267,30 @@ module prefixes in `automation-raw`, `automation-manifests`, and
 `automation-derived`. Existing WhatsApp/CRM inbound buckets remain compatible.
 
 Uploads are verified by size and SHA-256 before an artifact is marked archived.
-Local files are retained as working copies, and missing managed copies can be
-rehydrated from RustFS before download or dispatch. The Storage page exposes a
-no-delete dry-run/apply backfill and retry controls for failed transfers.
+RustFS is authoritative for bytes; local files are job-scoped working cache and
+can be evicted only after retention expiry, durable-object verification, checksum
+verification, terminal job state, and active delivery/preview reference checks.
+Failed workspaces use a longer retention window. Missing managed copies are
+rehydrated from RustFS before rendering, preview compilation, download, or
+dispatch. PostgreSQL owns the mutable AntiDengue scrape cursor and storage
+lifecycle timestamps. The Storage page exposes backfill, retry, cache inventory,
+and dry-run/confirmed verified eviction controls.
 
 ```text
 GET  /api/v1/storage/overview
 GET  /api/v1/storage/artifacts
 POST /api/v1/storage/artifacts/{artifact_id}/retry
 POST /api/v1/storage/backfill
+POST /api/v1/antidengue/storage/retention
+```
+
+Legacy migration and headless retention default to dry-run:
+
+```bash
+python scripts/migrate_antidengue_artifacts_to_rustfs.py
+python scripts/migrate_antidengue_artifacts_to_rustfs.py --apply
+python scripts/evict_antidengue_local_cache.py
+python scripts/evict_antidengue_local_cache.py --apply
 ```
 
 ## WhatsApp Gateway

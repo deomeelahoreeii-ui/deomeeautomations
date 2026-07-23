@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import mimetypes
 import uuid
 from pathlib import Path
 from typing import Any
@@ -207,13 +209,34 @@ def record_artifact(
     name: str | None = None,
     module_key: str = "legacy",
 ) -> Artifact:
+    identifier = uuid.UUID(str(job_id))
+    resolved_path = str(path.expanduser().resolve(strict=False))
+    digest = hashlib.sha256()
+    if path.is_file():
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    sha256 = digest.hexdigest() if path.is_file() else ""
+    existing = session.exec(
+        select(Artifact).where(
+            Artifact.job_id == identifier,
+            Artifact.path == resolved_path,
+            Artifact.kind == kind,
+            Artifact.sha256 == sha256,
+        )
+    ).first()
+    if existing is not None:
+        return existing
     artifact = Artifact(
-        job_id=uuid.UUID(str(job_id)),
+        job_id=identifier,
         module_key=module_key,
         kind=kind,
         name=name or path.name,
-        path=str(path),
+        path=resolved_path,
         size_bytes=path.stat().st_size if path.exists() else 0,
+        sha256=sha256,
+        content_type=mimetypes.guess_type(name or path.name)[0]
+        or "application/octet-stream",
     )
     session.add(artifact)
     session.commit()

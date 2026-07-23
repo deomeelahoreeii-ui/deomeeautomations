@@ -160,10 +160,18 @@ import AntiDengueLayout from "../layouts/AntiDengueLayout.astro";
     }
 
     async function api(path: string, init?: RequestInit) {
-      const response = await fetch(`${API}${path}`, {
-        ...init,
-        headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
-      });
+      let response: Response;
+      try {
+        response = await fetch(`${API}${path}`, {
+          ...init,
+          headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+        });
+      } catch (error) {
+        throw new Error(
+          `Could not reach the platform API at ${API}. Check that it is running and allows requests from ${location.origin}.`,
+          { cause: error },
+        );
+      }
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data));
       return data;

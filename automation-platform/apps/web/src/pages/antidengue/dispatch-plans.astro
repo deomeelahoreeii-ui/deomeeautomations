@@ -42,7 +42,9 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
     function stateOf(item: any) {
       if (item.planned_deliveries === 0) return { key: "empty", tone: "neutral", title: "Nothing to send", detail: item.blockers ? "The run produced no deliverable payloads. Review the blockers to understand why." : "The run found no matching records, so no WhatsApp messages were created." };
       if (item.blockers > 0 || item.status === "blocked" || item.execution_status === "blocked") return { key: "attention", tone: "blocked", title: "Fix blockers", detail: `${item.blockers} blocking issue${item.blockers === 1 ? "" : "s"} must be resolved before this plan can be approved.` };
-      if (["failed"].includes(item.status) || item.failed > 0) return { key: "attention", tone: "failed", title: "Delivery needs attention", detail: `${item.failed} delivery attempt${item.failed === 1 ? "" : "s"} failed and can be retried without resending successful items.` };
+      if (item.failed > 0) return { key: "attention", tone: "failed", title: "Delivery needs attention", detail: `${item.failed} delivery attempt${item.failed === 1 ? "" : "s"} explicitly failed and can be retried without resending successful or ambiguous items.` };
+      if (item.timed_out > 0) return { key: "attention", tone: "failed", title: "Reconciliation required", detail: `${item.timed_out} delivery outcome${item.timed_out === 1 ? " is" : "s are"} ambiguous after an acknowledgement timeout and will not be resent automatically.` };
+      if (item.status === "failed") return { key: "attention", tone: "failed", title: "Delivery needs attention", detail: "The dispatch attempt failed before a confirmed per-recipient result was recorded." };
       if (["queued", "sending"].includes(item.status)) return { key: "delivery", tone: "running", title: item.status === "queued" ? "Queued for delivery" : "Sending", detail: "The exact approved payloads are being processed by the WhatsApp worker." };
       if (item.status === "completed" || item.sent > 0 || item.delivered > 0) return { key: "delivery", tone: "complete", title: "Delivery complete", detail: "Review the per-recipient delivery result and retained audit trail." };
       return { key: "ready", tone: "ready", title: "Ready to review", detail: item.warnings ? `Review ${item.warnings} warning${item.warnings === 1 ? "" : "s"}, then explicitly approve the frozen payloads.` : "Review the exact recipients, messages and attachments before approval." };
@@ -64,7 +66,7 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       const filter = el<HTMLSelectElement>("plan-filter").value;
       const visible = plans.filter((item) => {
         const state = stateOf(item);
-        if (filter === "attention" && !(item.blockers > 0 || item.failed > 0 || item.status === "failed")) return false;
+        if (filter === "attention" && !(item.blockers > 0 || item.failed > 0 || item.timed_out > 0 || item.status === "failed")) return false;
         if (!["all", "attention"].includes(filter) && state.key !== filter) return false;
         return `${item.execution_code} ${item.preview_key} ${item.routing_profiles.map((profile: any) => profile.name).join(" ")} ${item.report}`.toLowerCase().includes(search);
       });
@@ -73,7 +75,7 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       for (const item of visible) {
         const state = stateOf(item);
         const card = document.createElement("article"); card.className = `plan-card ${state.tone}`;
-        card.innerHTML = `<div class="plan-card-status"><span class="plan-state-icon"></span><div><strong></strong><small></small></div></div><div class="plan-card-main"><header><div><span class="plan-run-type"></span><h3></h3><p></p></div><span class="job-status"></span></header><div class="plan-route-pills"></div><div class="plan-metrics"><div><span>Planned</span><strong></strong></div><div><span>Warnings</span><strong></strong></div><div><span>Blockers</span><strong></strong></div><div><span>Delivered</span><strong></strong></div><div><span>Failed</span><strong></strong></div></div><div class="plan-issue-summary" hidden></div><div class="plan-card-actions"></div></div>`;
+        card.innerHTML = `<div class="plan-card-status"><span class="plan-state-icon"></span><div><strong></strong><small></small></div></div><div class="plan-card-main"><header><div><span class="plan-run-type"></span><h3></h3><p></p></div><span class="job-status"></span></header><div class="plan-route-pills"></div><div class="plan-metrics"><div><span>Planned</span><strong></strong></div><div><span>Warnings</span><strong></strong></div><div><span>Blockers</span><strong></strong></div><div><span>Delivered</span><strong></strong></div><div><span>Failed</span><strong></strong></div><div><span>Timed out</span><strong></strong></div></div><div class="plan-issue-summary" hidden></div><div class="plan-card-actions"></div></div>`;
         card.querySelector(".plan-card-status strong")!.textContent = state.title;
         card.querySelector(".plan-card-status small")!.textContent = state.detail;
         card.querySelector(".plan-run-type")!.textContent = item.run_type === "manual_send" ? "SEND NOW" : item.run_type === "manual_preview" ? "TEST RUN" : "SCHEDULED RUN";
@@ -83,7 +85,7 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
         const pills = card.querySelector(".plan-route-pills")!;
         for (const profile of item.routing_profiles) { const pill = document.createElement("span"); pill.textContent = profile.name; pills.append(pill); }
         const metricValues = card.querySelectorAll(".plan-metrics strong");
-        [item.planned_deliveries, item.warnings, item.blockers, item.delivered, item.failed].forEach((value, index) => metricValues[index].textContent = String(value));
+        [item.planned_deliveries, item.warnings, item.blockers, item.delivered, item.failed, item.timed_out].forEach((value, index) => metricValues[index].textContent = String(value));
         const messages = uniqueIssueMessages(item); const issues = card.querySelector(".plan-issue-summary") as HTMLElement;
         if (messages.length) { issues.hidden = false; for (const message of messages) { const paragraph = document.createElement("p"); paragraph.textContent = message; issues.append(paragraph); } }
         const actions = card.querySelector(".plan-card-actions")!;
@@ -104,7 +106,7 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
         }
         if (item.failed > 0) {
           const retry = document.createElement("button"); retry.className = "btn btn-sm btn-outline"; retry.type = "button"; retry.textContent = `Retry ${item.failed} failed`;
-          retry.addEventListener("click", async () => { if (!confirm(`Retry only the ${item.failed} failed deliveries? Successful deliveries will not be resent.`)) return; retry.disabled = true; try { await api(`/api/v1/antidengue/dispatch-plans/${item.id}/retry-failed`, { method: "POST" }); await loadPlans(); } catch (error) { el("plan-message").textContent = error instanceof Error ? error.message : "Could not retry failed deliveries"; retry.disabled = false; } });
+          retry.addEventListener("click", async () => { if (!confirm(`Retry only the ${item.failed} explicitly failed deliveries? Successful and timed-out deliveries will not be resent.`)) return; retry.disabled = true; try { await api(`/api/v1/antidengue/dispatch-plans/${item.id}/retry-failed`, { method: "POST" }); await loadPlans(); } catch (error) { el("plan-message").textContent = error instanceof Error ? error.message : "Could not retry failed deliveries"; retry.disabled = false; } });
           actions.append(retry);
         }
         actions.append(actionLink("View run audit", `/antidengue/run-history?execution_id=${item.execution_id}`));
@@ -117,7 +119,7 @@ import AntiDengueLayout from "../../layouts/AntiDengueLayout.astro";
       try {
         const data = await api("/api/v1/antidengue/dispatch-plans?limit=200"); plans = data.items;
         el("total-plans").textContent = String(plans.length);
-        el("attention-plans").textContent = String(plans.filter((item) => item.blockers > 0 || item.failed > 0 || item.status === "failed").length);
+        el("attention-plans").textContent = String(plans.filter((item) => item.blockers > 0 || item.failed > 0 || item.timed_out > 0 || item.status === "failed").length);
         el("ready-plans").textContent = String(plans.filter((item) => stateOf(item).key === "ready").length);
         el("delivered-total").textContent = String(plans.reduce((total, item) => total + Number(item.delivered || 0), 0));
         renderPlans();

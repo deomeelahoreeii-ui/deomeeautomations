@@ -9,7 +9,7 @@ import DataTable from "../../components/DataTable.astro";
   description="Durable object storage, integrity verification and artifact ownership across every automation module."
   active="storage"
 >
-  <div slot="actions" class="table-actions"><button class="btn btn-sm" id="backfill">Backfill</button><button class="btn btn-sm btn-primary" id="refresh">↻ Check storage</button></div>
+  <div slot="actions" class="table-actions"><button class="btn btn-sm" id="backfill">Backfill</button><button class="btn btn-sm" id="evict-cache">Evict verified cache</button><button class="btn btn-sm btn-primary" id="refresh">↻ Check storage</button></div>
 
   <div class="notice"><strong>RustFS is the current provider; Storage is the platform capability.</strong><br />PostgreSQL owns searchable metadata, RustFS owns verified bytes, and local disk is retained as a working cache. Backfill uploads and verifies files but never deletes local data.</div>
 
@@ -17,7 +17,7 @@ import DataTable from "../../components/DataTable.astro";
     <article class="stat-card"><span>Connection</span><strong id="connection">Checking…</strong><small id="endpoint">—</small></article>
     <article class="stat-card"><span>Stored objects</span><strong id="objects">—</strong><small id="stored-bytes">—</small></article>
     <article class="stat-card"><span>Artifact records</span><strong id="artifacts">—</strong><small id="artifact-statuses">—</small></article>
-    <article class="stat-card"><span>Transfer errors</span><strong id="errors">—</strong><small>Safe to retry; local files are preserved</small></article>
+    <article class="stat-card"><span>Transfer errors</span><strong id="errors">—</strong><small id="storage-gaps">Safe to retry; local files are preserved</small></article>
   </section>
 
   <section class="notification-settings-grid">
@@ -26,12 +26,12 @@ import DataTable from "../../components/DataTable.astro";
       <div class="inbound-storage-health" id="buckets"></div>
     </article>
     <aside class="panel notification-help-panel">
-      <p class="eyebrow">Consumers</p><h2>Module ownership</h2><div id="modules"><p>Loading…</p></div>
+      <p class="eyebrow">Consumers</p><h2>Module ownership</h2><div id="antidengue-cache"><p>Loading cache state…</p></div><div id="modules"><p>Loading…</p></div>
     </aside>
   </section>
 
   <section class="master-card" style="margin-top:1.25rem">
-    <div class="inbound-card-heading"><div><p class="eyebrow">Artifact catalog</p><h2>Files and transfers</h2></div><div class="table-actions"><select class="select select-bordered select-sm" id="module-filter"><option value="">All modules</option><option value="antidengue">AntiDengue</option><option value="crm">CRM</option><option value="whatsapp">WhatsApp</option><option value="legacy">Legacy</option></select><select class="select select-bordered select-sm" id="status-filter"><option value="">All statuses</option><option value="ready">Archived</option><option value="local">Local</option><option value="error">Error</option></select><input class="input input-bordered input-sm" id="search" placeholder="Search artifacts" /></div></div>
+    <div class="inbound-card-heading"><div><p class="eyebrow">Artifact catalog</p><h2>Files and transfers</h2></div><div class="table-actions"><select class="select select-bordered select-sm" id="module-filter"><option value="">All modules</option><option value="antidengue">AntiDengue</option><option value="crm">CRM</option><option value="whatsapp">WhatsApp</option><option value="legacy">Legacy</option></select><select class="select select-bordered select-sm" id="status-filter"><option value="">All statuses</option><option value="ready">Archived</option><option value="local">Local</option><option value="error">Error</option><option value="missing">Historical missing</option></select><input class="input input-bordered input-sm" id="search" placeholder="Search artifacts" /></div></div>
     <DataTable id="storage-table" pageSize={25} emptyText="No storage artifacts match these filters." />
   </section>
 
@@ -56,7 +56,10 @@ import DataTable from "../../components/DataTable.astro";
       el("artifacts").textContent = String(data.catalog.artifacts);
       el("artifact-statuses").textContent = Object.entries(data.catalog.statuses).map(([key, value]) => `${key}: ${value}`).join(" · ") || "No records";
       el("errors").textContent = String(data.catalog.statuses.error || 0);
+      el("storage-gaps").textContent = data.antidengue_cache?.historical_missing ? `${data.antidengue_cache.historical_missing} pre-migration records have no recoverable original bytes` : "Safe to retry; local files are preserved";
       el("buckets").innerHTML = (data.platform_buckets || []).map((bucket: string, index: number) => `<div><span>${["Raw inputs", "Manifests", "Derived artifacts"][index] || "Bucket"}</span><strong>${bucket}</strong></div>`).join("");
+      const cache = data.antidengue_cache || {};
+      el("antidengue-cache").innerHTML = `<p><strong>AntiDengue local cache</strong><br /><small>${cache.local_cached || 0} cached · ${cache.local_evicted || 0} evicted · ${cache.rustfs_ready || 0} RustFS-ready${cache.local_only ? ` · ${cache.local_only} local-only` : ""}${cache.historical_missing ? ` · ${cache.historical_missing} historical gaps` : ""}</small></p>`;
       el("modules").innerHTML = (data.modules || []).length ? data.modules.map((item: any) => `<p><strong>${item.module_key}</strong><br /><small>${item.ready}/${item.artifacts} archived · ${formatBytes(Number(item.bytes))}${item.errors ? ` · ${item.errors} errors` : ""}</small></p>`).join("") : "<p>No artifact ownership has been recorded.</p>";
     }
 
@@ -75,7 +78,7 @@ import DataTable from "../../components/DataTable.astro";
       { accessorKey: "stored_object", header: "Object", cell: ({ row }: any) => stack(row.original.stored_object?.bucket || "Local only", row.original.stored_object?.object_key || row.original.storage_error || "Pending archival") },
       { id: "actions", header: "", cell: ({ row }: any) => actionButtons([
         { label: "Download", onClick: () => window.open(`${apiBase}/api/v1/artifacts/${row.original.id}/download`, "_blank") },
-        ...(row.original.storage_status !== "ready" ? [{ label: "Retry", onClick: async () => { const result = await actions.storage.retryArtifact({ id: row.original.id }); if (result.error) await showError(result.error); else { await showSuccess("Artifact archived", "RustFS returned and verified the expected checksum."); await table.refresh(false); await loadOverview(); } } }] : []),
+        ...(["local", "error", "uploading"].includes(row.original.storage_status) ? [{ label: "Retry", onClick: async () => { const result = await actions.storage.retryArtifact({ id: row.original.id }); if (result.error) await showError(result.error); else { await showSuccess("Artifact archived", "RustFS returned and verified the expected checksum."); await table.refresh(false); await loadOverview(); } } }] : []),
       ]) },
     ] });
 
@@ -92,6 +95,16 @@ import DataTable from "../../components/DataTable.astro";
       if (!await confirmAction("Archive local files to RustFS?", `${result.count} files (${formatBytes(result.bytes)}) will be uploaded and verified. No local files will be deleted.`, "Apply backfill")) return;
       const applied = await actions.storage.backfill({ apply: true, moduleKey, limit: 500 });
       if (applied.error) await showError(applied.error); else { const data = applied.data as any; await showSuccess("Backfill finished", `${data.ready} archived · ${data.errors} errors · ${data.missing} missing local files.`); await loadOverview(); await table.refresh(true); }
+    });
+    el("evict-cache").addEventListener("click", async () => {
+      const dry = await actions.storage.evictAntidengueCache({ apply: false, limit: 5000 });
+      if (dry.error) return void await showError(dry.error);
+      const preview = dry.data as any;
+      const count = Number(preview.eligible || 0) + Number(preview.source_files_eligible || 0);
+      if (!count) return void await showSuccess("Nothing eligible", "No expired local file passed every RustFS integrity and active-reference safety check.");
+      if (!await confirmAction("Evict verified AntiDengue cache?", `${count} expired local files will be removed. Their checksum-verified RustFS objects and PostgreSQL metadata remain available for on-demand hydration.`, "Evict verified cache")) return;
+      const applied = await actions.storage.evictAntidengueCache({ apply: true, limit: 5000 });
+      if (applied.error) await showError(applied.error); else { const data = applied.data as any; await showSuccess("Cache eviction finished", `${Number(data.evicted || 0) + Number(data.source_files_evicted || 0)} files removed · ${formatBytes(Number(data.bytes_evicted || 0))} reclaimed.`); await loadOverview(); await table.refresh(false); }
     });
     try { await loadOverview(); } catch (error) { await showError(error); }
   </script>

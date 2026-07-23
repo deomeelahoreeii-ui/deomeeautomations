@@ -9,6 +9,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel, Field
 from sqlmodel import Session, col, func, or_, select
 
 from antidengue_automation.intake import ALLOWED_EXTENSIONS, safe_filename, validate_antidengue_report
@@ -50,6 +51,10 @@ from antidengue_automation.scheduling import (
     validate_recurrence,
 )
 from antidengue_automation.tasks import run_antidengue_job
+from antidengue_automation.storage_lifecycle import (
+    antidengue_storage_counts,
+    evict_verified_antidengue_cache,
+)
 from antidengue_automation.notifications import NOTIFICATION_EVENT_TYPES
 from automation_core.database import get_session, session_scope
 from automation_core.job_service import (
@@ -78,6 +83,7 @@ from automation_core.notifications import ntfy_health
 from automation_core.task_outbox import publish_pending_tasks, stage_task
 from automation_core.time import utcnow
 from whatsapp_gateway.models import (
+    WhatsAppActivity,
     WhatsAppDelivery,
     WhatsAppDispatchApproval,
     WhatsAppDispatchPreview,
@@ -85,6 +91,12 @@ from whatsapp_gateway.models import (
 )
 
 router = APIRouter(prefix="/api/v1/antidengue", tags=["antidengue"])
+
+
+class AntiDengueRetentionInput(BaseModel):
+    apply: bool = False
+    older_than_hours: int | None = Field(default=None, ge=0, le=24 * 365)
+    limit: int = Field(default=5000, ge=1, le=20000)
 
 
 def _latest_source_run(session: Session, source_file_id: uuid.UUID) -> tuple[SourceFileRun, Job] | None:
@@ -112,6 +124,8 @@ def _source_file_dict(session: Session, item: SourceFile, *, include_runs: bool 
         "storage_error": item.storage_error,
         "stored_object_id": str(item.stored_object_id) if item.stored_object_id else None,
         "archived_at": item.archived_at,
+        "local_evicted_at": item.local_evicted_at,
+        "last_hydrated_at": item.last_hydrated_at,
         "validation_status": item.validation_status,
         "schema_version": item.schema_version,
         "detected_metadata": item.detected_metadata,
@@ -152,12 +166,6 @@ def _source_file_dict(session: Session, item: SourceFile, *, include_runs: bool 
     return data
 
 
-def _count_files(folder: Path) -> int:
-    if not folder.exists():
-        return 0
-    return sum(1 for path in folder.rglob("*") if path.is_file())
-
-
 def _managed_job_file(path: Path) -> bool:
     settings = get_settings()
     roots = (
@@ -186,16 +194,41 @@ def _remove_file_and_empty_parents(path: Path, stop_roots: tuple[Path, ...]) -> 
 def read_antidengue_overview(session: Session = Depends(get_session)) -> dict:
     root = get_settings().antidengue_root
     active_job = get_active_job(session, JobType.antidengue_report.value)
+    storage_counts = antidengue_storage_counts(session)
     return {
         "project_available": root.is_dir(),
         "active_job_id": str(active_job.id) if active_job else None,
         "counts": {
-            "raw_files": _count_files(root / "drop-raw-files"),
-            "output_files": _count_files(root / "output-files"),
-            "archived_files": _count_files(root / "archived-files"),
-            "unmapped_reports": _count_files(root / "unmapped-officer-reports"),
+            "raw_files": storage_counts["raw_files"],
+            "output_files": storage_counts["output_files"],
+            "archived_files": storage_counts["rustfs_ready"],
+            "unmapped_reports": session.scalar(
+                select(func.count())
+                .select_from(Artifact)
+                .where(
+                    Artifact.module_key == "antidengue",
+                    col(Artifact.name).ilike("%officer mapping audit%"),
+                )
+            )
+            or 0,
         },
+        "storage": storage_counts,
     }
+
+
+@router.post("/storage/retention")
+def apply_antidengue_storage_retention(
+    data: AntiDengueRetentionInput,
+    session: Session = Depends(get_session),
+) -> dict:
+    result = evict_verified_antidengue_cache(
+        session,
+        settings=get_settings(),
+        older_than_hours=data.older_than_hours,
+        apply=data.apply,
+        limit=data.limit,
+    )
+    return {"dry_run": not data.apply, **result}
 
 
 @router.get("/manual-reports")
@@ -434,8 +467,15 @@ def process_manual_report(
         raise HTTPException(status_code=404, detail="Manual report not found")
     if item.validation_status != "valid":
         raise HTTPException(status_code=422, detail="Only a valid manual report can be processed")
-    source_path = Path(item.stored_path).resolve()
-    if not source_path.is_relative_to(get_settings().source_file_root) or not source_path.is_file():
+    try:
+        source_path = ensure_source_file_local(session, item)
+        session.commit()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"The immutable source file is unavailable: {exc}",
+        ) from exc
+    if not source_path.is_relative_to(get_settings().source_file_root):
         raise HTTPException(status_code=422, detail="The immutable source file is unavailable")
     active_job = get_active_job(session, JobType.antidengue_report.value)
     if active_job is not None:
@@ -952,7 +992,8 @@ def list_antidengue_dispatch_plans(
         totals = {
             "sent": sum(item.status in {"sent", "sent_pending_confirmation"} for item in deliveries),
             "delivered": sum(item.status == "delivered" for item in deliveries),
-            "failed": sum(item.status in {"failed", "timed_out"} for item in deliveries),
+            "failed": sum(item.status == "failed" for item in deliveries),
+            "timed_out": sum(item.status == "timed_out" for item in deliveries),
         }
         items.append({
             "id": str(preview.id),
@@ -987,51 +1028,117 @@ def retry_antidengue_failed_deliveries(
     execution = session.exec(select(AntiDengueScheduleExecution).where(
         AntiDengueScheduleExecution.preview_id == preview_id
     )).first()
-    approval = session.exec(select(WhatsAppDispatchApproval).where(
-        WhatsAppDispatchApproval.preview_id == preview_id
-    )).first()
+    approval = session.exec(
+        select(WhatsAppDispatchApproval)
+        .where(WhatsAppDispatchApproval.preview_id == preview_id)
+        .with_for_update()
+    ).first()
     if execution is None or approval is None or execution.send_job_id is None:
         raise HTTPException(status_code=404, detail="AntiDengue delivery attempt not found")
-    failed = session.exec(select(WhatsAppDelivery).where(
-        WhatsAppDelivery.approval_id == approval.id,
-        WhatsAppDelivery.status.in_(["failed", "timed_out"]),
-    )).all()
+    if approval.status in {"queued", "sending"}:
+        raise HTTPException(
+            status_code=409,
+            detail="A delivery attempt for this approval is already active",
+        )
+    failed = session.exec(
+        select(WhatsAppDelivery)
+        .where(
+            WhatsAppDelivery.approval_id == approval.id,
+            WhatsAppDelivery.status == "failed",
+        )
+        .with_for_update()
+    ).all()
     if not failed:
-        raise HTTPException(status_code=409, detail="This plan has no failed deliveries to retry")
-    job = session.get(Job, execution.send_job_id)
-    if job is None or job.status in {JobStatus.queued.value, JobStatus.running.value}:
+        ambiguous = session.exec(
+            select(WhatsAppDelivery.id).where(
+                WhatsAppDelivery.approval_id == approval.id,
+                WhatsAppDelivery.status == "timed_out",
+            )
+        ).first()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Timed-out deliveries have an ambiguous send outcome and cannot be "
+                "automatically retried; reconcile them before resending."
+                if ambiguous
+                else "This plan has no explicitly failed deliveries to retry"
+            ),
+        )
+    previous_job = session.get(Job, execution.send_job_id)
+    if previous_job is None or previous_job.status in {
+        JobStatus.queued.value,
+        JobStatus.running.value,
+    }:
         raise HTTPException(status_code=409, detail="The dispatch job is unavailable or already active")
+    retry_ids = [str(item.id) for item in failed]
+    retry_job = add_job(
+        session,
+        job_type=JobType.whatsapp_dispatch_send.value,
+        title=f"Retry failed AntiDengue deliveries from {execution.execution_code}",
+        parameters={
+            "approval_id": str(approval.id),
+            "retry_delivery_ids": retry_ids,
+            "retry_of_job_id": str(previous_job.id),
+            "retry_requested_by": "web-operator",
+        },
+    )
     for delivery in failed:
+        session.add(
+            WhatsAppActivity(
+                account_id=delivery.account_id,
+                level="info",
+                event_type="approved_delivery_retry_requested",
+                message=(
+                    f"Retry requested for failed approved delivery to "
+                    f"{delivery.recipient_name}"
+                ),
+                details={
+                    "delivery_id": str(delivery.id),
+                    "approval_id": str(approval.id),
+                    "retry_job_id": str(retry_job.id),
+                    "previous_status": delivery.status,
+                    "previous_error": delivery.error,
+                    "previous_provider_result": delivery.provider_result,
+                    "requested_by": "web-operator",
+                },
+            )
+        )
         delivery.status = "queued"
         delivery.error = None
+        delivery.provider_result = None
+        delivery.queue_stream = None
+        delivery.queue_sequence = None
         delivery.completed_at = None
         session.add(delivery)
     approval.status = "queued"
     approval.error = None
     approval.completed_at = None
-    job.status = JobStatus.queued.value
-    job.error = None
-    job.result = None
-    job.started_at = None
-    job.finished_at = None
-    job.updated_at = utcnow()
-    job.parameters = {**dict(job.parameters), "retry_delivery_ids": [str(item.id) for item in failed]}
     execution.status = "dispatch_queued"
+    execution.send_job_id = retry_job.id
     execution.finished_at = None
     execution.error = None
     execution.updated_at = utcnow()
     session.add(approval)
-    session.add(job)
+    session.add(retry_job)
     session.add(execution)
-    add_job_log(session, job.id, f"Staged retry for {len(failed)} failed AntiDengue delivery(ies).")
+    add_job_log(
+        session,
+        retry_job.id,
+        f"Staged retry for {len(failed)} explicitly failed AntiDengue delivery(ies).",
+    )
     stage_task(
-        session, job=job, task_name="whatsapp_gateway.send_approved_preview",
-        queue="antidengue", args=[str(job.id)],
-        idempotency_key=f"execution:{execution.id}:dispatch-retry:{uuid.uuid4()}",
+        session, job=retry_job, task_name="whatsapp_gateway.send_approved_preview",
+        queue="antidengue", args=[str(retry_job.id)],
+        idempotency_key=f"execution:{execution.id}:dispatch-retry-job:{retry_job.id}",
     )
     session.commit()
     publish_pending_tasks(session, limit=10)
-    return {"execution_id": str(execution.id), "preview_id": str(preview_id), "retried": len(failed)}
+    return {
+        "execution_id": str(execution.id),
+        "preview_id": str(preview_id),
+        "retry_job_id": str(retry_job.id),
+        "retried": len(failed),
+    }
 
 
 @router.get("/executions/{execution_id}")

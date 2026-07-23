@@ -73,6 +73,8 @@ def list_reply_cases(
     ai_eligible: bool | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
+    scope: str = Query(default="all", pattern="^(actionable|all)$"),
+    source_batch_id: uuid.UUID | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=200),
     session: Session = Depends(get_session),
@@ -87,6 +89,8 @@ def list_reply_cases(
         ai_eligible=ai_eligible,
         date_from=date_from,
         date_to=date_to,
+        scope=scope,
+        source_batch_id=source_batch_id,
         page=page,
         page_size=page_size,
     )
@@ -99,7 +103,29 @@ def reply_editor(
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     try:
-        return _service(session, settings).editor(case_id)
+        # The editor's critical path is intentionally PostgreSQL-only. A live
+        # Helpdesk refresh is loaded independently after the local draft paints.
+        return _service(session, settings).editor(case_id, refresh_remote=False)
+    except ReplyNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ReplyWorkspaceError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/cases/{case_id}/refresh")
+def refresh_reply_editor(
+    case_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Return the editor payload enriched by a bounded Helpdesk client read.
+
+    This endpoint is deliberately separate from the local editor endpoint so a
+    remote outage can never hide a saved PostgreSQL/imported reply.
+    """
+
+    try:
+        return _service(session, settings).editor(case_id, refresh_remote=True)
     except ReplyNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ReplyWorkspaceError as exc:
@@ -199,9 +225,14 @@ async def upload_case_document(
     try:
         content = await file.read()
         return _service(session, settings).upload_case_document(
-            case_id, filename=file.filename or "case-file", content=content,
-            content_type=file.content_type, role=role, actor=actor,
-            dispatch_batch_id=dispatch_batch_id, dispatch_item_id=dispatch_item_id,
+            case_id,
+            filename=file.filename or "case-file",
+            content=content,
+            content_type=file.content_type,
+            role=role,
+            actor=actor,
+            dispatch_batch_id=dispatch_batch_id,
+            dispatch_item_id=dispatch_item_id,
         )
     except ReplyNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -218,7 +249,8 @@ def download_case_document(
     try:
         document, path = _service(session, settings).case_document_path(document_id)
         return FileResponse(
-            path, media_type=document.mime_type or "application/octet-stream",
+            path,
+            media_type=document.mime_type or "application/octet-stream",
             filename=document.original_filename or path.name,
         )
     except ReplyNotFoundError as exc:

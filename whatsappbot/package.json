@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node worker.js",
-    "test": "node --check worker.js",
+    "test": "node --check worker.js && node --test test/*.test.mjs",
     "tokens": "node scripts/check-tctokens.mjs",
     "worker": "node worker.js",
     "test:inbound": "node --test test/inbound-foundation.test.mjs test/inbound-history-lifecycle.test.mjs"

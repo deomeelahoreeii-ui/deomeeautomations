@@ -28,10 +28,21 @@ from portal_reports import (
 # ==========================================
 BASE_DIR = Path(__file__).parent.resolve()
 load_dotenv(BASE_DIR / ".env")
-WATCH_DIR = BASE_DIR / "drop-raw-files"
-DEBUG_DIR = BASE_DIR / "scraper-debug"
+
+
+def _runtime_path(env_name: str, default: Path) -> Path:
+    configured = Path(os.getenv(env_name, str(default)))
+    return configured if configured.is_absolute() else (BASE_DIR / configured).resolve()
+
+
+WORK_ROOT = _runtime_path("ANTIDENGUE_WORK_ROOT", BASE_DIR)
+WATCH_DIR = _runtime_path("ANTIDENGUE_RAW_DIR", WORK_ROOT / "drop-raw-files")
+DEBUG_DIR = _runtime_path("ANTIDENGUE_DEBUG_DIR", WORK_ROOT / "scraper-debug")
 SESSION_FILE = BASE_DIR / "playwright_session.json"
-LAST_RUN_FILE = BASE_DIR / "last_scrape_metadata.json"
+LAST_RUN_FILE = _runtime_path(
+    "ANTIDENGUE_LAST_SCRAPE_METADATA_PATH",
+    WORK_ROOT / "last_scrape_metadata.json",
+)
 LOGIN_LOCK_FILE = BASE_DIR / "login_failed.lock"  # The Kill-Switch file
 
 PORTAL_USER = os.getenv("PORTAL_USER", "")
@@ -123,6 +134,7 @@ def _navigate_with_retry(page, url: str, *, wait_until: str, logger):
 def record_scrape_time():
     """Maintains a persistent record of the last successful scrape."""
     timestamp = datetime.datetime.now().isoformat()
+    LAST_RUN_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(LAST_RUN_FILE, "w") as f:
         json.dump({"last_successful_scrape": timestamp}, f, indent=4)
     return timestamp

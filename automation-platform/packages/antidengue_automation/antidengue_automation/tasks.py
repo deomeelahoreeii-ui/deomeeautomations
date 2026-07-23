@@ -10,8 +10,17 @@ from celery.exceptions import SoftTimeLimitExceeded
 from sqlmodel import Session
 
 from antidengue_automation.models import AntiDengueScheduleExecution
+from antidengue_automation.runtime_state import (
+    LAST_SCRAPE_STATE_KEY,
+    materialize_runtime_state,
+    persist_runtime_state,
+)
 from antidengue_automation.runtime_snapshot import write_runtime_snapshot
 from antidengue_automation.scheduling import append_milestone_once
+from antidengue_automation.storage_lifecycle import (
+    antidengue_workspace,
+    evict_verified_antidengue_cache,
+)
 from automation_core.celery_app import celery_app
 from automation_core.command_runner import append_job_log, run_streamed_command
 from automation_core.config import get_settings
@@ -29,6 +38,32 @@ from automation_core.task_delivery import discarded_missing_job_delivery
 
 
 logger = logging.getLogger(__name__)
+
+
+def _archive_run_artifacts(job_id: str) -> dict[str, int]:
+    with Session(engine) as session:
+        return archive_job_artifacts(session, job_id)
+
+
+def _archive_failed_run_artifacts(job_id: str) -> None:
+    """Best-effort durability for outputs produced before a failed interruption."""
+
+    try:
+        storage_result = _archive_run_artifacts(job_id)
+    except Exception as exc:
+        append_job_log(
+            job_id,
+            f"Failed-run artifact archival could not complete: {exc}",
+            level="error",
+        )
+        return
+    if storage_result["errors"] or storage_result["local"]:
+        append_job_log(
+            job_id,
+            "Failed-run artifact archival remains incomplete: "
+            f"{storage_result['errors']} errors, {storage_result['local']} local-only.",
+            level="error",
+        )
 
 
 def _latest_run_summary(output_dir: Path, modified_after: float) -> dict | None:
@@ -56,6 +91,27 @@ def run_antidengue_job(job_id: str) -> dict:
     settings = get_settings()
     project_root = settings.antidengue_root
     started_at = time.time()
+    workspace = antidengue_workspace(settings, job_id)
+    output_dir = workspace / "output-files"
+    raw_dir = workspace / "drop-raw-files"
+    unmapped_report_dir = workspace / "unmapped-officer-reports"
+    archive_dir = workspace / "archived-files"
+    state_dir = workspace / "state"
+    for directory in (
+        output_dir,
+        raw_dir,
+        unmapped_report_dir,
+        archive_dir,
+        state_dir,
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+    last_scrape_path = state_dir / "last_scrape_metadata.json"
+    with Session(engine) as session:
+        materialize_runtime_state(
+            session,
+            state_key=LAST_SCRAPE_STATE_KEY,
+            destination=last_scrape_path,
+        )
 
     with Session(engine) as session:
         job = claim_job_running(session, job_id)
@@ -80,11 +136,7 @@ def run_antidengue_job(job_id: str) -> dict:
                     execution.dispatch_profile_ids or [str(execution.dispatch_profile_id)]
                 )
 
-    snapshot_path = (
-        settings.artifact_root.resolve()
-        / "antidengue-runtime"
-        / f"{job_id}.json"
-    )
+    snapshot_path = state_dir / "runtime_snapshot.json"
     try:
         with Session(engine) as session:
             runtime_snapshot = write_runtime_snapshot(
@@ -93,6 +145,14 @@ def run_antidengue_job(job_id: str) -> dict:
                 job_id=job_id,
                 dispatch_profile_ids=dispatch_profile_ids,
                 deadline_snapshot=dict(parameters.get("deadline_snapshot") or {}),
+            )
+            record_artifact(
+                session,
+                job_id,
+                snapshot_path,
+                kind="manifest",
+                name="runtime_snapshot.json",
+                module_key="antidengue",
             )
     except Exception as exc:
         error = f"Could not freeze PostgreSQL runtime snapshot: {exc}"
@@ -170,6 +230,13 @@ def run_antidengue_job(job_id: str) -> dict:
     env = {
         "PORTAL_LOGIN_MODE": str(parameters.get("login_mode", "auto")),
         "ANTIDENGUE_RUNTIME_SNAPSHOT": str(snapshot_path),
+        "ANTIDENGUE_WORK_ROOT": str(workspace),
+        "ANTIDENGUE_OUTPUT_DIR": str(output_dir),
+        "ANTIDENGUE_RAW_DIR": str(raw_dir),
+        "ANTIDENGUE_UNMAPPED_REPORT_DIR": str(unmapped_report_dir),
+        "ANTIDENGUE_ARCHIVE_DIR": str(archive_dir),
+        "ANTIDENGUE_DEBUG_DIR": str(workspace / "scraper-debug"),
+        "ANTIDENGUE_LAST_SCRAPE_METADATA_PATH": str(last_scrape_path),
         "PORTAL_REPORT_CUTOFF": str(parameters.get("report_cutoff") or ""),
         "PORTAL_REPORTS": portal_report_keys,
         "ANTIDENGUE_SUBMISSION_DEADLINE": str(
@@ -191,10 +258,11 @@ def run_antidengue_job(job_id: str) -> dict:
             job_id,
             command,
             cwd=project_root,
-            output_dir=project_root / "output-files",
+            output_dir=output_dir,
             additional_output_dirs=(
-                project_root / "unmapped-officer-reports",
-                project_root / "drop-raw-files",
+                unmapped_report_dir,
+                raw_dir,
+                state_dir,
             ),
             env=env,
             module_key="antidengue",
@@ -202,18 +270,41 @@ def run_antidengue_job(job_id: str) -> dict:
     except SoftTimeLimitExceeded:
         error = "AntiDengue exceeded the 30 minute execution limit"
         append_job_log(job_id, error, level="error")
+        _archive_failed_run_artifacts(job_id)
         with Session(engine) as session:
             mark_job_failed(session, job_id, error)
         raise
     except Exception as exc:
         append_job_log(job_id, str(exc), level="error")
+        _archive_failed_run_artifacts(job_id)
         with Session(engine) as session:
             mark_job_failed(session, job_id, str(exc))
         raise
 
-    summary = _latest_run_summary(project_root / "output-files", started_at)
-    with Session(engine) as session:
-        storage_result = archive_job_artifacts(session, job_id)
+    try:
+        summary = _latest_run_summary(output_dir, started_at)
+        with Session(engine) as session:
+            persisted_runtime_state = persist_runtime_state(
+                session,
+                state_key=LAST_SCRAPE_STATE_KEY,
+                source=last_scrape_path,
+                job_id=uuid.UUID(job_id),
+            )
+    except Exception as exc:
+        error = f"Could not validate and persist PostgreSQL runtime state: {exc}"
+        append_job_log(job_id, error, level="error")
+        _archive_failed_run_artifacts(job_id)
+        with Session(engine) as session:
+            mark_job_failed(session, job_id, error)
+        raise
+    try:
+        storage_result = _archive_run_artifacts(job_id)
+    except Exception as exc:
+        error = f"Durable RustFS archival failed: {exc}"
+        append_job_log(job_id, error, level="error")
+        with Session(engine) as session:
+            mark_job_failed(session, job_id, error)
+        raise
     if storage_result["errors"]:
         append_job_log(
             job_id,
@@ -233,11 +324,39 @@ def run_antidengue_job(job_id: str) -> dict:
         "input_source": input_source,
         "source_file_id": parameters.get("source_file_id"),
         "runtime_snapshot": runtime_snapshot,
+        "runtime_state": persisted_runtime_state,
+        "workspace": str(workspace),
         "storage": storage_result,
     }
     with Session(engine) as session:
-        if result.return_code == 0:
+        if storage_result["errors"] or storage_result["local"]:
+            job = get_job(session, job_id)
+            assert job is not None
+            job.result = job_result
+            session.add(job)
+            session.commit()
+            mark_job_failed(
+                session,
+                job_id,
+                "AntiDengue processing finished, but durable RustFS archival is incomplete; "
+                "retry storage before treating this run as complete.",
+            )
+        elif result.return_code == 0:
             mark_job_succeeded(session, job_id, job_result)
         else:
             mark_job_failed(session, job_id, f"Command exited with code {result.return_code}")
+    if settings.antidengue_retention_enabled:
+        with Session(engine) as session:
+            retention = evict_verified_antidengue_cache(
+                session,
+                settings=settings,
+                apply=True,
+            )
+        if retention["evicted"]:
+            append_job_log(
+                job_id,
+                "Evicted "
+                f"{retention['evicted']} verified AntiDengue cache files "
+                f"({retention['bytes_evicted']} bytes); RustFS remains authoritative.",
+            )
     return job_result

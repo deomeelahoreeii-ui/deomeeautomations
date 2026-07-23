@@ -178,6 +178,23 @@ wait_for_http() {
   fail "$label did not become ready at $url within ${seconds}s."
 }
 
+wait_for_frontend_module_graph() {
+  local source=""
+  local dependency_path=""
+  local url="http://127.0.0.1:$WEB_PORT/src/scripts/alerts.ts"
+  for ((i=0; i<30; i++)); do
+    source="$(curl --fail --silent --max-time 2 "$url" 2>/dev/null || true)"
+    dependency_path="$(sed -n 's#.*from "\(/node_modules/[^";]*\)".*#\1#p' <<<"$source" | head -n 1)"
+    if [[ -n "$dependency_path" ]] \
+      && curl --fail --silent --max-time 2 \
+        "http://127.0.0.1:$WEB_PORT$dependency_path" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  fail "Astro served HTML but its frontend dependency graph is stale or incomplete. Restart after dependency synchronization failed for $url."
+}
+
 assert_frontend_generated_paths_writable() {
   local path=""
   local blocked_path=""
@@ -385,6 +402,8 @@ payload = json.loads(os.environ["HEALTH_JSON"])
 inbound = payload.get("inboundCapture") or {}
 history = payload.get("inboundHistory") or {}
 if not payload.get("ready"):
+    raise SystemExit(1)
+if int(payload.get("deliveryProtocolVersion") or 0) < 2:
     raise SystemExit(1)
 if not inbound.get("enabled"):
     raise SystemExit(1)
@@ -873,6 +892,7 @@ info "Applying database migrations"
 
 info "Recovering jobs left active by an earlier development process"
 "$UV" run python scripts/recover_crm_jobs.py --all-active
+"$UV" run python scripts/recover_whatsapp_dispatches.py --all-active
 "$UV" run python scripts/recover_antidengue_executions.py
 
 info "Starting FastAPI"
@@ -889,9 +909,9 @@ platform_worker_command="$UV run celery -A automation_worker.main.celery_app wor
 pids+=("$!")
 
 if whatsapp_worker_inbound_ready; then
-  echo "An existing WhatsApp worker with bounded history protocol v2 is ready; it will be reused."
+  echo "An existing WhatsApp worker with delivery protocol v2 and bounded history is ready; it will be reused."
 elif whatsapp_worker_ready; then
-  info "Restarting older WhatsApp worker without bounded history protocol v2"
+  info "Restarting an older WhatsApp worker without the required delivery/history protocol"
   stop_existing_whatsapp_worker
   (
     cd "$WHATSAPP_DIR"
@@ -932,13 +952,14 @@ info "Starting Astro web application"
   # Astro otherwise daemonizes automatically when it detects an AI-agent
   # environment. Keep it in the foreground so this script supervises the
   # real web-server lifetime just as it does every other service.
-  exec env ASTRO_DEV_BACKGROUND=0 npm run dev -- --host 0.0.0.0 --port "$WEB_PORT"
+  exec env ASTRO_DEV_BACKGROUND=0 npm run dev -- --force --host 0.0.0.0 --port "$WEB_PORT"
 ) &
 pids+=("$!")
 
 info "Waiting for API, web UI, Celery, and WhatsApp worker"
 wait_for_http "http://127.0.0.1:$API_PORT/health" "FastAPI" 30
 wait_for_http "http://127.0.0.1:$WEB_PORT/whatsapp/inbound-files" "Astro" 45
+wait_for_frontend_module_graph
 wait_for_platform_worker
 for _ in {1..45}; do
   whatsapp_worker_inbound_ready && break

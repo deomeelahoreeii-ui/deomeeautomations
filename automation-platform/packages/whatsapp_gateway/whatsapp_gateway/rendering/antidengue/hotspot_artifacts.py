@@ -14,6 +14,7 @@ from sqlmodel import Session
 
 from automation_core.config import get_settings
 from automation_core.models import Artifact, Job
+from automation_core.storage_catalog import ensure_artifact_local
 from master_data.models import Wing
 
 if TYPE_CHECKING:
@@ -33,8 +34,9 @@ def review_artifact(
     for artifact in artifacts:
         if not artifact.name.lower().split("/")[-1].startswith("hotspot distance review"):
             continue
-        path = Path(artifact.path).expanduser().resolve(strict=False)
-        if not path.is_file():
+        try:
+            path = ensure_artifact_local(session, artifact)
+        except Exception:
             continue
         workbook = load_workbook(path, read_only=True, data_only=True)
         try:

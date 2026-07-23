@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from automation_core.models import Artifact
 from automation_core.config import get_settings
-from automation_core.storage_catalog import store_path
+from automation_core.storage_catalog import ensure_artifact_local, store_path
 from whatsapp_gateway.models import WhatsAppDispatchPreview, WhatsAppDispatchPreviewArtifact
 from whatsapp_gateway.previews.artifact_storage import freeze_artifact, sha256_file
 from whatsapp_gateway.previews.compiler.attachments import _artifact_role, _attachment_paths
@@ -40,12 +40,27 @@ class ArtifactSnapshotStore:
         size = 0
         artifact_status = "ready"
         frozen_path = source_path
-        if not path.exists() or not path.is_file():
+        if artifact is not None:
+            try:
+                source_path = ensure_artifact_local(self.ctx.session, artifact)
+                frozen_path = source_path
+            except Exception as exc:
+                artifact_status = "blocked"
+                problems.append(
+                    issue(
+                        "missing_attachment",
+                        "blocked",
+                        f"Attachment cannot be hydrated: {path.name}: {exc}",
+                    )
+                )
+        if artifact_status == "ready" and (
+            not source_path.exists() or not source_path.is_file()
+        ):
             artifact_status = "blocked"
             problems.append(issue("missing_attachment", "blocked", f"Attachment is missing: {path.name}"))
-        else:
-            size = path.stat().st_size
-            checksum = sha256_file(path)
+        elif artifact_status == "ready":
+            size = source_path.stat().st_size
+            checksum = sha256_file(source_path)
             if size == 0:
                 artifact_status = "blocked"
                 problems.append(issue("empty_attachment", "blocked", f"Attachment is empty: {path.name}"))
@@ -54,7 +69,7 @@ class ArtifactSnapshotStore:
             problems.append(issue("untracked_attachment", "blocked",
                 f"Attachment is not registered to the source dry run: {path.name}"))
         if artifact is not None and artifact_status == "ready":
-            frozen_path = freeze_artifact(path, checksum)
+            frozen_path = freeze_artifact(source_path, checksum)
         stored_object_id = None
         storage_status = "local"
         storage_error = None

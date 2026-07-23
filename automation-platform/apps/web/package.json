@@ -11,6 +11,10 @@
     "typecheck": "tsc --noEmit",
     "preview": "astro preview",
     "start": "node ./dist/server/entry.mjs",
+    "test:e2e:pdf": "node ./tests/pdf-preview-smoke.mjs",
+    "test:e2e:dispatch-sent": "node ./tests/dispatch-sent-smoke.mjs",
+    "test:e2e:reply-editor": "node ./tests/reply-editor-smoke.mjs",
+    "test:e2e:reply-final-packet": "node ./tests/reply-final-packet-smoke.mjs",
     "verify": "npm run check && npm run build"
   },
   "dependencies": {
@@ -29,6 +33,7 @@
     "@types/d3": "7.4.3",
     "@types/howler": "2.2.13",
     "@types/node": "24.13.3",
+    "playwright-core": "^1.61.1",
     "typescript": "6.0.3"
   }
 }

@@ -14,6 +14,7 @@ from automation_core.config import Settings, get_settings
 from automation_core.database import get_session
 from crm_domain.dispatch import (
     CrmDispatchError,
+    CrmDispatchConflict,
     CrmDispatchNotFound,
     CrmDispatchService,
     CrmDispatchValidationError,
@@ -85,6 +86,7 @@ class ManualRouteInput(BaseModel):
 class ExclusionInput(BaseModel):
     excluded: bool
     reason: str = Field(default="", max_length=2_000)
+    actor: str = Field(default="web-operator", max_length=120)
 
 
 def service(session: Session, settings: Settings | None = None) -> CrmDispatchService:
@@ -94,6 +96,8 @@ def service(session: Session, settings: Settings | None = None) -> CrmDispatchSe
 def fail(exc: CrmDispatchError) -> None:
     if isinstance(exc, CrmDispatchNotFound):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if isinstance(exc, CrmDispatchConflict):
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
     if isinstance(exc, CrmDispatchValidationError):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -135,7 +139,9 @@ def profiles(
 
 
 @router.post("/profiles", status_code=status.HTTP_201_CREATED)
-def save_profile(payload: DestinationProfileInput, session: Session = Depends(get_session)) -> dict[str, Any]:
+def save_profile(
+    payload: DestinationProfileInput, session: Session = Depends(get_session)
+) -> dict[str, Any]:
     try:
         return service(session).save_profile(
             profile_id=payload.id,
@@ -239,14 +245,18 @@ def eligible_sources(
 
 @router.post("/batches", status_code=status.HTTP_201_CREATED)
 def create_batch(
-    payload: BatchInput, session: Session = Depends(get_session),
+    payload: BatchInput,
+    session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     try:
         return service(session, settings).create_batch(
-            direction=payload.direction, case_ids=payload.case_ids,
-            official_letter_ids=payload.official_letter_ids, actor=payload.actor,
-            purpose=payload.purpose, response_due_at=payload.response_due_at,
+            direction=payload.direction,
+            case_ids=payload.case_ids,
+            official_letter_ids=payload.official_letter_ids,
+            actor=payload.actor,
+            purpose=payload.purpose,
+            response_due_at=payload.response_due_at,
         )
     except CrmDispatchError as exc:
         fail(exc)
@@ -260,6 +270,7 @@ def download_dispatch_artifact(
 ) -> FileResponse:
     from crm_domain.models import CrmDispatchArtifact
     from pathlib import Path
+
     artifact = session.get(CrmDispatchArtifact, artifact_id)
     if artifact is None:
         raise HTTPException(status_code=404, detail="Dispatch packet was not found")
@@ -278,7 +289,9 @@ def list_batches(
     page_size: int = Query(default=25, ge=1, le=200),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    return service(session).list_batches(search=search, status=status_filter, direction=direction, page=page, page_size=page_size)
+    return service(session).list_batches(
+        search=search, status=status_filter, direction=direction, page=page, page_size=page_size
+    )
 
 
 @router.get("/deliveries")
@@ -293,6 +306,22 @@ def delivery_history(
     return service(session).list_delivery_history(
         search=search, status=status_filter, direction=direction, page=page, page_size=page_size
     )
+
+
+@router.get("/submissions")
+def upward_submissions(
+    search: str = Query(default="", max_length=300),
+    phase: str = Query(default="sent", pattern="^(sent|in_progress|attention|all)$"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=200),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        return service(session).list_upward_submissions(
+            search=search, phase=phase, page=page, page_size=page_size
+        )
+    except CrmDispatchError as exc:
+        fail(exc)
 
 
 @router.get("/batches/{batch_id}")
@@ -330,8 +359,10 @@ async def approve_batch(
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     from whatsapp_gateway.models import (
-        WhatsAppDispatchApproval, WhatsAppDispatchPreview,
-        WhatsAppDispatchPreviewArtifact, WhatsAppDispatchPreviewDelivery,
+        WhatsAppDispatchApproval,
+        WhatsAppDispatchPreview,
+        WhatsAppDispatchPreviewArtifact,
+        WhatsAppDispatchPreviewDelivery,
     )
     from whatsapp_gateway.previews.approval import approve_preview
     from whatsapp_gateway.previews.schemas import PreviewApprovalInput
@@ -343,7 +374,9 @@ async def approve_batch(
         fail(exc)
     pending = [item for item in current.get("previews", []) if not item.get("approval")]
     if not pending:
-        raise HTTPException(status_code=409, detail="This CRM dispatch batch has no unapproved frozen previews")
+        raise HTTPException(
+            status_code=409, detail="This CRM dispatch batch has no unapproved frozen previews"
+        )
 
     eligible: list[tuple[uuid.UUID, int, int]] = []
     blocked: list[dict[str, Any]] = []
@@ -353,20 +386,30 @@ async def approve_batch(
         if preview is None:
             blocked.append({"preview_id": str(preview_id), "reason": "Preview no longer exists"})
             continue
-        deliveries = list(session.scalars(
-            select(WhatsAppDispatchPreviewDelivery).where(WhatsAppDispatchPreviewDelivery.preview_id == preview_id)
-        ).all())
-        artifacts = list(session.scalars(
-            select(WhatsAppDispatchPreviewArtifact).where(WhatsAppDispatchPreviewArtifact.preview_id == preview_id)
-        ).all())
+        deliveries = list(
+            session.scalars(
+                select(WhatsAppDispatchPreviewDelivery).where(
+                    WhatsAppDispatchPreviewDelivery.preview_id == preview_id
+                )
+            ).all()
+        )
+        artifacts = list(
+            session.scalars(
+                select(WhatsAppDispatchPreviewArtifact).where(
+                    WhatsAppDispatchPreviewArtifact.preview_id == preview_id
+                )
+            ).all()
+        )
         summary = summarize_preview_state(deliveries, preview.issues or [], artifacts)
         if summary.eligible_delivery_count <= 0:
-            blocked.append({
-                "preview_id": str(preview_id),
-                "preview_key": preview.preview_key,
-                "reason": "No new eligible recipient remains; the delivery is blocked, excluded, or already sent",
-                "excluded_count": summary.excluded_delivery_count,
-            })
+            blocked.append(
+                {
+                    "preview_id": str(preview_id),
+                    "preview_key": preview.preview_key,
+                    "reason": "No new eligible recipient remains; the delivery is blocked, excluded, or already sent",
+                    "excluded_count": summary.excluded_delivery_count,
+                }
+            )
             continue
         eligible.append((preview_id, summary.warning_issue_count, summary.excluded_delivery_count))
 
@@ -395,18 +438,24 @@ async def approve_batch(
             session,
         )
         approval = session.scalar(
-            select(WhatsAppDispatchApproval).where(WhatsAppDispatchApproval.preview_id == preview_id)
+            select(WhatsAppDispatchApproval).where(
+                WhatsAppDispatchApproval.preview_id == preview_id
+            )
         )
         actual = int(approval.delivery_count if approval else 0)
         queued += actual
         excluded += int(approval.excluded_count if approval else excluded_count)
-        jobs.append({
-            "preview_id": str(preview_id),
-            "job_id": str(job.id),
-            "job_status": job.status,
-            "queued": actual,
-            "no_op": bool((job.result or {}).get("no_op")) if isinstance(job.result, dict) else False,
-        })
+        jobs.append(
+            {
+                "preview_id": str(preview_id),
+                "job_id": str(job.id),
+                "job_status": job.status,
+                "queued": actual,
+                "no_op": bool((job.result or {}).get("no_op"))
+                if isinstance(job.result, dict)
+                else False,
+            }
+        )
 
     refreshed = service(session).refresh(batch_id)
     if queued <= 0:
@@ -462,6 +511,193 @@ def exclude_item(
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     try:
-        return service(session).set_item_excluded(item_id, excluded=payload.excluded, reason=payload.reason)
+        return service(session).set_item_excluded(
+            item_id,
+            excluded=payload.excluded,
+            reason=payload.reason,
+            actor=payload.actor,
+        )
     except CrmDispatchError as exc:
         fail(exc)
+
+
+@router.post("/batches/{batch_id}/discard")
+def discard_upward_batch(
+    batch_id: uuid.UUID,
+    payload: ActorInput,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        return service(session).discard_upward_batch(batch_id, actor=payload.actor)
+    except CrmDispatchError as exc:
+        fail(exc)
+
+
+@router.post("/batches/{batch_id}/retry-failed", status_code=status.HTTP_202_ACCEPTED)
+def retry_failed_upward_deliveries(
+    batch_id: uuid.UUID,
+    payload: ActorInput,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    from automation_core.job_service import add_job, add_job_log
+    from automation_core.models import Job, JobStatus, JobType
+    from automation_core.task_outbox import publish_pending_tasks, stage_task
+    from crm_domain.models import CrmDispatchBatch, CrmDispatchItem, CrmDispatchTarget
+    from whatsapp_gateway.models import (
+        WhatsAppActivity,
+        WhatsAppDelivery,
+        WhatsAppDispatchApproval,
+    )
+
+    batch = session.get(CrmDispatchBatch, batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Dispatch batch not found")
+    if batch.direction != "upward":
+        raise HTTPException(
+            status_code=409,
+            detail="Only failed upward compliance deliveries can be retried here",
+        )
+    preview_ids = list(
+        session.scalars(
+            select(CrmDispatchTarget.preview_id)
+            .join(
+                CrmDispatchItem,
+                CrmDispatchItem.id == CrmDispatchTarget.dispatch_item_id,
+            )
+            .where(
+                CrmDispatchItem.batch_id == batch.id,
+                CrmDispatchTarget.preview_id.is_not(None),
+            )
+        ).all()
+    )
+    approvals = list(
+        session.scalars(
+            select(WhatsAppDispatchApproval).where(
+                WhatsAppDispatchApproval.preview_id.in_(preview_ids)
+            ).with_for_update()
+        ).all()
+    )
+    staged: list[dict[str, Any]] = []
+    total = 0
+    for approval in approvals:
+        if approval.status in {"queued", "sending"}:
+            raise HTTPException(
+                status_code=409,
+                detail="A delivery attempt for this approval is already active",
+            )
+        failed = list(
+            session.scalars(
+                select(WhatsAppDelivery).where(
+                    WhatsAppDelivery.approval_id == approval.id,
+                    WhatsAppDelivery.status == "failed",
+                ).with_for_update()
+            ).all()
+        )
+        if not failed:
+            continue
+        original_job = session.get(Job, approval.job_id)
+        if original_job is None or original_job.status in {
+            JobStatus.queued.value,
+            JobStatus.running.value,
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail="A failed delivery job is unavailable or already active",
+            )
+        retry_ids = [str(delivery.id) for delivery in failed]
+        retry_job = add_job(
+            session,
+            job_type=JobType.whatsapp_dispatch_send.value,
+            title=f"Retry failed deliveries from approval {approval.id}",
+            parameters={
+                "approval_id": str(approval.id),
+                "retry_delivery_ids": retry_ids,
+                "retry_of_job_id": str(original_job.id),
+                "retry_requested_by": payload.actor,
+            },
+        )
+        for delivery in failed:
+            session.add(
+                WhatsAppActivity(
+                    account_id=delivery.account_id,
+                    level="info",
+                    event_type="approved_delivery_retry_requested",
+                    message=(
+                        f"Retry requested for failed approved delivery to "
+                        f"{delivery.recipient_name}"
+                    ),
+                    details={
+                        "delivery_id": str(delivery.id),
+                        "approval_id": str(approval.id),
+                        "retry_job_id": str(retry_job.id),
+                        "previous_status": delivery.status,
+                        "previous_error": delivery.error,
+                        "previous_provider_result": delivery.provider_result,
+                        "requested_by": payload.actor,
+                    },
+                )
+            )
+            delivery.status = "queued"
+            delivery.error = None
+            delivery.provider_result = None
+            delivery.queue_stream = None
+            delivery.queue_sequence = None
+            delivery.completed_at = None
+            session.add(delivery)
+        approval.status = "queued"
+        approval.error = None
+        approval.completed_at = None
+        session.add(approval)
+        add_job_log(
+            session,
+            retry_job.id,
+            (
+                f"Staged CRM retry for {len(failed)} explicitly failed "
+                f"delivery(ies) by {payload.actor}."
+            ),
+        )
+        stage_task(
+            session,
+            job=retry_job,
+            task_name="whatsapp_gateway.send_approved_preview",
+            queue="antidengue",
+            args=[str(retry_job.id)],
+            idempotency_key=(
+                f"crm-dispatch:{batch.id}:approval:{approval.id}:"
+                f"retry-job:{retry_job.id}"
+            ),
+        )
+        total += len(failed)
+        staged.append(
+            {
+                "approval_id": str(approval.id),
+                "job_id": str(retry_job.id),
+                "delivery_ids": retry_ids,
+            }
+        )
+    if not total:
+        ambiguous = session.scalar(
+            select(WhatsAppDelivery.id)
+            .join(
+                WhatsAppDispatchApproval,
+                WhatsAppDispatchApproval.id == WhatsAppDelivery.approval_id,
+            )
+            .where(
+                WhatsAppDispatchApproval.preview_id.in_(preview_ids),
+                WhatsAppDelivery.status == "timed_out",
+            )
+            .limit(1)
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Timed-out deliveries have an ambiguous send outcome and cannot be "
+                "automatically retried; reconcile them before resending."
+                if ambiguous
+                else "This batch has no explicitly failed destinations to retry"
+            ),
+        )
+    session.commit()
+    refreshed = service(session).refresh(batch.id)
+    publish_pending_tasks(session, limit=10)
+    return {"retried": total, "staged": staged, "batch": refreshed}

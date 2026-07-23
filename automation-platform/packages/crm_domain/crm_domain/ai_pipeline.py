@@ -24,6 +24,7 @@ from crm_domain.bulk_operations import (
     _safe_name,
     _sha256_bytes,
 )
+from crm_domain.case_scopes import reply_case_eligibility_clause
 from crm_domain.default_reply_sop import (
     DEFAULT_REPLY_SOP_CONTENT,
     DEFAULT_REPLY_SOP_NAME,
@@ -199,7 +200,9 @@ def _redact(value: str) -> str:
     text = value or ""
     text = re.sub(r"\b\d{5}-?\d{7}-?\d\b", "[CNIC REDACTED]", text)
     text = re.sub(r"\b(?:\+92|0092|0)?3\d{9}\b", "[PHONE REDACTED]", text)
-    text = re.sub(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", "[EMAIL REDACTED]", text, flags=re.I)
+    text = re.sub(
+        r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", "[EMAIL REDACTED]", text, flags=re.I
+    )
     return text
 
 
@@ -260,9 +263,12 @@ class CrmAiPipelineService:
             )
             self.session.add(version)
         for slug, name, description, order in DEFAULT_TAG_GROUPS:
-            if self.session.exec(
-                select(CrmComplaintTagGroup).where(CrmComplaintTagGroup.slug == slug)
-            ).first() is None:
+            if (
+                self.session.exec(
+                    select(CrmComplaintTagGroup).where(CrmComplaintTagGroup.slug == slug)
+                ).first()
+                is None
+            ):
                 self.session.add(
                     CrmComplaintTagGroup(
                         slug=slug,
@@ -307,7 +313,9 @@ class CrmAiPipelineService:
 
     def prompt_profiles(self) -> dict[str, Any]:
         active = self.active_prompt_version()
-        profiles = list(self.session.exec(select(CrmPromptProfile).order_by(CrmPromptProfile.name)).all())
+        profiles = list(
+            self.session.exec(select(CrmPromptProfile).order_by(CrmPromptProfile.name)).all()
+        )
         versions = list(
             self.session.exec(
                 select(CrmPromptProfileVersion).order_by(
@@ -318,7 +326,9 @@ class CrmAiPipelineService:
         )
         by_profile: dict[uuid.UUID, list[dict[str, Any]]] = {}
         for row in versions:
-            by_profile.setdefault(row.profile_id, []).append(self._version_payload(row, include_content=False))
+            by_profile.setdefault(row.profile_id, []).append(
+                self._version_payload(row, include_content=False)
+            )
         return {
             "active_version_id": str(active.id),
             "profiles": [
@@ -435,32 +445,49 @@ class CrmAiPipelineService:
 
     def statistics(self) -> dict[str, Any]:
         active = self.active_prompt_version()
-        published = self.session.scalar(
-            select(func.count()).select_from(ComplaintCase).where(ComplaintCase.state == "published")
-        ) or 0
-        classified = self.session.scalar(
-            select(func.count()).select_from(ComplaintCase).where(
-                ComplaintCase.state == "published",
-                ComplaintCase.category_id.is_not(None),
+        eligible = (
+            self.session.scalar(
+                select(func.count())
+                .select_from(ComplaintCase)
+                .where(reply_case_eligibility_clause())
             )
-        ) or 0
-        review = self.session.scalar(
-            select(func.count()).select_from(CrmComplaintClassification).where(
-                CrmComplaintClassification.status == "review_required"
+            or 0
+        )
+        classified = (
+            self.session.scalar(
+                select(func.count())
+                .select_from(ComplaintCase)
+                .where(
+                    reply_case_eligibility_clause(),
+                    ComplaintCase.category_id.is_not(None),
+                )
             )
-        ) or 0
+            or 0
+        )
+        review = (
+            self.session.scalar(
+                select(func.count())
+                .select_from(CrmComplaintClassification)
+                .where(CrmComplaintClassification.status == "review_required")
+            )
+            or 0
+        )
         replies = self.session.scalar(select(func.count()).select_from(ComplaintReply)) or 0
-        suggestions = self.session.scalar(
-            select(func.count()).select_from(CrmTaxonomySuggestion).where(
-                CrmTaxonomySuggestion.status == "pending"
+        suggestions = (
+            self.session.scalar(
+                select(func.count())
+                .select_from(CrmTaxonomySuggestion)
+                .where(CrmTaxonomySuggestion.status == "pending")
             )
-        ) or 0
+            or 0
+        )
         return {
-            "published_cases": int(published),
-            "awaiting_classification": max(0, int(published) - int(classified)),
+            "published_cases": int(eligible),
+            "reply_eligible_cases": int(eligible),
+            "awaiting_classification": max(0, int(eligible) - int(classified)),
             "classified_cases": int(classified),
             "needs_review": int(review),
-            "awaiting_reply": max(0, int(published) - int(replies)),
+            "awaiting_reply": max(0, int(eligible) - int(replies)),
             "pending_taxonomy_suggestions": int(suggestions),
             "active_prompt_version": active.version_label,
             "active_prompt_version_id": str(active.id),
@@ -478,7 +505,11 @@ class CrmAiPipelineService:
             self.session.exec(
                 select(ComplaintSubcategory)
                 .where(ComplaintSubcategory.active == True)  # noqa: E712
-                .order_by(ComplaintSubcategory.category_id, ComplaintSubcategory.display_order, ComplaintSubcategory.name)
+                .order_by(
+                    ComplaintSubcategory.category_id,
+                    ComplaintSubcategory.display_order,
+                    ComplaintSubcategory.name,
+                )
             ).all()
         )
         return categories, subcategories
@@ -493,7 +524,7 @@ class CrmAiPipelineService:
         self.ensure_defaults()
         if scope not in {"unclassified", "all", "selected"}:
             raise AiPipelineError("Classification scope must be unclassified, all or selected")
-        statement = select(ComplaintCase).where(ComplaintCase.state == "published")
+        statement = select(ComplaintCase).where(reply_case_eligibility_clause())
         if scope == "unclassified":
             statement = statement.where(ComplaintCase.category_id.is_(None))
         elif scope == "selected":
@@ -515,7 +546,9 @@ class CrmAiPipelineService:
                     CrmComplaintTag.ai_available == True,  # noqa: E712
                     CrmComplaintTag.merged_into_id.is_(None),
                 )
-                .order_by(CrmComplaintTag.group_name, CrmComplaintTag.display_name, CrmComplaintTag.name)
+                .order_by(
+                    CrmComplaintTag.group_name, CrmComplaintTag.display_name, CrmComplaintTag.name
+                )
             ).all()
         )
         now = utcnow()
@@ -539,7 +572,10 @@ class CrmAiPipelineService:
                     complaint_case_id=case.id,
                     complaint_number_snapshot=number,
                     status="exported",
-                    details_json={"category_at_export": case.category, "subcategory_at_export": case.sub_category},
+                    details_json={
+                        "category_at_export": case.category,
+                        "subcategory_at_export": case.sub_category,
+                    },
                     processed_at=now,
                 )
             )
@@ -569,7 +605,18 @@ class CrmAiPipelineService:
         ]
         example = _csv_bytes(
             CLASSIFICATION_HEADERS,
-            [["104-1234567", "Fees", "Summer Vacation Fee", "private-school;advance-fee;no-evidence", "0.96", "No", "", "Advance vacation fee complaint"]],
+            [
+                [
+                    "104-1234567",
+                    "Fees",
+                    "Summer Vacation Fee",
+                    "private-school;advance-fee;no-evidence",
+                    "0.96",
+                    "No",
+                    "",
+                    "Advance vacation fee complaint",
+                ]
+            ],
         )
         summary = {
             "batch_id": str(batch.id),
@@ -581,11 +628,23 @@ class CrmAiPipelineService:
         }
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("01-complaints-to-classify.csv", _csv_bytes(["Complaint Number", "Complaint Remarks"], complaint_rows))
+            archive.writestr(
+                "01-complaints-to-classify.csv",
+                _csv_bytes(["Complaint Number", "Complaint Remarks"], complaint_rows),
+            )
             archive.writestr(
                 "02-existing-taxonomy.csv",
                 _csv_bytes(
-                    ["Category", "Subcategory", "Category Description", "Subcategory Description", "Category Reply Guidance", "Category Policy Notes", "Subcategory Reply Guidance", "Subcategory Policy Notes"],
+                    [
+                        "Category",
+                        "Subcategory",
+                        "Category Description",
+                        "Subcategory Description",
+                        "Category Reply Guidance",
+                        "Category Policy Notes",
+                        "Subcategory Reply Guidance",
+                        "Subcategory Policy Notes",
+                    ],
                     taxonomy_rows,
                 ),
             )
@@ -594,7 +653,10 @@ class CrmAiPipelineService:
                 _csv_bytes(["Tag", "Display Name", "Group", "Description", "Aliases"], tag_rows),
             )
             archive.writestr("04-classification-instructions.txt", CLASSIFICATION_INSTRUCTIONS)
-            archive.writestr("05-classification-output-template.csv", _csv_bytes(CLASSIFICATION_HEADERS, template_rows))
+            archive.writestr(
+                "05-classification-output-template.csv",
+                _csv_bytes(CLASSIFICATION_HEADERS, template_rows),
+            )
             archive.writestr("06-completed-classification-sample.csv", example)
             archive.writestr("batch-summary.json", json.dumps(summary, indent=2))
         self.bulk._write_artifact(
@@ -647,7 +709,10 @@ class CrmAiPipelineService:
             source_sha256=_sha256_bytes(content),
             status="validating",
             scope={"parent_classification_export_id": str(parent.id)},
-            settings={"auto_accept_threshold": auto_accept_threshold, "format": "classification_csv_v1"},
+            settings={
+                "auto_accept_threshold": auto_accept_threshold,
+                "format": "classification_csv_v1",
+            },
         )
         batch.started_at = now
         self.bulk._write_artifact(
@@ -664,24 +729,47 @@ class CrmAiPipelineService:
             text = content.decode("utf-8-sig")
         except UnicodeDecodeError:
             text = ""
-            errors.append(["", "", "invalid_encoding", "The classification CSV must use UTF-8 encoding."])
+            errors.append(
+                ["", "", "invalid_encoding", "The classification CSV must use UTF-8 encoding."]
+            )
         if text:
             reader = csv.DictReader(io.StringIO(text))
             if list(reader.fieldnames or []) != CLASSIFICATION_HEADERS:
-                errors.append(["", "", "invalid_headers", "The CSV columns must exactly match the classification template."])
+                errors.append(
+                    [
+                        "",
+                        "",
+                        "invalid_headers",
+                        "The CSV columns must exactly match the classification template.",
+                    ]
+                )
             else:
                 for source_row, row in enumerate(reader, start=2):
                     raw_number = str(row.get("Complaint Number") or "").strip()
                     number = normalize_complaint_number(raw_number)
                     if not number:
                         invalid += 1
-                        errors.append([source_row, raw_number, "missing_complaint_number", "Complaint Number is required."])
+                        errors.append(
+                            [
+                                source_row,
+                                raw_number,
+                                "missing_complaint_number",
+                                "Complaint Number is required.",
+                            ]
+                        )
                         continue
                     seen[number] += 1
                     if seen[number] > 1:
                         duplicates += 1
                         invalid += 1
-                        errors.append([source_row, number, "duplicate_complaint_number", "Complaint Number occurs more than once."])
+                        errors.append(
+                            [
+                                source_row,
+                                number,
+                                "duplicate_complaint_number",
+                                "Complaint Number occurs more than once.",
+                            ]
+                        )
                         self.session.add(
                             CrmBulkOperationItem(
                                 batch_id=batch.id,
@@ -696,7 +784,14 @@ class CrmAiPipelineService:
                     export_item = expected.get(number)
                     if export_item is None:
                         invalid += 1
-                        errors.append([source_row, number, "outside_export_batch", "Complaint was not included in the related classification export."])
+                        errors.append(
+                            [
+                                source_row,
+                                number,
+                                "outside_export_batch",
+                                "Complaint was not included in the related classification export.",
+                            ]
+                        )
                         self.session.add(
                             CrmBulkOperationItem(
                                 batch_id=batch.id,
@@ -733,7 +828,9 @@ class CrmAiPipelineService:
                     tags = _split_tags(str(row.get("Tags") or ""))
                     if not category and not needs_new:
                         invalid += 1
-                        message = "Choose an existing category or mark the row as needing new taxonomy."
+                        message = (
+                            "Choose an existing category or mark the row as needing new taxonomy."
+                        )
                         errors.append([source_row, number, "missing_category", message])
                         self.session.add(
                             CrmBulkOperationItem(
@@ -785,7 +882,14 @@ class CrmAiPipelineService:
         for number, export_item in expected.items():
             if not seen[number]:
                 missing += 1
-                errors.append(["", number, "missing_from_import", "Complaint from the export batch is missing from the classification CSV."])
+                errors.append(
+                    [
+                        "",
+                        number,
+                        "missing_from_import",
+                        "Complaint from the export batch is missing from the classification CSV.",
+                    ]
+                )
                 self.session.add(
                     CrmBulkOperationItem(
                         batch_id=batch.id,
@@ -808,14 +912,18 @@ class CrmAiPipelineService:
                 kind="validation_errors",
                 name=f"{batch.batch_number}-validation-errors.csv",
                 content_type="text/csv; charset=utf-8",
-                content=_csv_bytes(["Source Row", "Complaint Number", "Error Code", "Error"], errors),
+                content=_csv_bytes(
+                    ["Source Row", "Complaint Number", "Error Code", "Error"], errors
+                ),
             )
         batch.updated_at = utcnow()
         self.session.add(batch)
         self.session.commit()
         return self.bulk.batch_detail(batch.id)
 
-    def _category_lookup(self) -> tuple[dict[str, ComplaintCategory], dict[tuple[uuid.UUID, str], ComplaintSubcategory]]:
+    def _category_lookup(
+        self,
+    ) -> tuple[dict[str, ComplaintCategory], dict[tuple[uuid.UUID, str], ComplaintSubcategory]]:
         categories, subs = self._taxonomy_rows()
         return (
             {row.normalized_name: row for row in categories},
@@ -832,7 +940,12 @@ class CrmAiPipelineService:
             )
         ).all()
         for row in rows:
-            for value in (row.normalized_name, row.name, row.display_name, *(row.aliases_json or [])):
+            for value in (
+                row.normalized_name,
+                row.name,
+                row.display_name,
+                *(row.aliases_json or []),
+            ):
                 key = _tag_slug(value)
                 if key:
                     lookup[key] = row
@@ -850,7 +963,9 @@ class CrmAiPipelineService:
         if batch.operation_type != "classification_import" or batch.status != "ready":
             raise AiPipelineError("The classification import batch is not ready to commit")
         if batch.failed_items and not allow_partial:
-            raise AiPipelineError("Strict classification import is enabled. Correct every invalid or missing row first.")
+            raise AiPipelineError(
+                "Strict classification import is enabled. Correct every invalid or missing row first."
+            )
         threshold = float((batch.settings_json or {}).get("auto_accept_threshold", 0.85))
         categories, subs = self._category_lookup()
         tags = self._tag_lookup()
@@ -858,10 +973,12 @@ class CrmAiPipelineService:
         auto_accepted = review_required = 0
         items = list(
             self.session.exec(
-                select(CrmBulkOperationItem).where(
+                select(CrmBulkOperationItem)
+                .where(
                     CrmBulkOperationItem.batch_id == batch.id,
                     CrmBulkOperationItem.status == "valid",
-                ).order_by(CrmBulkOperationItem.source_row)
+                )
+                .order_by(CrmBulkOperationItem.source_row)
             ).all()
         )
         for item in items:
@@ -877,7 +994,11 @@ class CrmAiPipelineService:
             category_name = clean_name(str(details.get("category") or ""))
             sub_name = clean_name(str(details.get("subcategory") or ""))
             category = categories.get(normalized_name(category_name))
-            sub = subs.get((category.id, normalized_name(sub_name))) if category and sub_name else None
+            sub = (
+                subs.get((category.id, normalized_name(sub_name)))
+                if category and sub_name
+                else None
+            )
             tag_names = list(details.get("tags") or [])
             known_tags = [tags[name] for name in tag_names if name in tags]
             unknown_tags = [name for name in tag_names if name not in tags]
@@ -885,22 +1006,46 @@ class CrmAiPipelineService:
             confidence = float(details.get("confidence") or 0)
             proposals: list[tuple[str, str, uuid.UUID | None]] = []
             if category is None:
-                proposals.append(("category", clean_name(str(details.get("proposed_name") or category_name)), None))
+                proposals.append(
+                    (
+                        "category",
+                        clean_name(str(details.get("proposed_name") or category_name)),
+                        None,
+                    )
+                )
             elif sub_name and sub is None:
-                proposals.append(("subcategory", clean_name(str(details.get("proposed_name") or sub_name)), category.id))
+                proposals.append(
+                    (
+                        "subcategory",
+                        clean_name(str(details.get("proposed_name") or sub_name)),
+                        category.id,
+                    )
+                )
             for name in unknown_tags:
                 proposals.append(("tag", name, None))
             if needs_new and not proposals:
                 explicit = clean_name(str(details.get("proposed_name") or ""))
                 if explicit:
-                    proposals.append(("subcategory" if category else "category", explicit, category.id if category else None))
-            accept = bool(category and (sub or not sub_name) and not needs_new and not proposals and confidence >= threshold)
+                    proposals.append(
+                        (
+                            "subcategory" if category else "category",
+                            explicit,
+                            category.id if category else None,
+                        )
+                    )
+            accept = bool(
+                category
+                and (sub or not sub_name)
+                and not needs_new
+                and not proposals
+                and confidence >= threshold
+            )
             for previous in self.session.exec(
                 select(CrmComplaintClassification).where(
                     CrmComplaintClassification.complaint_case_id == case.id,
-                    CrmComplaintClassification.status.in_((
-                        "pending", "auto_accepted", "review_required", "approved"
-                    )),
+                    CrmComplaintClassification.status.in_(
+                        ("pending", "auto_accepted", "review_required", "approved")
+                    ),
                 )
             ).all():
                 previous.status = "superseded"
@@ -939,12 +1084,15 @@ class CrmAiPipelineService:
                 case.updated_at = now
                 self.session.add(case)
                 for tag in known_tags:
-                    if self.session.exec(
-                        select(CrmComplaintTagLink).where(
-                            CrmComplaintTagLink.complaint_case_id == case.id,
-                            CrmComplaintTagLink.tag_id == tag.id,
-                        )
-                    ).first() is None:
+                    if (
+                        self.session.exec(
+                            select(CrmComplaintTagLink).where(
+                                CrmComplaintTagLink.complaint_case_id == case.id,
+                                CrmComplaintTagLink.tag_id == tag.id,
+                            )
+                        ).first()
+                        is None
+                    ):
                         self.session.add(
                             CrmComplaintTagLink(
                                 complaint_case_id=case.id,
@@ -967,12 +1115,18 @@ class CrmAiPipelineService:
                             proposal_type=proposal_type,
                             parent_category_id=parent_id,
                             proposed_name=proposed_name,
-                            normalized_name=_tag_slug(proposed_name) if proposal_type == "tag" else normalized_name(proposed_name),
+                            normalized_name=_tag_slug(proposed_name)
+                            if proposal_type == "tag"
+                            else normalized_name(proposed_name),
                             proposed_group_name="issue" if proposal_type == "tag" else None,
                             reason=classification.reason,
                         )
                     )
-            item.details_json = {**details, "classification_id": str(classification.id), "auto_accepted": accept}
+            item.details_json = {
+                **details,
+                "classification_id": str(classification.id),
+                "auto_accepted": accept,
+            }
             item.processed_at = now
             self.session.add(item)
             self.session.add(
@@ -980,7 +1134,9 @@ class CrmAiPipelineService:
                     complaint_case_id=case.id,
                     entity_type="complaint_classification",
                     entity_id=str(classification.id),
-                    event_type="classification_auto_accepted" if accept else "classification_review_required",
+                    event_type="classification_auto_accepted"
+                    if accept
+                    else "classification_review_required",
                     actor=actor,
                     after_json={
                         "category": category.name if category else category_name,
@@ -996,11 +1152,18 @@ class CrmAiPipelineService:
         batch.status = "completed_with_errors" if batch.failed_items else "completed"
         batch.completed_at = now
         batch.updated_at = now
-        batch.settings_json = {**(batch.settings_json or {}), "committed_by": actor, "allow_partial": allow_partial}
+        batch.settings_json = {
+            **(batch.settings_json or {}),
+            "committed_by": actor,
+            "allow_partial": allow_partial,
+        }
         self.session.add(batch)
         self.session.commit()
         result = self.bulk.batch_detail(batch.id)
-        result["commit_summary"] = {"auto_accepted": auto_accepted, "review_required": review_required}
+        result["commit_summary"] = {
+            "auto_accepted": auto_accepted,
+            "review_required": review_required,
+        }
         return result
 
     @staticmethod
@@ -1015,10 +1178,18 @@ class CrmAiPipelineService:
             "case_id": str(case.id),
             "complaint_number": case.complaint_number or str(case.id),
             "complaint_preview": (case.remarks or "").replace("\n", " ")[:360],
-            "suggested_category_id": str(classification.suggested_category_id) if classification.suggested_category_id else None,
-            "suggested_subcategory_id": str(classification.suggested_subcategory_id) if classification.suggested_subcategory_id else None,
-            "suggested_category": category.name if category else classification.suggested_category_name or "",
-            "suggested_subcategory": subcategory.name if subcategory else classification.suggested_subcategory_name or "",
+            "suggested_category_id": str(classification.suggested_category_id)
+            if classification.suggested_category_id
+            else None,
+            "suggested_subcategory_id": str(classification.suggested_subcategory_id)
+            if classification.suggested_subcategory_id
+            else None,
+            "suggested_category": category.name
+            if category
+            else classification.suggested_category_name or "",
+            "suggested_subcategory": subcategory.name
+            if subcategory
+            else classification.suggested_subcategory_name or "",
             "confidence": classification.confidence,
             "reason": classification.reason or "",
             "tags": classification.tags_json,
@@ -1026,30 +1197,68 @@ class CrmAiPipelineService:
             "created_at": classification.created_at,
         }
 
-    def review_queue(self, *, search: str = "", page: int = 1, page_size: int = 25) -> dict[str, Any]:
+    def review_queue(
+        self, *, search: str = "", page: int = 1, page_size: int = 25
+    ) -> dict[str, Any]:
         filters: list[Any] = [CrmComplaintClassification.status == "review_required"]
         if search.strip():
             term = f"%{search.strip()}%"
-            filters.append(or_(ComplaintCase.complaint_number.ilike(term), ComplaintCase.remarks.ilike(term)))
-        count = self.session.scalar(
-            select(func.count()).select_from(CrmComplaintClassification).join(
-                ComplaintCase, ComplaintCase.id == CrmComplaintClassification.complaint_case_id
-            ).where(*filters)
-        ) or 0
+            filters.append(
+                or_(ComplaintCase.complaint_number.ilike(term), ComplaintCase.remarks.ilike(term))
+            )
+        count = (
+            self.session.scalar(
+                select(func.count())
+                .select_from(CrmComplaintClassification)
+                .join(
+                    ComplaintCase, ComplaintCase.id == CrmComplaintClassification.complaint_case_id
+                )
+                .where(*filters)
+            )
+            or 0
+        )
         rows = self.session.exec(
             select(CrmComplaintClassification, ComplaintCase)
             .join(ComplaintCase, ComplaintCase.id == CrmComplaintClassification.complaint_case_id)
             .where(*filters)
-            .order_by(CrmComplaintClassification.confidence.asc(), CrmComplaintClassification.created_at)
+            .order_by(
+                CrmComplaintClassification.confidence.asc(), CrmComplaintClassification.created_at
+            )
             .offset((page - 1) * page_size)
             .limit(page_size)
         ).all()
         category_ids = {row.suggested_category_id for row, _ in rows if row.suggested_category_id}
         sub_ids = {row.suggested_subcategory_id for row, _ in rows if row.suggested_subcategory_id}
-        category_map = {row.id: row for row in self.session.exec(select(ComplaintCategory).where(ComplaintCategory.id.in_(category_ids))).all()} if category_ids else {}
-        sub_map = {row.id: row for row in self.session.exec(select(ComplaintSubcategory).where(ComplaintSubcategory.id.in_(sub_ids))).all()} if sub_ids else {}
+        category_map = (
+            {
+                row.id: row
+                for row in self.session.exec(
+                    select(ComplaintCategory).where(ComplaintCategory.id.in_(category_ids))
+                ).all()
+            }
+            if category_ids
+            else {}
+        )
+        sub_map = (
+            {
+                row.id: row
+                for row in self.session.exec(
+                    select(ComplaintSubcategory).where(ComplaintSubcategory.id.in_(sub_ids))
+                ).all()
+            }
+            if sub_ids
+            else {}
+        )
         return {
-            "items": [self._classification_payload(row, case, category_map.get(row.suggested_category_id), sub_map.get(row.suggested_subcategory_id)) for row, case in rows],
+            "items": [
+                self._classification_payload(
+                    row,
+                    case,
+                    category_map.get(row.suggested_category_id),
+                    sub_map.get(row.suggested_subcategory_id),
+                )
+                for row, case in rows
+            ],
             "total": int(count),
             "page": page,
             "page_size": page_size,
@@ -1076,13 +1285,17 @@ class CrmAiPipelineService:
         if case is None:
             raise AiPipelineError("Complaint was not found")
         now = utcnow()
-        batch_item = self.session.exec(
-            select(CrmBulkOperationItem).where(
-                CrmBulkOperationItem.batch_id == row.batch_id,
-                CrmBulkOperationItem.complaint_case_id == row.complaint_case_id,
-                CrmBulkOperationItem.status == "review_required",
-            )
-        ).first() if row.batch_id else None
+        batch_item = (
+            self.session.exec(
+                select(CrmBulkOperationItem).where(
+                    CrmBulkOperationItem.batch_id == row.batch_id,
+                    CrmBulkOperationItem.complaint_case_id == row.complaint_case_id,
+                    CrmBulkOperationItem.status == "review_required",
+                )
+            ).first()
+            if row.batch_id
+            else None
+        )
         suggestions = list(
             self.session.exec(
                 select(CrmTaxonomySuggestion).where(
@@ -1113,7 +1326,9 @@ class CrmAiPipelineService:
         category = self.session.get(ComplaintCategory, category_id)
         if category is None or not category.active:
             raise AiPipelineError("Active category was not found")
-        subcategory = self.session.get(ComplaintSubcategory, subcategory_id) if subcategory_id else None
+        subcategory = (
+            self.session.get(ComplaintSubcategory, subcategory_id) if subcategory_id else None
+        )
         if subcategory and (subcategory.category_id != category.id or not subcategory.active):
             raise AiPipelineError("Subcategory does not belong to the selected category")
         row.status = "approved"
@@ -1134,12 +1349,15 @@ class CrmAiPipelineService:
             tag = self.session.get(CrmComplaintTag, tag_id)
             if tag is None or not tag.active:
                 continue
-            if self.session.exec(
-                select(CrmComplaintTagLink).where(
-                    CrmComplaintTagLink.complaint_case_id == case.id,
-                    CrmComplaintTagLink.tag_id == tag.id,
-                )
-            ).first() is None:
+            if (
+                self.session.exec(
+                    select(CrmComplaintTagLink).where(
+                        CrmComplaintTagLink.complaint_case_id == case.id,
+                        CrmComplaintTagLink.tag_id == tag.id,
+                    )
+                ).first()
+                is None
+            ):
                 self.session.add(
                     CrmComplaintTagLink(
                         complaint_case_id=case.id,
@@ -1173,7 +1391,10 @@ class CrmAiPipelineService:
                 entity_id=str(row.id),
                 event_type="classification_approved",
                 actor=actor,
-                after_json={"category": category.name, "subcategory": subcategory.name if subcategory else None},
+                after_json={
+                    "category": category.name,
+                    "subcategory": subcategory.name if subcategory else None,
+                },
             )
         )
         self.session.commit()
@@ -1194,11 +1415,13 @@ class CrmAiPipelineService:
             filters.append(CrmTaxonomySuggestion.status == status)
         if search.strip():
             term = f"%{search.strip()}%"
-            filters.append(or_(
-                CrmTaxonomySuggestion.proposed_name.ilike(term),
-                CrmTaxonomySuggestion.reason.ilike(term),
-                ComplaintCase.complaint_number.ilike(term),
-            ))
+            filters.append(
+                or_(
+                    CrmTaxonomySuggestion.proposed_name.ilike(term),
+                    CrmTaxonomySuggestion.reason.ilike(term),
+                    ComplaintCase.complaint_number.ilike(term),
+                )
+            )
         base = (
             select(CrmTaxonomySuggestion, CrmComplaintClassification, ComplaintCase)
             .join(
@@ -1208,16 +1431,21 @@ class CrmAiPipelineService:
             .join(ComplaintCase, ComplaintCase.id == CrmComplaintClassification.complaint_case_id)
             .where(*filters)
         )
-        count = self.session.scalar(
-            select(func.count())
-            .select_from(CrmTaxonomySuggestion)
-            .join(
-                CrmComplaintClassification,
-                CrmComplaintClassification.id == CrmTaxonomySuggestion.classification_id,
+        count = (
+            self.session.scalar(
+                select(func.count())
+                .select_from(CrmTaxonomySuggestion)
+                .join(
+                    CrmComplaintClassification,
+                    CrmComplaintClassification.id == CrmTaxonomySuggestion.classification_id,
+                )
+                .join(
+                    ComplaintCase, ComplaintCase.id == CrmComplaintClassification.complaint_case_id
+                )
+                .where(*filters)
             )
-            .join(ComplaintCase, ComplaintCase.id == CrmComplaintClassification.complaint_case_id)
-            .where(*filters)
-        ) or 0
+            or 0
+        )
         rows = self.session.exec(
             base.order_by(
                 CrmTaxonomySuggestion.supporting_count.desc(),
@@ -1237,7 +1465,9 @@ class CrmAiPipelineService:
                     "reason": suggestion.reason or "",
                     "supporting_count": suggestion.supporting_count,
                     "status": suggestion.status,
-                    "parent_category_id": str(suggestion.parent_category_id) if suggestion.parent_category_id else None,
+                    "parent_category_id": str(suggestion.parent_category_id)
+                    if suggestion.parent_category_id
+                    else None,
                     "proposed_group_name": suggestion.proposed_group_name,
                     "created_at": suggestion.created_at,
                 }
@@ -1265,9 +1495,15 @@ class CrmAiPipelineService:
             raise BulkOperationNotFound("Taxonomy suggestion was not found")
         if row.status != "pending":
             raise AiPipelineError("Only pending taxonomy suggestions can be resolved")
-        if resolved_category_id and self.session.get(ComplaintCategory, resolved_category_id) is None:
+        if (
+            resolved_category_id
+            and self.session.get(ComplaintCategory, resolved_category_id) is None
+        ):
             raise AiPipelineError("Resolved category was not found")
-        if resolved_subcategory_id and self.session.get(ComplaintSubcategory, resolved_subcategory_id) is None:
+        if (
+            resolved_subcategory_id
+            and self.session.get(ComplaintSubcategory, resolved_subcategory_id) is None
+        ):
             raise AiPipelineError("Resolved subcategory was not found")
         if resolved_tag_id and self.session.get(CrmComplaintTag, resolved_tag_id) is None:
             raise AiPipelineError("Resolved tag was not found")
@@ -1347,29 +1583,51 @@ class CrmAiPipelineService:
 
     def tag_statistics(self) -> dict[str, int]:
         self.ensure_defaults()
-        active = self.session.scalar(
-            select(func.count()).select_from(CrmComplaintTag).where(
-                CrmComplaintTag.active == True,  # noqa: E712
-                CrmComplaintTag.merged_into_id.is_(None),
+        active = (
+            self.session.scalar(
+                select(func.count())
+                .select_from(CrmComplaintTag)
+                .where(
+                    CrmComplaintTag.active == True,  # noqa: E712
+                    CrmComplaintTag.merged_into_id.is_(None),
+                )
             )
-        ) or 0
-        inactive = self.session.scalar(
-            select(func.count()).select_from(CrmComplaintTag).where(
-                or_(CrmComplaintTag.active == False, CrmComplaintTag.merged_into_id.is_not(None))  # noqa: E712
+            or 0
+        )
+        inactive = (
+            self.session.scalar(
+                select(func.count())
+                .select_from(CrmComplaintTag)
+                .where(
+                    or_(
+                        CrmComplaintTag.active == False, CrmComplaintTag.merged_into_id.is_not(None)
+                    )  # noqa: E712
+                )
             )
-        ) or 0
-        groups = self.session.scalar(
-            select(func.count()).select_from(CrmComplaintTagGroup).where(
-                CrmComplaintTagGroup.active == True  # noqa: E712
+            or 0
+        )
+        groups = (
+            self.session.scalar(
+                select(func.count())
+                .select_from(CrmComplaintTagGroup)
+                .where(
+                    CrmComplaintTagGroup.active == True  # noqa: E712
+                )
             )
-        ) or 0
+            or 0
+        )
         links = self.session.scalar(select(func.count()).select_from(CrmComplaintTagLink)) or 0
-        suggestions = self.session.scalar(
-            select(func.count()).select_from(CrmTaxonomySuggestion).where(
-                CrmTaxonomySuggestion.proposal_type == "tag",
-                CrmTaxonomySuggestion.status == "pending",
+        suggestions = (
+            self.session.scalar(
+                select(func.count())
+                .select_from(CrmTaxonomySuggestion)
+                .where(
+                    CrmTaxonomySuggestion.proposal_type == "tag",
+                    CrmTaxonomySuggestion.status == "pending",
+                )
             )
-        ) or 0
+            or 0
+        )
         return {
             "active_tags": int(active),
             "inactive_tags": int(inactive),
@@ -1391,12 +1649,15 @@ class CrmAiPipelineService:
         counts = {
             str(slug): int(count)
             for slug, count in self.session.exec(
-                select(CrmComplaintTag.group_name, func.count())
-                .group_by(CrmComplaintTag.group_name)
+                select(CrmComplaintTag.group_name, func.count()).group_by(
+                    CrmComplaintTag.group_name
+                )
             ).all()
         }
         return {
-            "items": [self._tag_group_payload(row, tag_count=counts.get(row.slug, 0)) for row in rows],
+            "items": [
+                self._tag_group_payload(row, tag_count=counts.get(row.slug, 0)) for row in rows
+            ],
             "total": len(rows),
         }
 
@@ -1486,9 +1747,13 @@ class CrmAiPipelineService:
             raise AiPipelineError("Controlled tag status is invalid")
         filters: list[Any] = []
         if status == "active":
-            filters.extend((CrmComplaintTag.active == True, CrmComplaintTag.merged_into_id.is_(None)))  # noqa: E712
+            filters.extend(
+                (CrmComplaintTag.active == True, CrmComplaintTag.merged_into_id.is_(None))
+            )  # noqa: E712
         elif status == "inactive":
-            filters.append(or_(CrmComplaintTag.active == False, CrmComplaintTag.merged_into_id.is_not(None)))  # noqa: E712
+            filters.append(
+                or_(CrmComplaintTag.active == False, CrmComplaintTag.merged_into_id.is_not(None))
+            )  # noqa: E712
         if group.strip():
             filters.append(CrmComplaintTag.group_name == _tag_slug(group))
         if ai_available is not None:
@@ -1504,27 +1769,34 @@ class CrmAiPipelineService:
                     cast(CrmComplaintTag.aliases_json, Text).ilike(term),
                 )
             )
-        count = self.session.scalar(
-            select(func.count()).select_from(CrmComplaintTag).where(*filters)
-        ) or 0
+        count = (
+            self.session.scalar(select(func.count()).select_from(CrmComplaintTag).where(*filters))
+            or 0
+        )
         rows = list(
             self.session.exec(
                 select(CrmComplaintTag)
                 .where(*filters)
-                .order_by(CrmComplaintTag.group_name, CrmComplaintTag.display_name, CrmComplaintTag.name)
+                .order_by(
+                    CrmComplaintTag.group_name, CrmComplaintTag.display_name, CrmComplaintTag.name
+                )
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             ).all()
         )
         ids = [row.id for row in rows]
-        usage = {
-            tag_id: int(total)
-            for tag_id, total in self.session.exec(
-                select(CrmComplaintTagLink.tag_id, func.count())
-                .where(CrmComplaintTagLink.tag_id.in_(ids))
-                .group_by(CrmComplaintTagLink.tag_id)
-            ).all()
-        } if ids else {}
+        usage = (
+            {
+                tag_id: int(total)
+                for tag_id, total in self.session.exec(
+                    select(CrmComplaintTagLink.tag_id, func.count())
+                    .where(CrmComplaintTagLink.tag_id.in_(ids))
+                    .group_by(CrmComplaintTagLink.tag_id)
+                ).all()
+            }
+            if ids
+            else {}
+        )
         return {
             "items": [self._tag_payload(row, usage_count=usage.get(row.id, 0)) for row in rows],
             "total": int(count),
@@ -1710,14 +1982,17 @@ class CrmAiPipelineService:
                 self.session.add(link)
                 moved += 1
         for suggestion in self.session.exec(
-            select(CrmTaxonomySuggestion).where(
-                CrmTaxonomySuggestion.resolved_tag_id == source.id
-            )
+            select(CrmTaxonomySuggestion).where(CrmTaxonomySuggestion.resolved_tag_id == source.id)
         ).all():
             suggestion.resolved_tag_id = target.id
             self.session.add(suggestion)
         target.aliases_json = _clean_aliases(
-            [*(target.aliases_json or []), source.display_name, source.name, *(source.aliases_json or [])],
+            [
+                *(target.aliases_json or []),
+                source.display_name,
+                source.name,
+                *(source.aliases_json or []),
+            ],
             slug=target.name,
         )
         target.version += 1
@@ -1766,7 +2041,9 @@ class CrmAiPipelineService:
         if classification is None:
             raise BulkOperationNotFound("Classification decision was not found")
         if classification.status != "review_required":
-            raise AiPipelineError("New tags can only be suggested while classification is awaiting review")
+            raise AiPipelineError(
+                "New tags can only be suggested while classification is awaiting review"
+            )
         group = self._require_tag_group(group_name)
         label = _tag_display_name(display_name)[:140]
         slug = _tag_slug(label)
@@ -1867,12 +2144,16 @@ class CrmAiPipelineService:
                     CrmComplaintTag.ai_available == True,  # noqa: E712
                     CrmComplaintTag.merged_into_id.is_(None),
                 )
-                .order_by(CrmComplaintTag.group_name, CrmComplaintTag.display_name, CrmComplaintTag.name)
+                .order_by(
+                    CrmComplaintTag.group_name, CrmComplaintTag.display_name, CrmComplaintTag.name
+                )
             ).all()
         )
         by_category: dict[uuid.UUID, list[dict[str, Any]]] = {}
         for row in subcategories:
-            by_category.setdefault(row.category_id, []).append({"id": str(row.id), "name": row.name})
+            by_category.setdefault(row.category_id, []).append(
+                {"id": str(row.id), "name": row.name}
+            )
         return {
             "categories": [
                 {"id": str(row.id), "name": row.name, "subcategories": by_category.get(row.id, [])}
@@ -1917,7 +2198,11 @@ class CrmAiPipelineService:
                 ComplaintCase.id != case.id,
             )
         )
-        candidates = list(self.session.exec(statement.order_by(ComplaintReplyRevision.captured_at.desc()).limit(250)).all())
+        candidates = list(
+            self.session.exec(
+                statement.order_by(ComplaintReplyRevision.captured_at.desc()).limit(250)
+            ).all()
+        )
         ranked: list[tuple[ComplaintReplyRevision, ComplaintCase, float, str]] = []
         for revision, example_case in candidates:
             basis = "semantic"
@@ -1950,9 +2235,11 @@ class CrmAiPipelineService:
             raise AiPipelineError("Historical example limit must be between 0 and 10")
         statement = (
             select(ComplaintCase, ComplaintReply)
-            .join(ComplaintReply, ComplaintReply.complaint_case_id == ComplaintCase.id, isouter=True)
+            .join(
+                ComplaintReply, ComplaintReply.complaint_case_id == ComplaintCase.id, isouter=True
+            )
             .where(
-                ComplaintCase.state == "published",
+                reply_case_eligibility_clause(),
                 ComplaintCase.category_id.is_not(None),
             )
         )
@@ -1967,7 +2254,10 @@ class CrmAiPipelineService:
             if parent_batch_id is None:
                 raise AiPipelineError("Select a completed classification import batch")
             parent = self.bulk._require_batch(parent_batch_id)
-            if parent.operation_type != "classification_import" or parent.status not in {"completed", "completed_with_errors"}:
+            if parent.operation_type != "classification_import" or parent.status not in {
+                "completed",
+                "completed_with_errors",
+            }:
                 raise AiPipelineError("The source classification batch must be completed")
             selected = [
                 item.complaint_case_id
@@ -2006,8 +2296,26 @@ class CrmAiPipelineService:
         batch.started_at = now
         category_ids = {case.category_id for case, _ in rows if case.category_id}
         sub_ids = {case.sub_category_id for case, _ in rows if case.sub_category_id}
-        categories = {row.id: row for row in self.session.exec(select(ComplaintCategory).where(ComplaintCategory.id.in_(category_ids))).all()} if category_ids else {}
-        subs = {row.id: row for row in self.session.exec(select(ComplaintSubcategory).where(ComplaintSubcategory.id.in_(sub_ids))).all()} if sub_ids else {}
+        categories = (
+            {
+                row.id: row
+                for row in self.session.exec(
+                    select(ComplaintCategory).where(ComplaintCategory.id.in_(category_ids))
+                ).all()
+            }
+            if category_ids
+            else {}
+        )
+        subs = (
+            {
+                row.id: row
+                for row in self.session.exec(
+                    select(ComplaintSubcategory).where(ComplaintSubcategory.id.in_(sub_ids))
+                ).all()
+            }
+            if sub_ids
+            else {}
+        )
         complaint_rows: list[list[Any]] = []
         template_rows: list[list[Any]] = []
         context_rows: list[list[Any]] = []
@@ -2018,8 +2326,18 @@ class CrmAiPipelineService:
             category = categories.get(case.category_id)
             sub = subs.get(case.sub_category_id)
             case_tags = self._case_tags(case.id)
-            complaint_text = _redact(case.remarks or "") if redact_personal_data else case.remarks or ""
-            complaint_rows.append([number, complaint_text, category.name if category else "", sub.name if sub else "", ";".join(tag.name for tag in case_tags)])
+            complaint_text = (
+                _redact(case.remarks or "") if redact_personal_data else case.remarks or ""
+            )
+            complaint_rows.append(
+                [
+                    number,
+                    complaint_text,
+                    category.name if category else "",
+                    sub.name if sub else "",
+                    ";".join(tag.name for tag in case_tags),
+                ]
+            )
             template_rows.append([number, ""])
             context_rows.append(
                 [
@@ -2042,8 +2360,12 @@ class CrmAiPipelineService:
                         basis,
                         f"{score:.4f}",
                         revision.approval_status,
-                        _redact(example_case.remarks or "") if redact_personal_data else example_case.remarks or "",
-                        _redact(revision.reply_text) if redact_personal_data else revision.reply_text,
+                        _redact(example_case.remarks or "")
+                        if redact_personal_data
+                        else example_case.remarks or "",
+                        _redact(revision.reply_text)
+                        if redact_personal_data
+                        else revision.reply_text,
                     ]
                 )
                 self.session.add(
@@ -2064,7 +2386,17 @@ class CrmAiPipelineService:
                         },
                     )
                 )
-            manifest_rows.append([number, str(case.id), category.name if category else "", sub.name if sub else "", len(examples), bool(reply), redact_personal_data])
+            manifest_rows.append(
+                [
+                    number,
+                    str(case.id),
+                    category.name if category else "",
+                    sub.name if sub else "",
+                    len(examples),
+                    bool(reply),
+                    redact_personal_data,
+                ]
+            )
             self.session.add(
                 CrmBulkOperationItem(
                     batch_id=batch.id,
@@ -2089,7 +2421,11 @@ class CrmAiPipelineService:
             "batch_number": batch.batch_number,
             "created_at": now.isoformat(),
             "complaints": len(rows),
-            "prompt_profile": {"name": DEFAULT_REPLY_SOP_NAME, "version": version.version_label, "sha256": version.content_sha256},
+            "prompt_profile": {
+                "name": DEFAULT_REPLY_SOP_NAME,
+                "version": version.version_label,
+                "sha256": version.content_sha256,
+            },
             "historical_examples": len(example_rows),
             "redact_personal_data": redact_personal_data,
             "required_reply_columns": ["Complaint Number", "Reply"],
@@ -2098,32 +2434,73 @@ class CrmAiPipelineService:
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr(
                 "01-new-complaints.csv",
-                _csv_bytes(["Complaint Number", "Complaint Remarks", "Category", "Subcategory", "Tags"], complaint_rows),
+                _csv_bytes(
+                    ["Complaint Number", "Complaint Remarks", "Category", "Subcategory", "Tags"],
+                    complaint_rows,
+                ),
             )
-            archive.writestr("02-reply-template.csv", _csv_bytes(["Complaint Number", "Reply"], template_rows))
+            archive.writestr(
+                "02-reply-template.csv", _csv_bytes(["Complaint Number", "Reply"], template_rows)
+            )
             archive.writestr("03-active-reply-sop.txt", version.content)
             archive.writestr(
                 "04-taxonomy-context.csv",
                 _csv_bytes(
-                    ["Complaint Number", "Category", "Subcategory", "Tags", "Category Reply Guidance", "Category Policy Notes", "Subcategory Reply Guidance", "Subcategory Policy Notes"],
+                    [
+                        "Complaint Number",
+                        "Category",
+                        "Subcategory",
+                        "Tags",
+                        "Category Reply Guidance",
+                        "Category Policy Notes",
+                        "Subcategory Reply Guidance",
+                        "Subcategory Policy Notes",
+                    ],
                     context_rows,
                 ),
             )
             archive.writestr(
                 "05-approved-historical-examples.csv",
                 _csv_bytes(
-                    ["Target Complaint Number", "Example Complaint Number", "Match Basis", "Score", "Approval Status", "Example Complaint", "Approved Reply"],
+                    [
+                        "Target Complaint Number",
+                        "Example Complaint Number",
+                        "Match Basis",
+                        "Score",
+                        "Approval Status",
+                        "Example Complaint",
+                        "Approved Reply",
+                    ],
                     example_rows,
                 ),
             )
             archive.writestr("06-chatgpt-reply-instructions.txt", REPLY_CONTEXT_INSTRUCTIONS)
             archive.writestr(
                 "07-example-completed-replies.csv",
-                _csv_bytes(["Complaint Number", "Reply"], [["104-1234567", "Respected Worthy Chief Executive Officer (DEA),\n\nThe matter has been reviewed on the basis of available record.\n\nSubmitted for kind perusal and further necessary action, please."]]),
+                _csv_bytes(
+                    ["Complaint Number", "Reply"],
+                    [
+                        [
+                            "104-1234567",
+                            "Respected Worthy Chief Executive Officer (DEA),\n\nThe matter has been reviewed on the basis of available record.\n\nSubmitted for kind perusal and further necessary action, please.",
+                        ]
+                    ],
+                ),
             )
             archive.writestr(
                 "batch-manifest.csv",
-                _csv_bytes(["Complaint Number", "Case ID", "Category", "Subcategory", "Historical Examples", "Had Reply At Export", "Personal Data Redacted"], manifest_rows),
+                _csv_bytes(
+                    [
+                        "Complaint Number",
+                        "Case ID",
+                        "Category",
+                        "Subcategory",
+                        "Historical Examples",
+                        "Had Reply At Export",
+                        "Personal Data Redacted",
+                    ],
+                    manifest_rows,
+                ),
             )
             archive.writestr("batch-summary.json", json.dumps(summary, indent=2))
         self.bulk._write_artifact(
@@ -2145,14 +2522,48 @@ class CrmAiPipelineService:
 
     def reference_file(self, kind: str) -> tuple[str, str, bytes]:
         if kind == "classification-template":
-            return "crm-classification-template.csv", "text/csv; charset=utf-8", _csv_bytes(CLASSIFICATION_HEADERS, [["104-1234567", "", "", "", "", "No", "", ""]])
+            return (
+                "crm-classification-template.csv",
+                "text/csv; charset=utf-8",
+                _csv_bytes(CLASSIFICATION_HEADERS, [["104-1234567", "", "", "", "", "No", "", ""]]),
+            )
         if kind == "classification-sample":
-            return "crm-classification-sample.csv", "text/csv; charset=utf-8", _csv_bytes(CLASSIFICATION_HEADERS, [["104-1234567", "Fees", "Summer Vacation Fee", "private-school;advance-fee;no-evidence", "0.96", "No", "", "Advance vacation fee complaint"]])
+            return (
+                "crm-classification-sample.csv",
+                "text/csv; charset=utf-8",
+                _csv_bytes(
+                    CLASSIFICATION_HEADERS,
+                    [
+                        [
+                            "104-1234567",
+                            "Fees",
+                            "Summer Vacation Fee",
+                            "private-school;advance-fee;no-evidence",
+                            "0.96",
+                            "No",
+                            "",
+                            "Advance vacation fee complaint",
+                        ]
+                    ],
+                ),
+            )
         if kind == "classification-instructions":
-            return "crm-classification-instructions.txt", "text/plain; charset=utf-8", CLASSIFICATION_INSTRUCTIONS.encode("utf-8")
+            return (
+                "crm-classification-instructions.txt",
+                "text/plain; charset=utf-8",
+                CLASSIFICATION_INSTRUCTIONS.encode("utf-8"),
+            )
         if kind == "active-reply-sop":
             version = self.active_prompt_version()
-            return f"cm-complaint-reply-sop-{version.version_label}.txt", "text/plain; charset=utf-8", version.content.encode("utf-8")
+            return (
+                f"cm-complaint-reply-sop-{version.version_label}.txt",
+                "text/plain; charset=utf-8",
+                version.content.encode("utf-8"),
+            )
         if kind == "reply-context-instructions":
-            return "crm-contextual-reply-instructions.txt", "text/plain; charset=utf-8", REPLY_CONTEXT_INSTRUCTIONS.encode("utf-8")
+            return (
+                "crm-contextual-reply-instructions.txt",
+                "text/plain; charset=utf-8",
+                REPLY_CONTEXT_INSTRUCTIONS.encode("utf-8"),
+            )
         raise BulkOperationNotFound("AI pipeline reference file was not found")

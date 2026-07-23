@@ -71,6 +71,7 @@ def add_source_document(
     *,
     role: str,
     mime_type: str,
+    review_state: str = "accepted",
 ) -> None:
     message_id = uuid.uuid4()
     attachment = WhatsAppInboundAttachment(
@@ -112,7 +113,7 @@ def add_source_document(
         mime_type=mime_type,
         role=role,
         source_sha256=f"{role}-{source.stat().st_size}",
-        review_state="accepted",
+        review_state=review_state,
     )
     session.add(document)
     session.flush()
@@ -121,7 +122,7 @@ def add_source_document(
             complaint_document_id=document.id,
             complaint_case_id=case.id,
             role=role,
-            review_state="accepted",
+            review_state=review_state,
             confidence=1.0,
             source_locator=f"test:{document.id}",
         )
@@ -206,8 +207,18 @@ def test_complete_pdf_orders_letter_then_complaint_then_attachments(tmp_path: Pa
         source_pdf(main, "MAIN COMPLAINT")
         attachment = tmp_path / "attachment.png"
         PillowImage.new("RGB", (600, 300), "white").save(attachment)
+        duplicate = tmp_path / "duplicate.pdf"
+        source_pdf(duplicate, "DUPLICATE MUST NOT APPEAR")
         add_source_document(session, case, main, role="main_complaint", mime_type="application/pdf")
         add_source_document(session, case, attachment, role="attachment", mime_type="image/png")
+        add_source_document(
+            session,
+            case,
+            duplicate,
+            role="attachment",
+            mime_type="application/pdf",
+            review_state="duplicate",
+        )
         session.commit()
 
         service = OfficialLetterService(session, settings(tmp_path))
@@ -241,6 +252,41 @@ def test_complete_pdf_orders_letter_then_complaint_then_attachments(tmp_path: Pa
             "attachment",
         ]
         assert composed["complete_pdf"]["skipped_documents"] == []
+
+
+def test_complete_pdf_reports_unconvertible_accepted_documents(tmp_path: Path) -> None:
+    with Session(engine()) as session:
+        case, revision = seed(session)
+        unsupported = tmp_path / "evidence.bin"
+        unsupported.write_bytes(b"not a supported office document")
+        add_source_document(
+            session,
+            case,
+            unsupported,
+            role="attachment",
+            mime_type="application/octet-stream",
+        )
+        session.commit()
+        service = OfficialLetterService(session, settings(tmp_path))
+        defaults = service.configuration()["settings"]
+        letter = service.generate(
+            case.id,
+            letter_number=defaults["current_letter_number"],
+            letter_date=date.fromisoformat(defaults["current_letter_date"]),
+            recipient_name=defaults["default_recipient_name"],
+            recipient_location=defaults["default_recipient_location"],
+            subject_prefix=defaults["default_subject_prefix"],
+            cc_entries=defaults["default_cc_entries"],
+            template_id=None,
+            signature_profile_id=None,
+            reply_revision_id=revision.id,
+            actor="test",
+            finalize=True,
+        )
+        composed = service.compose_complete_pdf(uuid.UUID(letter["id"]), actor="test")
+        assert len(composed["complete_pdf"]["skipped_documents"]) == 1
+        assert composed["complete_pdf"]["order"][:2] == ["official_letter", "main_complaint"]
+        assert any("could not be included" in warning for warning in composed["warnings"])
 
 
 def test_b352_ui_and_api_contracts() -> None:

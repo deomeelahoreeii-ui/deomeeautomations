@@ -161,6 +161,14 @@ class Artifact(SQLModel, table=True):
     storage_status: str = Field(default="local", index=True)
     storage_error: str | None = Field(default=None, sa_column=Column(Text))
     archived_at: datetime | None = Field(default=None, index=True)
+    local_evicted_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    last_hydrated_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
@@ -178,6 +186,8 @@ class ArtifactPublic(SQLModel):
     storage_status: str
     storage_error: str | None
     archived_at: datetime | None
+    local_evicted_at: datetime | None
+    last_hydrated_at: datetime | None
     created_at: datetime
 
 
@@ -199,6 +209,14 @@ class SourceFile(SQLModel, table=True):
     storage_status: str = Field(default="local", index=True)
     storage_error: str | None = Field(default=None, sa_column=Column(Text))
     archived_at: datetime | None = Field(default=None, index=True)
+    local_evicted_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    last_hydrated_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
     validation_status: str = Field(default="pending", index=True)
     schema_version: str | None = None
     detected_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))

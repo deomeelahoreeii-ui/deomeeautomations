@@ -30,7 +30,7 @@
     "source": "antidengue_renderer.py"
   },
   "_canonical_report_artifact": {
-    "ast_sha256": "f1836d1bdf897bfe59565140b9e5c643e8603949fcca0b226f0af10dbb4ee5fc",
+    "ast_sha256": "e4d3d16bcefb32c621ca303b41390851cc26621959ab3055e5d07fe44c949c17",
     "destination_file": "rendering/antidengue/source_data.py",
     "source": "antidengue_renderer.py"
   },
@@ -65,7 +65,7 @@
     "source": "antidengue_renderer.py"
   },
   "_publish_approved_deliveries": {
-    "ast_sha256": "e8077a6fe68be2b18006ab12cb6af5a236333428770b72ca9c6b876fc541e814",
+    "ast_sha256": "a28022f37278311f8bc03d61ed55272908013030ae92116711f0129b5574817a",
     "destination_file": "dispatch/approved_delivery.py",
     "source": "tasks.py"
   },
@@ -120,7 +120,7 @@
     "source": "antidengue_renderer.py"
   },
   "send_approved_preview_job": {
-    "ast_sha256": "304e78791d953063e08d509233546829381287216a2ea332a3c00b96de2dc266",
+    "ast_sha256": "a480c535a4594329776cea47a275e07ca61130b4493b6a554a088168c460c2fa",
     "destination_file": "dispatch/task_entrypoints.py",
     "source": "tasks.py"
   }

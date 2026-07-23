@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     antidengue_submission_deadline: str = "12:30 PM"
     antidengue_scheduler_enabled: bool = True
     antidengue_scheduler_interval_seconds: int = 10
+    antidengue_local_retention_hours: int = 24
+    antidengue_failed_workspace_retention_hours: int = 168
+    antidengue_retention_enabled: bool = True
+    antidengue_retention_interval_seconds: int = 3600
 
     # Shared ntfy transport. Publishing and subscriber URLs are deliberately
     # separate: containers can publish over their private network while phones

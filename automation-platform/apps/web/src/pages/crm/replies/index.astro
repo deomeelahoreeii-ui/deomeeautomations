@@ -46,6 +46,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
 
         <div class="reply-primary-filters">
           <label class="crm-field reply-search-filter" for="filter-search"><span>Search</span><input id="filter-search" class="input input-bordered" placeholder="Complaint number, complaint text or reply…" /></label>
+          <label class="crm-field" for="filter-scope"><span>Queue scope</span><select id="filter-scope" class="select select-bordered"><option value="actionable">Actionable</option><option value="all">All replies</option></select></label>
           <label class="crm-field" for="filter-category"><span>Category</span><select id="filter-category" class="select select-bordered"><option value="">All categories</option></select></label>
           <label class="crm-field" for="filter-status"><span>Reply status</span><select id="filter-status" class="select select-bordered"><option value="">All statuses</option><option>Not Prepared</option><option>Imported Draft</option><option>Draft</option><option>Pending Approval</option><option>Approved</option><option>Issued</option><option>Rejected</option></select></label>
           <label class="crm-field" for="filter-source"><span>Source</span><select id="filter-source" class="select select-bordered"><option value="">All sources</option><option value="crm_portal">CRM portal</option><option value="pm_portal">PM portal</option><option value="whatsapp">WhatsApp</option></select></label>
@@ -75,6 +76,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
           <div>
             <h2>Pending complaint replies</h2>
             <p id="queue-count">Loading complaints…</p>
+            <small id="queue-scope-note"></small>
           </div>
           <span class="reply-table-hint">Select a complaint number to preview the full complaint. Use <b>Open editor</b> to review its reply.</span>
         </header>
@@ -164,6 +166,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
     let categories: Category[] = [];
     let visibleIds: string[] = [];
     let filterTimer = 0;
+    let sourceBatchId = new URLSearchParams(window.location.search).get("source_batch_id") || "";
 
     async function api(path: string, init?: RequestInit) {
       const response = await fetch(`${API}${path}`, init);
@@ -207,6 +210,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
     function hydrateFiltersFromUrl() {
       const params = new URLSearchParams(window.location.search);
       const mappings: Array<[string, string]> = [
+        ["scope", "filter-scope"],
         ["search", "filter-search"],
         ["category_id", "filter-category"],
         ["subcategory_id", "filter-subcategory"],
@@ -220,6 +224,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
         const value = params.get(param);
         if (value !== null) ($(id) as HTMLInputElement | HTMLSelectElement).value = value;
       }
+      if (!params.has("scope")) ($("filter-scope") as HTMLSelectElement).value = "actionable";
       const advanced = ["subcategory_id", "ai_eligible", "date_from", "date_to"].some((key) => params.has(key));
       setAdvancedFilters(advanced);
       return {
@@ -230,6 +235,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
 
     function filterParams(pageIndex: number, pageSize: number) {
       const params = new URLSearchParams({
+        scope: ($("filter-scope") as HTMLSelectElement).value || "actionable",
         category_id: ($("filter-category") as HTMLSelectElement).value,
         subcategory_id: ($("filter-subcategory") as HTMLSelectElement).value,
         reply_status: ($("filter-status") as HTMLSelectElement).value,
@@ -241,6 +247,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
         page: String(pageIndex + 1),
         page_size: String(pageSize),
       });
+      if (sourceBatchId) params.set("source_batch_id", sourceBatchId);
       for (const [key, value] of [...params]) if (!value) params.delete(key);
       return params;
     }
@@ -430,6 +437,9 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
       const rows = (data.items || []) as QueueItem[];
       visibleIds = rows.map((item) => item.case_id);
       $("queue-count").textContent = `${data.total} complaint${data.total === 1 ? "" : "s"} · page ${data.page} of ${data.pages}`;
+      $("queue-scope-note").textContent = sourceBatchId
+        ? `Scoped to import batch ${sourceBatchId} · ${data.scope === "actionable" ? "remaining work" : "all imported replies"}`
+        : data.scope === "actionable" ? "Showing replies that still require action." : "Showing the complete reply register.";
       window.queueMicrotask(updateSelection);
       return { rows, total: Number(data.total || 0) };
     }
@@ -473,6 +483,8 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
       ["filter-search", "filter-category", "filter-subcategory", "filter-status", "filter-ai", "filter-source", "filter-from", "filter-to"].forEach((id) => {
         ($(id) as HTMLInputElement | HTMLSelectElement).value = "";
       });
+      ($("filter-scope") as HTMLSelectElement).value = "actionable";
+      sourceBatchId = "";
       updateSubcategoryOptions("filter");
       setAdvancedFilters(false);
       void refreshAll(true);
@@ -540,7 +552,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE_URL || "http://127.0.0.1:8020";
     }
 
     wireDialogs();
-    ["filter-category", "filter-subcategory", "filter-status", "filter-ai", "filter-source", "filter-from", "filter-to"].forEach((id) => $(id).addEventListener("change", () => {
+    ["filter-scope", "filter-category", "filter-subcategory", "filter-status", "filter-ai", "filter-source", "filter-from", "filter-to"].forEach((id) => $(id).addEventListener("change", () => {
       if (id === "filter-category") updateSubcategoryOptions("filter");
       void refreshAll(true);
     }));

@@ -4,7 +4,18 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, CheckConstraint, Column, Index, JSON, Text, UniqueConstraint, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    ForeignKey,
+    Index,
+    JSON,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    text,
+)
 from sqlmodel import Field, SQLModel
 
 from automation_core.time import utcnow
@@ -114,7 +125,9 @@ class ComplaintCategory(SQLModel, table=True):
     normalized_name: str = Field(index=True, max_length=140)
     description: str | None = Field(default=None, sa_column=Column(Text))
     display_order: int = Field(default=100, index=True)
-    active: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, default=True, index=True))
+    active: bool = Field(
+        default=True, sa_column=Column(Boolean, nullable=False, default=True, index=True)
+    )
     default_ai_eligible: bool = Field(
         default=False, sa_column=Column(Boolean, nullable=False, default=False)
     )
@@ -141,14 +154,14 @@ class ComplaintSubcategory(SQLModel, table=True):
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    category_id: uuid.UUID = Field(
-        foreign_key="crm_complaint_categories.id", index=True
-    )
+    category_id: uuid.UUID = Field(foreign_key="crm_complaint_categories.id", index=True)
     name: str = Field(index=True, max_length=140)
     normalized_name: str = Field(index=True, max_length=140)
     description: str | None = Field(default=None, sa_column=Column(Text))
     display_order: int = Field(default=100, index=True)
-    active: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, default=True, index=True))
+    active: bool = Field(
+        default=True, sa_column=Column(Boolean, nullable=False, default=True, index=True)
+    )
     reply_guidance: str | None = Field(default=None, sa_column=Column(Text))
     policy_notes: str | None = Field(default=None, sa_column=Column(Text))
     merged_into_id: uuid.UUID | None = Field(
@@ -180,9 +193,7 @@ class ComplaintAuditEvent(SQLModel, table=True):
     before_json: dict[str, Any] = Field(
         default_factory=dict, sa_column=Column(JSON, nullable=False)
     )
-    after_json: dict[str, Any] = Field(
-        default_factory=dict, sa_column=Column(JSON, nullable=False)
-    )
+    after_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     details_json: dict[str, Any] = Field(
         default_factory=dict, sa_column=Column(JSON, nullable=False)
     )
@@ -205,15 +216,27 @@ class ComplaintDocument(SQLModel, table=True):
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    complaint_case_id: uuid.UUID | None = Field(default=None, foreign_key="crm_complaint_cases.id", index=True)
-    source_processing_item_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_inbound_processing_items.id", index=True)
-    source_attachment_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_inbound_attachments.id", index=True)
-    source_message_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_inbound_messages.id", index=True)
+    complaint_case_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_complaint_cases.id", index=True
+    )
+    source_processing_item_id: uuid.UUID | None = Field(
+        default=None, foreign_key="whatsapp_inbound_processing_items.id", index=True
+    )
+    source_attachment_id: uuid.UUID | None = Field(
+        default=None, foreign_key="whatsapp_inbound_attachments.id", index=True
+    )
+    source_message_id: uuid.UUID | None = Field(
+        default=None, foreign_key="whatsapp_inbound_messages.id", index=True
+    )
     source_kind: str = Field(default="whatsapp_inbound", index=True, max_length=32)
     storage_path: str | None = Field(default=None, sa_column=Column(Text))
     uploaded_by: str | None = Field(default=None, index=True, max_length=120)
-    source_dispatch_batch_id: uuid.UUID | None = Field(default=None, foreign_key="crm_dispatch_batches.id", index=True)
-    source_dispatch_item_id: uuid.UUID | None = Field(default=None, foreign_key="crm_dispatch_items.id", index=True)
+    source_dispatch_batch_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_dispatch_batches.id", index=True
+    )
+    source_dispatch_item_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_dispatch_items.id", index=True
+    )
     source_sha256: str | None = Field(default=None, index=True)
     duplicate_of_document_id: uuid.UUID | None = Field(
         default=None,
@@ -235,15 +258,15 @@ class ComplaintDocumentCaseLink(SQLModel, table=True):
     __tablename__ = "crm_complaint_document_case_links"
     __table_args__ = (
         UniqueConstraint(
-            "complaint_document_id", "complaint_case_id", "source_locator",
+            "complaint_document_id",
+            "complaint_case_id",
+            "source_locator",
             name="uq_crm_document_case_source",
         ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    complaint_document_id: uuid.UUID = Field(
-        foreign_key="crm_complaint_documents.id", index=True
-    )
+    complaint_document_id: uuid.UUID = Field(foreign_key="crm_complaint_documents.id", index=True)
     complaint_case_id: uuid.UUID = Field(foreign_key="crm_complaint_cases.id", index=True)
     role: str = Field(default="evidence", index=True)
     review_state: str = Field(default="pending", index=True)
@@ -257,7 +280,10 @@ class DocumentExtraction(SQLModel, table=True):
     __tablename__ = "crm_document_extractions"
     __table_args__ = (
         UniqueConstraint(
-            "complaint_document_id", "extractor_name", "extractor_version", "content_sha256",
+            "complaint_document_id",
+            "extractor_name",
+            "extractor_version",
+            "content_sha256",
             name="uq_crm_document_extraction_version",
         ),
     )
@@ -282,7 +308,9 @@ class ComplaintFieldObservation(SQLModel, table=True):
     __tablename__ = "crm_complaint_field_observations"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    complaint_case_id: uuid.UUID | None = Field(default=None, foreign_key="crm_complaint_cases.id", index=True)
+    complaint_case_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_complaint_cases.id", index=True
+    )
     extraction_id: uuid.UUID = Field(foreign_key="crm_document_extractions.id", index=True)
     field_name: str = Field(index=True)
     raw_value: str = Field(sa_column=Column(Text, nullable=False))
@@ -300,8 +328,12 @@ class ComplaintMatch(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     complaint_case_id: uuid.UUID = Field(foreign_key="crm_complaint_cases.id", index=True)
-    processing_item_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_inbound_processing_items.id", index=True)
-    matched_case_id: uuid.UUID | None = Field(default=None, foreign_key="crm_complaint_cases.id", index=True)
+    processing_item_id: uuid.UUID | None = Field(
+        default=None, foreign_key="whatsapp_inbound_processing_items.id", index=True
+    )
+    matched_case_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_complaint_cases.id", index=True
+    )
     paperless_document_id: int | None = Field(default=None, index=True)
     proposed_decision: str = Field(index=True)
     final_decision: str | None = Field(default=None, index=True)
@@ -352,9 +384,7 @@ class ComplaintReply(SQLModel, table=True):
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    complaint_case_id: uuid.UUID = Field(
-        foreign_key="crm_complaint_cases.id", index=True
-    )
+    complaint_case_id: uuid.UUID = Field(foreign_key="crm_complaint_cases.id", index=True)
     reply_text: str = Field(sa_column=Column(Text, nullable=False))
     inquiry_findings: str | None = Field(default=None, sa_column=Column(Text))
     school_version: str | None = Field(default=None, sa_column=Column(Text))
@@ -406,9 +436,7 @@ class CrmBulkOperationBatch(SQLModel, table=True):
     )
     source_filename: str | None = Field(default=None, index=True, max_length=255)
     source_sha256: str | None = Field(default=None, index=True, max_length=64)
-    scope_json: dict[str, Any] = Field(
-        default_factory=dict, sa_column=Column(JSON, nullable=False)
-    )
+    scope_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     settings_json: dict[str, Any] = Field(
         default_factory=dict, sa_column=Column(JSON, nullable=False)
     )
@@ -437,9 +465,7 @@ class CrmBulkOperationItem(SQLModel, table=True):
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    batch_id: uuid.UUID = Field(
-        foreign_key="crm_bulk_operation_batches.id", index=True
-    )
+    batch_id: uuid.UUID = Field(foreign_key="crm_bulk_operation_batches.id", index=True)
     complaint_case_id: uuid.UUID | None = Field(
         default=None, foreign_key="crm_complaint_cases.id", index=True
     )
@@ -463,15 +489,11 @@ class CrmBulkOperationItem(SQLModel, table=True):
 class CrmBulkOperationArtifact(SQLModel, table=True):
     __tablename__ = "crm_bulk_operation_artifacts"
     __table_args__ = (
-        UniqueConstraint(
-            "batch_id", "kind", "name", name="uq_crm_bulk_operation_artifact"
-        ),
+        UniqueConstraint("batch_id", "kind", "name", name="uq_crm_bulk_operation_artifact"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    batch_id: uuid.UUID = Field(
-        foreign_key="crm_bulk_operation_batches.id", index=True
-    )
+    batch_id: uuid.UUID = Field(foreign_key="crm_bulk_operation_batches.id", index=True)
     kind: str = Field(index=True, max_length=80)
     name: str = Field(max_length=255)
     path: str = Field(sa_column=Column(Text, nullable=False))
@@ -483,15 +505,15 @@ class CrmBulkOperationArtifact(SQLModel, table=True):
 
 class CrmPromptProfile(SQLModel, table=True):
     __tablename__ = "crm_prompt_profiles"
-    __table_args__ = (
-        UniqueConstraint("slug", name="uq_crm_prompt_profiles_slug"),
-    )
+    __table_args__ = (UniqueConstraint("slug", name="uq_crm_prompt_profiles_slug"),)
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     slug: str = Field(index=True, max_length=120)
     name: str = Field(index=True, max_length=180)
     description: str | None = Field(default=None, sa_column=Column(Text))
-    active: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, default=True, index=True))
+    active: bool = Field(
+        default=True, sa_column=Column(Boolean, nullable=False, default=True, index=True)
+    )
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
 
@@ -499,7 +521,9 @@ class CrmPromptProfile(SQLModel, table=True):
 class CrmPromptProfileVersion(SQLModel, table=True):
     __tablename__ = "crm_prompt_profile_versions"
     __table_args__ = (
-        UniqueConstraint("profile_id", "version_label", name="uq_crm_prompt_profile_versions_label"),
+        UniqueConstraint(
+            "profile_id", "version_label", name="uq_crm_prompt_profile_versions_label"
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -507,8 +531,12 @@ class CrmPromptProfileVersion(SQLModel, table=True):
     version_label: str = Field(index=True, max_length=80)
     content: str = Field(sa_column=Column(Text, nullable=False))
     content_sha256: str = Field(index=True, max_length=64)
-    structured_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
-    is_active: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, default=False, index=True))
+    structured_json: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON, nullable=False)
+    )
+    is_active: bool = Field(
+        default=False, sa_column=Column(Boolean, nullable=False, default=False, index=True)
+    )
     effective_from: datetime | None = Field(default=None, index=True)
     created_by: str = Field(default="system", index=True, max_length=120)
     created_at: datetime = Field(default_factory=utcnow, index=True)
@@ -516,16 +544,16 @@ class CrmPromptProfileVersion(SQLModel, table=True):
 
 class CrmComplaintTagGroup(SQLModel, table=True):
     __tablename__ = "crm_complaint_tag_groups"
-    __table_args__ = (
-        UniqueConstraint("slug", name="uq_crm_complaint_tag_groups_slug"),
-    )
+    __table_args__ = (UniqueConstraint("slug", name="uq_crm_complaint_tag_groups_slug"),)
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     slug: str = Field(index=True, max_length=80)
     name: str = Field(index=True, max_length=120)
     description: str | None = Field(default=None, sa_column=Column(Text))
     display_order: int = Field(default=100, index=True)
-    active: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, default=True, index=True))
+    active: bool = Field(
+        default=True, sa_column=Column(Boolean, nullable=False, default=True, index=True)
+    )
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
 
@@ -543,8 +571,12 @@ class CrmComplaintTag(SQLModel, table=True):
     group_name: str = Field(default="issue", index=True, max_length=80)
     description: str | None = Field(default=None, sa_column=Column(Text))
     aliases_json: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
-    ai_available: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, default=True, index=True))
-    active: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, default=True, index=True))
+    ai_available: bool = Field(
+        default=True, sa_column=Column(Boolean, nullable=False, default=True, index=True)
+    )
+    active: bool = Field(
+        default=True, sa_column=Column(Boolean, nullable=False, default=True, index=True)
+    )
     merged_into_id: uuid.UUID | None = Field(
         default=None, foreign_key="crm_complaint_tags.id", index=True
     )
@@ -562,7 +594,9 @@ class CrmComplaintTagLink(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     complaint_case_id: uuid.UUID = Field(foreign_key="crm_complaint_cases.id", index=True)
     tag_id: uuid.UUID = Field(foreign_key="crm_complaint_tags.id", index=True)
-    classification_id: uuid.UUID | None = Field(default=None, foreign_key="crm_complaint_classifications.id", index=True)
+    classification_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_complaint_classifications.id", index=True
+    )
     source: str = Field(default="manual", index=True, max_length=40)
     created_by: str = Field(default="web-operator", index=True, max_length=120)
     created_at: datetime = Field(default_factory=utcnow, index=True)
@@ -579,19 +613,31 @@ class CrmComplaintClassification(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     complaint_case_id: uuid.UUID = Field(foreign_key="crm_complaint_cases.id", index=True)
-    batch_id: uuid.UUID | None = Field(default=None, foreign_key="crm_bulk_operation_batches.id", index=True)
-    suggested_category_id: uuid.UUID | None = Field(default=None, foreign_key="crm_complaint_categories.id", index=True)
-    suggested_subcategory_id: uuid.UUID | None = Field(default=None, foreign_key="crm_complaint_subcategories.id", index=True)
+    batch_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_bulk_operation_batches.id", index=True
+    )
+    suggested_category_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_complaint_categories.id", index=True
+    )
+    suggested_subcategory_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_complaint_subcategories.id", index=True
+    )
     suggested_category_name: str | None = Field(default=None, index=True, max_length=140)
     suggested_subcategory_name: str | None = Field(default=None, index=True, max_length=140)
-    approved_category_id: uuid.UUID | None = Field(default=None, foreign_key="crm_complaint_categories.id", index=True)
-    approved_subcategory_id: uuid.UUID | None = Field(default=None, foreign_key="crm_complaint_subcategories.id", index=True)
+    approved_category_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_complaint_categories.id", index=True
+    )
+    approved_subcategory_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_complaint_subcategories.id", index=True
+    )
     confidence: float = 0.0
     reason: str | None = Field(default=None, sa_column=Column(Text))
     tags_json: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     status: str = Field(default="pending", index=True, max_length=32)
     decision_source: str = Field(default="ai_csv", index=True, max_length=40)
-    taxonomy_snapshot_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    taxonomy_snapshot_json: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON, nullable=False)
+    )
     decided_by: str | None = Field(default=None, index=True, max_length=120)
     decided_at: datetime | None = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=utcnow, index=True)
@@ -614,16 +660,24 @@ class CrmTaxonomySuggestion(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     classification_id: uuid.UUID = Field(foreign_key="crm_complaint_classifications.id", index=True)
     proposal_type: str = Field(index=True, max_length=24)
-    parent_category_id: uuid.UUID | None = Field(default=None, foreign_key="crm_complaint_categories.id", index=True)
+    parent_category_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_complaint_categories.id", index=True
+    )
     proposed_name: str = Field(index=True, max_length=140)
     normalized_name: str = Field(index=True, max_length=140)
     proposed_group_name: str | None = Field(default=None, index=True, max_length=80)
     reason: str | None = Field(default=None, sa_column=Column(Text))
     supporting_count: int = 1
     status: str = Field(default="pending", index=True, max_length=24)
-    resolved_category_id: uuid.UUID | None = Field(default=None, foreign_key="crm_complaint_categories.id", index=True)
-    resolved_subcategory_id: uuid.UUID | None = Field(default=None, foreign_key="crm_complaint_subcategories.id", index=True)
-    resolved_tag_id: uuid.UUID | None = Field(default=None, foreign_key="crm_complaint_tags.id", index=True)
+    resolved_category_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_complaint_categories.id", index=True
+    )
+    resolved_subcategory_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_complaint_subcategories.id", index=True
+    )
+    resolved_tag_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_complaint_tags.id", index=True
+    )
     decided_by: str | None = Field(default=None, index=True, max_length=120)
     decided_at: datetime | None = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=utcnow, index=True)
@@ -633,7 +687,9 @@ class CrmReplyContextExample(SQLModel, table=True):
     __tablename__ = "crm_reply_context_examples"
     __table_args__ = (
         UniqueConstraint(
-            "batch_id", "complaint_case_id", "reply_revision_id",
+            "batch_id",
+            "complaint_case_id",
+            "reply_revision_id",
             name="uq_crm_reply_context_examples_batch_case_revision",
         ),
     )
@@ -646,7 +702,9 @@ class CrmReplyContextExample(SQLModel, table=True):
     rank: int = 1
     score: float = 0.0
     matched_by: str = Field(default="subcategory", index=True, max_length=80)
-    snapshot_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    snapshot_json: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON, nullable=False)
+    )
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
@@ -663,9 +721,7 @@ class ComplaintReplyRevision(SQLModel, table=True):
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    complaint_case_id: uuid.UUID = Field(
-        foreign_key="crm_complaint_cases.id", index=True
-    )
+    complaint_case_id: uuid.UUID = Field(foreign_key="crm_complaint_cases.id", index=True)
     reply_text: str = Field(sa_column=Column(Text, nullable=False))
     content_hash: str = Field(index=True)
     source_system: str = Field(default="frappe_helpdesk", index=True)
@@ -673,9 +729,7 @@ class ComplaintReplyRevision(SQLModel, table=True):
     approval_status: str = Field(index=True)
     remote_modified_at: datetime | None = Field(default=None, index=True)
     captured_at: datetime = Field(default_factory=utcnow, index=True)
-    is_current: bool = Field(
-        default=True, sa_column=Column(Boolean, nullable=False, default=True)
-    )
+    is_current: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, default=True))
 
 
 class CrmOfficialLetterSettings(SQLModel, table=True):
@@ -695,7 +749,9 @@ class CrmOfficialLetterSettings(SQLModel, table=True):
     )
     default_recipient_location: str = Field(default="Lahore", max_length=160)
     default_subject_prefix: str = Field(default="COMPLAINT NO.", max_length=160)
-    default_cc_entries: str = Field(default="Office Record.", sa_column=Column(Text, nullable=False))
+    default_cc_entries: str = Field(
+        default="Office Record.", sa_column=Column(Text, nullable=False)
+    )
     date_format: str = Field(default="DD/MM/YYYY", max_length=40)
     numbering_prefix: str = Field(default="PMDU/CRM", max_length=120)
     last_numeric_number: int = 1510
@@ -717,9 +773,7 @@ class CrmOfficialLetterSettings(SQLModel, table=True):
 class CrmOfficialLetterTemplate(SQLModel, table=True):
     __tablename__ = "crm_official_letter_templates"
     __table_args__ = (
-        UniqueConstraint(
-            "template_key", "version", name="uq_crm_official_letter_template_version"
-        ),
+        UniqueConstraint("template_key", "version", name="uq_crm_official_letter_template_version"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -794,15 +848,9 @@ class CrmOfficialLetter(SQLModel, table=True):
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    complaint_case_id: uuid.UUID = Field(
-        foreign_key="crm_complaint_cases.id", index=True
-    )
-    reply_revision_id: uuid.UUID = Field(
-        foreign_key="crm_complaint_reply_revisions.id", index=True
-    )
-    template_id: uuid.UUID = Field(
-        foreign_key="crm_official_letter_templates.id", index=True
-    )
+    complaint_case_id: uuid.UUID = Field(foreign_key="crm_complaint_cases.id", index=True)
+    reply_revision_id: uuid.UUID = Field(foreign_key="crm_complaint_reply_revisions.id", index=True)
+    template_id: uuid.UUID = Field(foreign_key="crm_official_letter_templates.id", index=True)
     signature_profile_id: uuid.UUID = Field(
         foreign_key="crm_official_letter_signature_profiles.id", index=True
     )
@@ -833,15 +881,11 @@ class CrmOfficialLetter(SQLModel, table=True):
 class CrmOfficialLetterArtifact(SQLModel, table=True):
     __tablename__ = "crm_official_letter_artifacts"
     __table_args__ = (
-        UniqueConstraint(
-            "official_letter_id", "kind", name="uq_crm_official_letter_artifact_kind"
-        ),
+        UniqueConstraint("official_letter_id", "kind", name="uq_crm_official_letter_artifact_kind"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    official_letter_id: uuid.UUID = Field(
-        foreign_key="crm_official_letters.id", index=True
-    )
+    official_letter_id: uuid.UUID = Field(foreign_key="crm_official_letters.id", index=True)
     kind: str = Field(index=True, max_length=40)
     name: str = Field(max_length=255)
     path: str = Field(sa_column=Column(Text, nullable=False))
@@ -866,10 +910,18 @@ class CrmDispatchRule(SQLModel, table=True):
     description: str | None = Field(default=None, sa_column=Column(Text))
     priority: int = Field(default=100, index=True)
     selection_mode: str = Field(default="suggested", index=True, max_length=24)
-    conditions_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
-    dispatch_profile_ids_json: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
-    stop_after_match: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, default=True))
-    enabled: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, default=True, index=True))
+    conditions_json: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON, nullable=False)
+    )
+    dispatch_profile_ids_json: list[str] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False)
+    )
+    stop_after_match: bool = Field(
+        default=True, sa_column=Column(Boolean, nullable=False, default=True)
+    )
+    enabled: bool = Field(
+        default=True, sa_column=Column(Boolean, nullable=False, default=True, index=True)
+    )
     effective_from: datetime | None = Field(default=None, index=True)
     effective_to: datetime | None = Field(default=None, index=True)
     version: int = 1
@@ -939,7 +991,9 @@ class CrmDispatchArtifact(SQLModel, table=True):
     size_bytes: int = 0
     sha256: str = Field(index=True, max_length=64)
     page_count: int = 0
-    source_snapshot_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    source_snapshot_json: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON, nullable=False)
+    )
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
@@ -960,8 +1014,12 @@ class CrmDispatchItem(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     batch_id: uuid.UUID = Field(foreign_key="crm_dispatch_batches.id", index=True)
     complaint_case_id: uuid.UUID = Field(foreign_key="crm_complaint_cases.id", index=True)
-    official_letter_id: uuid.UUID | None = Field(default=None, foreign_key="crm_official_letters.id", index=True)
-    complete_pdf_artifact_id: uuid.UUID | None = Field(default=None, foreign_key="crm_official_letter_artifacts.id", index=True)
+    official_letter_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_official_letters.id", index=True
+    )
+    complete_pdf_artifact_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_official_letter_artifacts.id", index=True
+    )
     packet_artifact_id: uuid.UUID | None = Field(default=None, index=True)
     complaint_number_snapshot: str = Field(index=True, max_length=80)
     letter_number_snapshot: str | None = Field(default=None, index=True, max_length=180)
@@ -971,17 +1029,65 @@ class CrmDispatchItem(SQLModel, table=True):
     packet_page_count: int = 0
     route_status: str = Field(default="needs_review", index=True, max_length=24)
     compliance_status: str = Field(default="not_requested", index=True, max_length=24)
-    route_summary_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
-    excluded: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, default=False, index=True))
+    route_summary_json: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON, nullable=False)
+    )
+    excluded: bool = Field(
+        default=False, sa_column=Column(Boolean, nullable=False, default=False, index=True)
+    )
     exclusion_reason: str | None = Field(default=None, sa_column=Column(Text))
     created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class CrmUpwardSubmissionClaim(SQLModel, table=True):
+    """Exclusive lifecycle claim for one immutable official-letter revision."""
+
+    __tablename__ = "crm_upward_submission_claims"
+    __table_args__ = (
+        UniqueConstraint("dispatch_item_id", name="uq_crm_upward_submission_claims_item"),
+        CheckConstraint(
+            "status IN ('reserved', 'sent', 'released')",
+            name="ck_crm_upward_submission_claims_status",
+        ),
+        Index(
+            "uq_crm_upward_submission_claims_active_letter",
+            "official_letter_id",
+            unique=True,
+            postgresql_where=text("released_at IS NULL"),
+            sqlite_where=text("released_at IS NULL"),
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    official_letter_id: uuid.UUID = Field(foreign_key="crm_official_letters.id", index=True)
+    dispatch_item_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid,
+            ForeignKey(
+                "crm_dispatch_items.id",
+                name="crm_upward_submission_claims_dispatch_item_id_fkey",
+                ondelete="CASCADE",
+            ),
+            nullable=False,
+            index=True,
+        )
+    )
+    status: str = Field(default="reserved", index=True, max_length=24)
+    claimed_by: str = Field(default="web-operator", index=True, max_length=120)
+    release_reason: str | None = Field(default=None, sa_column=Column(Text))
+    claimed_at: datetime = Field(default_factory=utcnow, index=True)
+    sent_at: datetime | None = Field(default=None, index=True)
+    released_at: datetime | None = Field(default=None, index=True)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
 
 
 class CrmDispatchTarget(SQLModel, table=True):
     __tablename__ = "crm_dispatch_targets"
     __table_args__ = (
-        UniqueConstraint("dispatch_item_id", "dispatch_profile_id", name="uq_crm_dispatch_targets_item_profile"),
+        UniqueConstraint(
+            "dispatch_item_id", "dispatch_profile_id", name="uq_crm_dispatch_targets_item_profile"
+        ),
         CheckConstraint(
             "selection_source IN ('rule', 'manual', 'fallback')",
             name="ck_crm_dispatch_targets_selection_source",
@@ -995,16 +1101,26 @@ class CrmDispatchTarget(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     dispatch_item_id: uuid.UUID = Field(foreign_key="crm_dispatch_items.id", index=True)
-    routing_rule_id: uuid.UUID | None = Field(default=None, foreign_key="crm_dispatch_rules.id", index=True)
+    routing_rule_id: uuid.UUID | None = Field(
+        default=None, foreign_key="crm_dispatch_rules.id", index=True
+    )
     dispatch_profile_id: uuid.UUID = Field(foreign_key="whatsapp_dispatch_profiles.id", index=True)
     selection_source: str = Field(default="rule", index=True, max_length=20)
     manual_override_reason: str | None = Field(default=None, sa_column=Column(Text))
-    recipient_snapshot_json: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    recipient_snapshot_json: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False)
+    )
     message_snapshot: str = Field(default="", sa_column=Column(Text, nullable=False))
     message_sha256: str = Field(default="", index=True, max_length=64)
-    preview_id: uuid.UUID | None = Field(default=None, foreign_key="whatsapp_dispatch_previews.id", index=True)
-    preview_delivery_ids_json: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
-    whatsapp_delivery_ids_json: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    preview_id: uuid.UUID | None = Field(
+        default=None, foreign_key="whatsapp_dispatch_previews.id", index=True
+    )
+    preview_delivery_ids_json: list[str] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False)
+    )
+    whatsapp_delivery_ids_json: list[str] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False)
+    )
     business_status: str = Field(default="planned", index=True, max_length=40)
     response_due_at: datetime | None = Field(default=None, index=True)
     error: str | None = Field(default=None, sa_column=Column(Text))
@@ -1031,9 +1147,7 @@ class CrmPaperlessStatusSync(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     dispatch_item_id: uuid.UUID = Field(foreign_key="crm_dispatch_items.id")
-    complaint_case_id: uuid.UUID = Field(
-        foreign_key="crm_complaint_cases.id", index=True
-    )
+    complaint_case_id: uuid.UUID = Field(foreign_key="crm_complaint_cases.id", index=True)
     paperless_document_id: int | None = Field(default=None, index=True)
     intended_status: str = Field(default="Submitted", index=True, max_length=80)
     state: str = Field(default="pending", index=True, max_length=24)
@@ -1067,9 +1181,7 @@ class CrmSpreadsheetIntakeBatch(SQLModel, table=True):
     processing_item_id: uuid.UUID = Field(
         foreign_key="whatsapp_inbound_processing_items.id", index=True
     )
-    run_id: uuid.UUID = Field(
-        foreign_key="whatsapp_inbound_processing_runs.id", index=True
-    )
+    run_id: uuid.UUID = Field(foreign_key="whatsapp_inbound_processing_runs.id", index=True)
     source_document_id: uuid.UUID | None = Field(
         default=None, foreign_key="crm_complaint_documents.id", index=True
     )
@@ -1108,9 +1220,7 @@ class CrmSpreadsheetIntakeRow(SQLModel, table=True):
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    batch_id: uuid.UUID = Field(
-        foreign_key="crm_spreadsheet_intake_batches.id", index=True
-    )
+    batch_id: uuid.UUID = Field(foreign_key="crm_spreadsheet_intake_batches.id", index=True)
     processing_item_id: uuid.UUID = Field(
         foreign_key="whatsapp_inbound_processing_items.id", index=True
     )
@@ -1156,9 +1266,7 @@ class FrappeSyncEvent(SQLModel, table=True):
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    complaint_case_id: uuid.UUID = Field(
-        foreign_key="crm_complaint_cases.id", index=True
-    )
+    complaint_case_id: uuid.UUID = Field(foreign_key="crm_complaint_cases.id", index=True)
     direction: str = Field(default="crm_to_frappe", index=True)
     operation: str = Field(index=True)
     state: str = Field(default="started", index=True)

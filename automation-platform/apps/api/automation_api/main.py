@@ -69,6 +69,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=[
         "Content-Type",
+        "Idempotency-Key",
         "X-Request-ID",
         "X-WhatsApp-Worker-Token",
         "X-WhatsApp-Worker-Id",

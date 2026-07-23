@@ -222,6 +222,7 @@ const dispatchItemId = Astro.url.searchParams.get("dispatch_item_id") || "";
             <button id="reject-reply" class="btn" type="button">Reject Reply</button>
             <button id="approve-reply" class="btn btn-primary" type="button">Approve Reply</button>
             <button id="issue-reply" class="btn btn-primary" type="button">Mark as Issued</button>
+            <button id="quick-final-packet" class="btn btn-primary" type="button" hidden disabled>Create final PDF packet</button>
           </div>
         </footer>
       </section>
@@ -280,8 +281,54 @@ const dispatchItemId = Astro.url.searchParams.get("dispatch_item_id") || "";
     </Fragment>
   </ModalDialog>
 
+  <ModalDialog
+    id="final-packet-dialog"
+    formId="final-packet-form"
+    title="Create final PDF packet"
+    eyebrow="One-step official record"
+    description="Review the immutable reply and saved office defaults before finalizing the official letter and complete PDF. This does not send or dispatch anything."
+    size="lg"
+  >
+    <section id="final-packet-loading" class="crm-empty-state compact">Loading packet requirements…</section>
+    <section id="final-packet-content" hidden>
+      <div id="final-packet-summary" class="editor-guidance-grid"></div>
+      <div id="final-packet-warning" class="crm-warning-box" hidden></div>
+      <div id="final-packet-result" class="official-letter-artifacts" hidden></div>
+    </section>
+    <Fragment slot="footer">
+      <button class="btn" type="button" data-dialog-close>Close</button>
+      <a id="final-packet-settings" class="btn" href="/crm/replies/official-letters/settings/">Edit saved defaults</a>
+      <a id="final-packet-full-page" class="btn" href={`/crm/replies/${id}/official-letter/`}>Open full letter setup</a>
+      <button id="confirm-final-packet" class="btn btn-primary" type="button" disabled>Create and finalize packet</button>
+    </Fragment>
+  </ModalDialog>
+
+  <script is:inline>
+    (() => {
+      const root = document.getElementById("reply-editor");
+      if (!root) return;
+      root.dataset.editorState = "booting";
+      window.setTimeout(() => {
+        if (["ready", "failed"].includes(root.dataset.editorState || "")) return;
+        const warning = document.getElementById("editor-warning");
+        const title = document.getElementById("editor-title");
+        if (title) title.textContent = "Reply editor could not start";
+        if (!warning) return;
+        warning.hidden = false;
+        warning.replaceChildren();
+        const message = document.createElement("span");
+        message.textContent = "The editor application did not finish loading. Your saved complaint and reply remain unchanged. ";
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "table-inline-link";
+        retry.textContent = "Reload editor";
+        retry.addEventListener("click", () => location.reload());
+        warning.append(message, retry);
+      }, 12000);
+    })();
+  </script>
+
   <script>
-    import { confirmAction } from "../../../scripts/alerts";
     import { closeDialog, openDialog, wireDialogs } from "../../../scripts/dialogs";
     import { badge, stack } from "../../../scripts/table-cells";
 
@@ -314,6 +361,7 @@ const dispatchItemId = Astro.url.searchParams.get("dispatch_item_id") || "";
     };
 
     const root = document.getElementById("reply-editor") as HTMLElement;
+    root.dataset.editorState = "module-started";
     const API = root.dataset.apiBase || "";
     const caseId = root.dataset.caseId || "";
     const dispatchBatchId = root.dataset.dispatchBatchId || "";
@@ -329,6 +377,8 @@ const dispatchItemId = Astro.url.searchParams.get("dispatch_item_id") || "";
     let saving = false;
     let auditLoaded = false;
     let selectedRevisionText = "";
+    let packetPreparation: Record<string, any> | null = null;
+    const persistentWarnings = new Set<string>();
 
     const statusTone = (value: unknown) => {
       const normalized = String(value || "").toLowerCase().replaceAll("_", " ");
@@ -391,6 +441,22 @@ const dispatchItemId = Astro.url.searchParams.get("dispatch_item_id") || "";
       node.className = `crm-toast${error ? " error" : ""}`;
       node.hidden = false;
       window.setTimeout(() => node.hidden = true, 4600);
+    }
+
+    function showWarning(message: string) {
+      persistentWarnings.add(message);
+      const warning = $("editor-warning");
+      warning.hidden = false;
+      warning.textContent = [...persistentWarnings].join(" ");
+    }
+
+    async function confirmReplyAction(title: string, text: string, confirmButtonText: string) {
+      try {
+        const { confirmAction } = await import("../../../scripts/alerts");
+        return await confirmAction(title, text, confirmButtonText);
+      } catch {
+        return window.confirm(`${title}\n\n${text}`);
+      }
     }
 
     function chip(label: unknown) {
@@ -478,6 +544,15 @@ const dispatchItemId = Astro.url.searchParams.get("dispatch_item_id") || "";
       };
       for (const [id, show] of Object.entries(visible)) $(id).hidden = !show;
       $("save-current").hidden = false;
+      const packet = $("quick-final-packet") as HTMLButtonElement;
+      const approvedRevision = (data?.revisions || []).find((item) => ["Approved", "Issued"].includes(item.approval_status));
+      packet.hidden = false;
+      packet.disabled = !approvedRevision;
+      packet.title = approvedRevision
+        ? "Review saved defaults and create the immutable official letter and complete PDF"
+        : "Approve or issue the reply before creating a final PDF packet";
+      if (!approvedRevision) packet.textContent = "Final packet requires approval";
+      else if (!packetPreparation) packet.textContent = "Create final PDF packet";
     }
 
     function replyPayload(statusOverride?: string) {
@@ -521,7 +596,7 @@ const dispatchItemId = Astro.url.searchParams.get("dispatch_item_id") || "";
       }
 
       const warning = $("editor-warning");
-      const warnings: string[] = [];
+      const warnings: string[] = [...persistentWarnings];
       if (reply.conflict) warnings.push("The imported/local draft differs from the current Helpdesk reply. The local draft is shown; compare both versions before saving.");
       if (reply.sync_status === "failed") warnings.push(`The local draft is safe, but Helpdesk synchronization failed${reply.sync_error ? `: ${reply.sync_error}` : "."}`);
       if (data.live_helpdesk_error) warnings.push(`Helpdesk could not be read: ${data.live_helpdesk_error}. The local workspace or last PostgreSQL snapshot is shown.`);
@@ -660,24 +735,216 @@ const dispatchItemId = Astro.url.searchParams.get("dispatch_item_id") || "";
       });
     }
 
-    async function load() {
+    function packetArtifact(letter: Record<string, any> | null, kind: string) {
+      return (letter?.artifacts || []).find((item: Record<string, any>) => item.kind === kind);
+    }
+
+    function packetActionLink(label: string, href: string, primary = false) {
+      const link = document.createElement("a");
+      link.className = primary ? "btn btn-primary btn-sm" : "btn btn-sm";
+      link.href = href;
+      link.textContent = label;
+      return link;
+    }
+
+    function renderPacketResult(letter: Record<string, any>) {
+      const result = $("final-packet-result");
+      const complete = packetArtifact(letter, "complete_pdf");
+      const official = packetArtifact(letter, "pdf");
+      const heading = document.createElement("strong");
+      heading.textContent = complete ? "Final PDF packet is ready" : "Official letter is ready";
+      const detail = document.createElement("small");
+      detail.textContent = `${letter.letter_number || "Official letter"} · ${letter.letter_date || ""} · ${letter.status || "finalized"}`;
+      const actions = document.createElement("div");
+      actions.className = "table-actions";
+      if (complete) {
+        actions.append(
+          packetActionLink("Preview complete PDF", `/crm/pdf-preview/${encodeURIComponent(complete.id)}.pdf`, true),
+          packetActionLink("Download complete PDF", `${API}${complete.download_url}`),
+        );
+      } else if (official) {
+        actions.append(packetActionLink("Preview official letter", `/crm/pdf-preview/${encodeURIComponent(official.id)}.pdf`, true));
+      }
+      if (letter.letter_url) actions.append(packetActionLink("Open letter record", letter.letter_url));
+      actions.append(packetActionLink("Prepare dispatch", `/crm/dispatch/?letter_id=${encodeURIComponent(letter.id)}`, true));
+      result.replaceChildren(heading, detail, actions);
+      result.hidden = false;
+    }
+
+    function renderPacketPreparation(prepared: Record<string, any>) {
+      packetPreparation = prepared;
+      const loading = $("final-packet-loading");
+      const content = $("final-packet-content");
+      const warning = $("final-packet-warning");
+      const confirm = $("confirm-final-packet") as HTMLButtonElement;
+      const button = $("quick-final-packet") as HTMLButtonElement;
+      loading.hidden = true;
+      content.hidden = false;
+      warning.hidden = true;
+      $("final-packet-result").hidden = true;
+      const revision = prepared.approved_revision;
+      const defaults = prepared.defaults || {};
+      const template = defaults.template || {};
+      const signature = defaults.signature || {};
+      const documents = prepared.source_documents || [];
+      $("final-packet-summary").replaceChildren(
+        guidanceCard("Complaint", prepared.case?.complaint_number || caseId),
+        guidanceCard("Approved reply", revision ? `${revision.approval_status} · ${formatDate(revision.captured_at)}` : "Not approved"),
+        guidanceCard("Shared reference", `${defaults.letter_number || "—"} · ${defaults.letter_date || "—"}`),
+        guidanceCard("Recipient", `${defaults.recipient_name || "—"} ${defaults.recipient_location || ""}`),
+        guidanceCard("Template", template.name ? `${template.name} · v${template.version}` : "No active default template"),
+        guidanceCard("Signature", signature.name ? `${signature.name} · ${signature.designation || ""}` : "No active default signature"),
+        guidanceCard("Complete PDF contents", `${documents.length} accepted source document(s) after the official letter`),
+        guidanceCard("Action", prepared.reason || prepared.action),
+      );
+      const today = new Date().toISOString().slice(0, 10);
+      const notices: string[] = [];
+      if (defaults.letter_date && defaults.letter_date !== today) notices.push(`The saved shared letter date is ${defaults.letter_date}, not today (${today}).`);
+      if (prepared.action === "revise") notices.push("This creates a revised immutable packet and supersedes the current finalized official letter.");
+      if (prepared.action === "blocked") notices.push(prepared.reason);
+      if (notices.length) {
+        warning.hidden = false;
+        warning.textContent = notices.join(" ");
+      }
+      confirm.disabled = prepared.action === "blocked" || prepared.action === "existing";
+      confirm.textContent = prepared.action === "revise"
+        ? "Create revised final packet"
+        : prepared.action === "finalize_preview"
+          ? "Finalize preview and build packet"
+          : prepared.action === "finish"
+            ? "Build complete PDF"
+            : "Create and finalize packet";
+      const labels: Record<string, string> = {
+        blocked: "Final packet requires approval",
+        existing: "Open final PDF packet",
+        finish: "Finish final PDF packet",
+        finalize_preview: "Finalize preview and build packet",
+        revise: "Create revised PDF packet",
+        create: "Create final PDF packet",
+      };
+      button.textContent = labels[prepared.action] || "Create final PDF packet";
+      button.disabled = prepared.action === "blocked";
+      button.title = prepared.reason || "";
+      if (prepared.action === "existing" && prepared.current_letter) renderPacketResult(prepared.current_letter);
+    }
+
+    async function loadPacketPreparation(open = true) {
+      if (open) {
+        $("final-packet-loading").hidden = false;
+        $("final-packet-content").hidden = true;
+        openDialog("final-packet-dialog");
+      }
       try {
-        const [taxonomy, editor] = await Promise.all([
-          api("/api/v1/crm/taxonomy?include_inactive=false"),
-          api(`/api/v1/crm/reply-workspace/cases/${caseId}`),
-        ]);
-        categories = taxonomy.categories || [];
+        const prepared = await api(`/api/v1/crm/official-letters/cases/${caseId}/final-packet/prepare`, {
+          signal: AbortSignal.timeout(20000),
+        });
+        renderPacketPreparation(prepared);
+      } catch (error) {
+        if (open) {
+          $("final-packet-loading").hidden = true;
+          $("final-packet-content").hidden = false;
+          $("final-packet-warning").hidden = false;
+          $("final-packet-warning").textContent = error instanceof Error ? error.message : String(error);
+        }
+        const button = $("quick-final-packet") as HTMLButtonElement;
+        button.disabled = false;
+        button.textContent = "Review final PDF packet";
+        button.title = "Packet requirements could not be checked in the background";
+      }
+    }
+
+    async function createFinalPacket() {
+      if (!packetPreparation?.approved_revision || packetPreparation.action === "blocked") return;
+      const confirm = $("confirm-final-packet") as HTMLButtonElement;
+      confirm.disabled = true;
+      confirm.textContent = "Creating official letter and complete PDF…";
+      try {
+        const result = await api(`/api/v1/crm/official-letters/cases/${caseId}/final-packet`, {
+          method: "POST",
+          signal: AbortSignal.timeout(120000),
+          body: JSON.stringify({
+            confirmation_token: packetPreparation.confirmation_token,
+            approved_revision_id: packetPreparation.approved_revision.id,
+            configuration_updated_at: packetPreparation.defaults.configuration_updated_at,
+            supersede_current: packetPreparation.action === "revise",
+          }),
+        });
+        renderPacketResult(result);
+        const packet = $("quick-final-packet") as HTMLButtonElement;
+        packet.textContent = "Open final PDF packet";
+        packet.disabled = false;
+        toast(result.idempotent ? "The existing final PDF packet was opened." : "Official letter finalized and complete PDF packet created. Nothing was dispatched.");
+        await loadPacketPreparation(false);
+      } catch (error) {
+        $("final-packet-warning").hidden = false;
+        $("final-packet-warning").textContent = `${error instanceof Error ? error.message : String(error)} Your reply was not changed and nothing was dispatched.`;
+        confirm.disabled = false;
+      } finally {
+        if (!confirm.disabled) {
+          confirm.textContent = packetPreparation?.action === "revise" ? "Create revised final packet" : "Retry packet creation";
+        }
+      }
+    }
+
+    async function load() {
+      const taxonomyRequest = api("/api/v1/crm/taxonomy?include_inactive=false", {
+        signal: AbortSignal.timeout(12000),
+      }).then((value) => ({ value }), (error) => ({ error }));
+      try {
+        const editor = await api(`/api/v1/crm/reply-workspace/cases/${caseId}`, {
+          signal: AbortSignal.timeout(15000),
+        });
         data = editor;
+        renderHero();
+        renderComplaint();
+        renderReply();
+        await renderTables();
+        root.dataset.editorState = "ready";
+        void refreshRemoteEditor();
+        if ((editor.revisions || []).length) void loadPacketPreparation(false);
+        try {
+          const taxonomyResult = await taxonomyRequest;
+          if ("error" in taxonomyResult) throw taxonomyResult.error;
+          categories = taxonomyResult.value.categories || [];
+          renderClassification();
+        } catch (error) {
+          renderClassification();
+          showWarning(`Taxonomy could not be loaded: ${error instanceof Error ? error.message : String(error)}. The complaint and reply remain available.`);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        root.dataset.editorState = "failed";
+        showWarning(message || "Unable to load reply editor");
+        toast(message || "Unable to load reply editor", true);
+      }
+    }
+
+    async function refreshRemoteEditor() {
+      try {
+        const refreshed = await api(`/api/v1/crm/reply-workspace/cases/${caseId}/refresh`, {
+          method: "POST",
+          signal: AbortSignal.timeout(15000),
+        });
+        if (dirty || saving) {
+          if (data) {
+            data.live_helpdesk = refreshed.live_helpdesk;
+            data.live_helpdesk_error = refreshed.live_helpdesk_error;
+          }
+          setStatus("live-source", refreshed.live_helpdesk ? "Live Helpdesk" : "CRM snapshot", refreshed.live_helpdesk ? "success" : "warning");
+          setSaveDisabled(false);
+          if (refreshed.live_helpdesk_error) showWarning(`Helpdesk could not be read: ${refreshed.live_helpdesk_error}. Your unsaved editor changes were not replaced.`);
+          return;
+        }
+        data = refreshed;
         renderHero();
         renderComplaint();
         renderClassification();
         renderReply();
         await renderTables();
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        $("editor-warning").hidden = false;
-        $("editor-warning").textContent = message;
-        toast(message || "Unable to load reply editor", true);
+        setStatus("live-source", "CRM snapshot", "warning");
+        setSaveDisabled(false);
+        showWarning(`Helpdesk refresh failed: ${error instanceof Error ? error.message : String(error)}. The PostgreSQL complaint and reply remain available.`);
       }
     }
 
@@ -759,7 +1026,7 @@ const dispatchItemId = Astro.url.searchParams.get("dispatch_item_id") || "";
         return;
       }
       if (["Approved", "Issued"].includes(status)) {
-        const confirmed = await confirmAction(
+        const confirmed = await confirmReplyAction(
           `${status} this reply?`,
           `The verified text will create an immutable approved revision in PostgreSQL.`,
           status === "Issued" ? "Mark as Issued" : "Approve Reply",
@@ -832,6 +1099,8 @@ const dispatchItemId = Astro.url.searchParams.get("dispatch_item_id") || "";
     $("reject-reply").addEventListener("click", () => void saveReply("Rejected"));
     $("approve-reply").addEventListener("click", () => void saveReply("Approved"));
     $("issue-reply").addEventListener("click", () => void saveReply("Issued"));
+    $("quick-final-packet").addEventListener("click", () => void loadPacketPreparation(true));
+    $("confirm-final-packet").addEventListener("click", () => void createFinalPacket());
     $("create-revision").addEventListener("click", () => {
       closeMoreActions();
       ($("reply-status") as HTMLSelectElement).value = "Draft";

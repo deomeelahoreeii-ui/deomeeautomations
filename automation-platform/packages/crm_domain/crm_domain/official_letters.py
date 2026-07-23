@@ -25,12 +25,15 @@ from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, func, select
 
 from automation_core.config import Settings
 from automation_core.object_storage import S3ObjectStorage
 from automation_core.time import utcnow
+from crm_domain.json_safe import json_safe
 from crm_domain.models import (
+    ComplaintAuditEvent,
     ComplaintCase,
     ComplaintDocument,
     ComplaintDocumentCaseLink,
@@ -1301,6 +1304,316 @@ class OfficialLetterService:
             "letters": [self._letter_payload(item, include_artifacts=True) for item in existing],
         }
 
+    def prepare_final_packet(self, case_id: uuid.UUID) -> dict[str, Any]:
+        """Describe the safe, idempotent quick-packet action for one complaint."""
+
+        case = self.session.get(ComplaintCase, case_id)
+        if case is None:
+            raise OfficialLetterNotFound("Complaint case was not found")
+        configuration = self.configuration()
+        revision = self.session.exec(
+            select(ComplaintReplyRevision)
+            .where(
+                ComplaintReplyRevision.complaint_case_id == case_id,
+                ComplaintReplyRevision.approval_status.in_(("Approved", "Issued")),
+            )
+            .order_by(
+                ComplaintReplyRevision.is_current.desc(),
+                ComplaintReplyRevision.captured_at.desc(),
+            )
+        ).first()
+        current = self._current_finalized_letter(case_id)
+        preview = self._active_preview_letter(case_id)
+        documents = self._source_documents(case_id)
+        complete = None
+        if current is not None:
+            complete = self.session.exec(
+                select(CrmOfficialLetterArtifact).where(
+                    CrmOfficialLetterArtifact.official_letter_id == current.id,
+                    CrmOfficialLetterArtifact.kind == "complete_pdf",
+                )
+            ).first()
+
+        if revision is None:
+            action = "blocked"
+            reason = "Approve or issue the reply before creating a final PDF packet"
+        elif current is not None and current.reply_revision_id == revision.id and complete is not None:
+            action = "existing"
+            reason = "The current approved reply already has a complete final PDF packet"
+        elif current is not None and current.reply_revision_id == revision.id:
+            action = "finish"
+            reason = "The official letter is finalized; the complete PDF still needs to be built"
+        elif preview is not None and preview.reply_revision_id == revision.id:
+            action = "finalize_preview"
+            reason = "The existing preview can be finalized and combined into the complete PDF"
+        elif current is not None:
+            action = "revise"
+            reason = "A newer approved reply requires a revised packet that supersedes the current letter"
+        else:
+            action = "create"
+            reason = "The approved reply is ready for a final PDF packet"
+
+        defaults = configuration["settings"]
+        template = next(
+            (
+                item
+                for item in configuration["templates"]
+                if item["id"] == defaults.get("default_template_id")
+            ),
+            None,
+        )
+        signature = next(
+            (
+                item
+                for item in configuration["signatures"]
+                if item["id"] == defaults.get("default_signature_id")
+            ),
+            None,
+        )
+        if action in {"create", "revise"}:
+            invalid_default = ""
+            if not template or not template.get("active"):
+                invalid_default = "Choose an active default official-letter template"
+            elif not signature or not signature.get("active"):
+                invalid_default = "Choose an active default signature profile"
+            else:
+                reference_date = date.fromisoformat(str(defaults["current_letter_date"]))
+                effective_from = signature.get("effective_from")
+                effective_to = signature.get("effective_to")
+                if effective_from and date.fromisoformat(str(effective_from)) > reference_date:
+                    invalid_default = "The default signature is not yet effective on the saved letter date"
+                elif effective_to and date.fromisoformat(str(effective_to)) < reference_date:
+                    invalid_default = "The default signature has expired for the saved letter date"
+            if invalid_default:
+                action = "blocked"
+                reason = invalid_default
+        fingerprint_payload = {
+            "case_id": str(case.id),
+            "revision_id": str(revision.id) if revision else None,
+            "revision_hash": revision.content_hash if revision else None,
+            "configuration_updated_at": defaults.get("updated_at"),
+            "letter_number": defaults.get("current_letter_number"),
+            "letter_date": defaults.get("current_letter_date"),
+            "template_id": defaults.get("default_template_id"),
+            "signature_id": defaults.get("default_signature_id"),
+            "current_letter_id": str(current.id) if current else None,
+            "current_letter_status": current.status if current else None,
+            "preview_id": str(preview.id) if preview else None,
+            "documents": [
+                {
+                    "id": str(document.id),
+                    "role": link.role,
+                    "review_state": link.review_state,
+                    "sha256": document.source_sha256,
+                }
+                for document, link in documents
+            ],
+        }
+        confirmation_token = _sha256(
+            json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode()
+        )
+        return {
+            "action": action,
+            "reason": reason,
+            "confirmation_token": confirmation_token,
+            "case": {
+                "id": str(case.id),
+                "complaint_number": case.complaint_number or str(case.id),
+                "category": case.category,
+                "subcategory": case.sub_category,
+            },
+            "approved_revision": (
+                {
+                    "id": str(revision.id),
+                    "approval_status": revision.approval_status,
+                    "captured_at": _iso(revision.captured_at),
+                    "content_hash": revision.content_hash,
+                }
+                if revision
+                else None
+            ),
+            "defaults": {
+                "configuration_updated_at": defaults.get("updated_at"),
+                "letter_number": defaults.get("current_letter_number"),
+                "letter_date": defaults.get("current_letter_date"),
+                "recipient_name": defaults.get("default_recipient_name"),
+                "recipient_location": defaults.get("default_recipient_location"),
+                "subject_prefix": defaults.get("default_subject_prefix"),
+                "cc_entries": defaults.get("default_cc_entries"),
+                "template": template,
+                "signature": signature,
+            },
+            "source_documents": [
+                self._source_document_payload(document, link) for document, link in documents
+            ],
+            "current_letter": (
+                self._letter_payload(current, include_artifacts=True) if current else None
+            ),
+            "active_preview": (
+                self._letter_payload(preview, include_artifacts=True) if preview else None
+            ),
+        }
+
+    def create_final_packet(
+        self,
+        case_id: uuid.UUID,
+        *,
+        confirmation_token: str,
+        approved_revision_id: uuid.UUID,
+        configuration_updated_at: str,
+        supersede_current: bool,
+        actor: str,
+    ) -> dict[str, Any]:
+        """Finalize and compose a packet once, returning the existing packet on retry."""
+
+        # Bootstrap shipped defaults before taking the per-complaint lock;
+        # ensure_defaults may commit when the installation is brand new.
+        self.ensure_defaults()
+        # Serialize commands for the same complaint. Database uniqueness remains
+        # the final guard if two transactions reached this line concurrently.
+        locked_case = self.session.exec(
+            select(ComplaintCase).where(ComplaintCase.id == case_id).with_for_update()
+        ).first()
+        if locked_case is None:
+            raise OfficialLetterNotFound("Complaint case was not found")
+        prepared = self.prepare_final_packet(case_id)
+        revision = prepared.get("approved_revision") or {}
+        if str(revision.get("id") or "") != str(approved_revision_id):
+            raise OfficialLetterValidationError(
+                "The approved reply changed. Review the packet summary and confirm again"
+            )
+        if str(prepared["defaults"].get("configuration_updated_at") or "") != str(
+            configuration_updated_at or ""
+        ):
+            raise OfficialLetterValidationError(
+                "Official-letter defaults changed. Review the packet summary and confirm again"
+            )
+        if prepared["confirmation_token"] != confirmation_token:
+            raise OfficialLetterValidationError(
+                "The packet inputs changed. Review the packet summary and confirm again"
+            )
+        action = prepared["action"]
+        if action == "blocked":
+            raise OfficialLetterValidationError(prepared["reason"])
+        if action == "revise" and not supersede_current:
+            raise OfficialLetterValidationError(
+                "Confirm that the revised packet may supersede the current finalized letter"
+            )
+        if action == "existing":
+            result = dict(prepared["current_letter"])
+            result.update(action_performed="existing", idempotent=True)
+            return result
+
+        before_ids = {
+            row.id
+            for row in self.session.exec(
+                select(CrmOfficialLetter).where(CrmOfficialLetter.complaint_case_id == case_id)
+            ).all()
+        }
+        try:
+            if action == "finish":
+                letter_id = uuid.UUID(prepared["current_letter"]["id"])
+            elif action == "finalize_preview":
+                letter_id = uuid.UUID(prepared["active_preview"]["id"])
+                self.finalize(letter_id, actor=actor, commit=False)
+            else:
+                defaults = prepared["defaults"]
+                generated = self.generate(
+                    case_id,
+                    letter_number=str(defaults["letter_number"]),
+                    letter_date=date.fromisoformat(str(defaults["letter_date"])),
+                    recipient_name=str(defaults["recipient_name"]),
+                    recipient_location=str(defaults["recipient_location"]),
+                    subject_prefix=str(defaults["subject_prefix"]),
+                    cc_entries=str(defaults["cc_entries"]),
+                    template_id=uuid.UUID(defaults["template"]["id"]),
+                    signature_profile_id=uuid.UUID(defaults["signature"]["id"]),
+                    reply_revision_id=approved_revision_id,
+                    actor=actor,
+                    finalize=True,
+                    supersedes_letter_id=(
+                        uuid.UUID(prepared["current_letter"]["id"])
+                        if action == "revise"
+                        else None
+                    ),
+                    commit=False,
+                )
+                letter_id = uuid.UUID(generated["id"])
+            result = self.compose_complete_pdf(letter_id, actor=actor, commit=False)
+            self.session.add(
+                ComplaintAuditEvent(
+                    complaint_case_id=case_id,
+                    entity_type="official_letter",
+                    entity_id=str(letter_id),
+                    event_type="final_packet_created",
+                    actor=actor,
+                    state="succeeded",
+                    before_json={},
+                    after_json=json_safe(
+                        {
+                            "letter_id": str(letter_id),
+                            "reply_revision_id": str(approved_revision_id),
+                            "action": action,
+                        }
+                    ),
+                    details_json=json_safe(
+                        {
+                            "confirmation_token": confirmation_token,
+                            "configuration_updated_at": configuration_updated_at,
+                        }
+                    ),
+                )
+            )
+            self.session.commit()
+            result = self.detail(letter_id)
+            result.update(action_performed=action, idempotent=False)
+            return result
+        except IntegrityError:
+            self.session.rollback()
+            raced = self.prepare_final_packet(case_id)
+            if raced["action"] == "existing":
+                result = dict(raced["current_letter"])
+                result.update(action_performed="existing", idempotent=True)
+                return result
+            raise OfficialLetterValidationError(
+                "Another packet operation changed this complaint. Review and try again"
+            )
+        except Exception as exc:
+            new_ids = {
+                row.id
+                for row in self.session.exec(
+                    select(CrmOfficialLetter).where(
+                        CrmOfficialLetter.complaint_case_id == case_id
+                    )
+                ).all()
+            } - before_ids
+            self.session.rollback()
+            for letter_id in new_ids:
+                shutil.rmtree(self.letters_root / str(letter_id), ignore_errors=True)
+            self.session.add(
+                ComplaintAuditEvent(
+                    complaint_case_id=case_id,
+                    entity_type="official_letter",
+                    entity_id="",
+                    event_type="final_packet_created",
+                    actor=actor,
+                    state="failed",
+                    before_json={},
+                    after_json={},
+                    details_json=json_safe(
+                        {
+                            "confirmation_token": confirmation_token,
+                            "reply_revision_id": str(approved_revision_id),
+                            "configuration_updated_at": configuration_updated_at,
+                            "action": action,
+                        }
+                    ),
+                    error=str(exc)[:4000],
+                )
+            )
+            self.session.commit()
+            raise
+
     def _assert_letter_reference(
         self, number: str, letter_date: date, *, exclude_id: uuid.UUID | None = None
     ) -> None:
@@ -1583,6 +1896,7 @@ class OfficialLetterService:
         with tempfile.TemporaryDirectory(prefix="crm-complete-letter-") as temp:
             root = Path(temp)
             parts: list[Path] = [official_path]
+            source_parts: list[Path] = []
             storage = S3ObjectStorage(self.settings)
             for position, (document, link) in enumerate(documents, start=1):
                 payload = self._source_document_payload(document, link)
@@ -1604,10 +1918,32 @@ class OfficialLetterService:
                     _convert_source_to_pdf(
                         materialized, mime_type=document.mime_type, destination=converted
                     )
-                    parts.append(converted)
+                    source_parts.append(converted)
                     included.append({**payload, "pages": _pdf_page_count(converted.read_bytes())})
                 except Exception as exc:
                     skipped.append({**payload, "error": str(exc)[:1000]})
+            if not any(
+                item.get("role") in {"main_complaint", "complaint_details"}
+                for item in included
+            ):
+                case = self.session.get(ComplaintCase, letter.complaint_case_id)
+                if case is None:
+                    raise OfficialLetterNotFound("Complaint case was not found")
+                fallback = root / "generated-complaint-record.pdf"
+                fallback.write_bytes(_render_complaint_packet_fallback(case))
+                source_parts.insert(0, fallback)
+                included.insert(
+                    0,
+                    {
+                        "id": None,
+                        "filename": fallback.name,
+                        "mime_type": PDF_MIME,
+                        "role": "main_complaint",
+                        "source_kind": "generated_fallback",
+                        "pages": _pdf_page_count(fallback.read_bytes()),
+                    },
+                )
+            parts.extend(source_parts)
             merged = root / "complete.pdf"
             merger = _merge_pdf_files(parts, merged)
             content = merged.read_bytes()
@@ -1641,7 +1977,9 @@ class OfficialLetterService:
             self.session.refresh(artifact)
         return self._letter_payload(letter, include_artifacts=True)
 
-    def finalize(self, letter_id: uuid.UUID, *, actor: str) -> dict[str, Any]:
+    def finalize(
+        self, letter_id: uuid.UUID, *, actor: str, commit: bool = True
+    ) -> dict[str, Any]:
         letter = self.session.get(CrmOfficialLetter, letter_id)
         if letter is None:
             raise OfficialLetterNotFound("Official letter was not found")
@@ -1678,7 +2016,8 @@ class OfficialLetterService:
             changed_at=now,
         )
         self.session.add(letter)
-        self.session.commit()
+        if commit:
+            self.session.commit()
         return self._letter_payload(letter, include_artifacts=True)
 
     def _artifact_payload(self, artifact: CrmOfficialLetterArtifact) -> dict[str, Any]:

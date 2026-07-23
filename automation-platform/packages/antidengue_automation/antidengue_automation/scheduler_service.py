@@ -12,6 +12,7 @@ from antidengue_automation.scheduling import (
     ensure_due_executions,
     recover_orphaned_executions,
 )
+from antidengue_automation.storage_lifecycle import evict_verified_antidengue_cache
 from antidengue_automation.notifications import publish_pending_ntfy
 from automation_core.config import get_settings
 from automation_core.database import engine
@@ -113,9 +114,27 @@ def main() -> int:
             }
         },
     )
+    next_retention_at = 0.0
     while not _STOP:
         try:
             stats = run_tick()
+            monotonic_now = time.monotonic()
+            if settings.antidengue_retention_enabled and monotonic_now >= next_retention_at:
+                with Session(engine) as session:
+                    retention = evict_verified_antidengue_cache(
+                        session,
+                        settings=settings,
+                        apply=True,
+                    )
+                next_retention_at = monotonic_now + max(
+                    60,
+                    settings.antidengue_retention_interval_seconds,
+                )
+                if retention["evicted"] or retention["source_files_evicted"]:
+                    logger.info(
+                        "scheduler.antidengue.cache_evicted",
+                        extra={"context": retention},
+                    )
             if any(stats.values()):
                 logger.info(
                     "scheduler.tick.changed",
